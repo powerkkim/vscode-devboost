@@ -75,11 +75,12 @@ export function buildArgs(o: RgOptions): string[] {
   if (o.wholeWord) {
     args.push('--word-regexp');
   }
+  // 파일 패턴은 대소문자 무시(--iglob): "*mapper*.xml"이 OrderMapper.xml에도 맞도록. Windows 파일명과도 일치
   for (const g of o.includeGlobs ?? []) {
-    args.push('-g', g);
+    args.push('--iglob', g);
   }
   for (const g of o.excludeGlobs ?? []) {
-    args.push('-g', `!${g}`);
+    args.push('--iglob', `!${g}`);
   }
   args.push('-e', o.query, '--');
   args.push(...o.roots);

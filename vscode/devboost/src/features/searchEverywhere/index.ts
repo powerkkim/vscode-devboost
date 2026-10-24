@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SearchService, SearchItem, TabId } from './searchService';
 import { Feature } from '../feature';
 import { SearchEverywherePanel } from './webviewPanel';
+import { SearchEverywhereView, PANEL_VIEW_ID } from './panelView';
 
 /** 탭 정의: IntelliJ의 "모두/클래스/파일/심볼/액션/텍스트" 와 동일한 순서 */
 const TABS: { id: TabId; label: string; icon: string }[] = [
@@ -46,19 +47,37 @@ export const searchEverywhere: Feature = {
   name: 'Search Everywhere',
   start(context) {
     const service = new SearchService(context);
+    const panelView = new SearchEverywhereView(context, service);
+
+    // 왼쪽 Activity Bar 아이콘은 ui 설정이 'panel'일 때만. 설정이 바뀌면 즉시 반영되도록 context key로 관리
+    const uiSetting = () => vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<string>('ui', 'popup');
+    const syncContext = () =>
+      void vscode.commands.executeCommand('setContext', 'devBoost.searchEverywhere.panelUi', uiSetting() === 'panel');
+    syncContext();
+    const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('devBoost.searchEverywhere.ui')) {
+        syncContext();
+      }
+    });
     const cmd = (command: string, tab: TabId) =>
       vscode.commands.registerCommand(`devBoost.searchEverywhere.${command}`, () => {
-        // 설정 devBoost.searchEverywhere.ui: "popup"(IntelliJ 모양 Webview, 기본) | "quickPick"(VS Code 기본 목록)
-        const ui = vscode.workspace
-          .getConfiguration('devBoost.searchEverywhere')
-          .get<string>('ui', 'popup');
+        // 설정 devBoost.searchEverywhere.ui:
+        //   "panel"(기본: 하단/사이드 패널) | "popup"(에디터 탭) | "window"(실험: 떠 있는 창) | "quickPick"(VS Code 기본 목록)
+        const ui = uiSetting();
         if (ui === 'quickPick') {
           openSearch(service, tab);
+        } else if (ui === 'popup' || ui === 'window') {
+          SearchEverywherePanel.show(context, service, tab, ui);
         } else {
-          SearchEverywherePanel.show(context, service, tab);
+          void panelView.show(tab);
         }
       });
     return [
+      configWatcher,
+      { dispose: () => void vscode.commands.executeCommand('setContext', 'devBoost.searchEverywhere.panelUi', false) },
+      vscode.window.registerWebviewViewProvider(PANEL_VIEW_ID, panelView, {
+        webviewOptions: { retainContextWhenHidden: true }, // 접었다 펴도 화면을 다시 만들지 않음 (빠름)
+      }),
       cmd('open', 'all'),
       cmd('classes', 'classes'),
       cmd('files', 'files'),
@@ -88,7 +107,9 @@ function openSearch(service: SearchService, initialTab: TabId) {
 
   const updateTitle = () => {
     const tabs = TABS.map((t) => (t.id === currentTab ? `[${t.label}]` : t.label)).join('   ');
-    qp.title = service.includeNonProject ? `${tabs}   · 비 프로젝트 포함` : tabs;
+    const p = service.options.paths;
+    const filter = p.include || p.exclude ? `   · 필터: ${p.include || '전체'}${p.exclude ? ' − ' + p.exclude : ''}` : '';
+    qp.title = (service.includeNonProject ? `${tabs}   · 비 프로젝트 포함` : tabs) + filter;
   };
   updateButtons();
 

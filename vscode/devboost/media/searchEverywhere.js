@@ -30,7 +30,21 @@
   const $query = document.getElementById('query');
   const $results = document.getElementById('results');
   const $footer = document.getElementById('footer');
-  const $nonProject = document.getElementById('nonProject');
+  const $scope = document.getElementById('scope');
+  const $fileMask = document.getElementById('fileMask');
+  const $fileMaskList = document.getElementById('fileMaskList');
+  const $optCase = document.getElementById('optCase');
+  const $optWord = document.getElementById('optWord');
+  const $optRegex = document.getElementById('optRegex');
+  const $controls = document.getElementById('controls');
+  const $optFilter = document.getElementById('optFilter');
+  const $filterbar = document.getElementById('filterbar');
+  const $incl = document.getElementById('incl');
+  const $excl = document.getElementById('excl');
+  const $inclList = document.getElementById('inclList');
+  const $useCurDir = document.getElementById('useCurDir');
+  const $clearPaths = document.getElementById('clearPaths');
+  const $timing = document.getElementById('timing');
 
   let tab = 'all';
   let rows = [];
@@ -38,6 +52,17 @@
   let runId = 0;
   let shownRunId = 0;
   let debounce;
+  // 범위·텍스트 옵션 (확장에서 init으로 받고, 바꾸면 search 메시지에 실어 보낸다)
+  let options = {
+    scope: 'project',
+    text: { fileMask: '', caseSensitive: false, wholeWord: false, regex: false },
+    paths: { include: '', exclude: '' },
+  };
+  let filterOpen = false;
+  // 속도 측정: 검색 요청을 보낸 시각(runId별), 창 여는 데 걸린 시간
+  const sentAt = {};
+  let showTiming = false;
+  let openMs;
 
   // ───────── 탭 ─────────
   function renderTabs() {
@@ -61,7 +86,106 @@
     if (tab === id) return;
     tab = id;
     renderTabs();
+    updateControls();
     search(true);
+  }
+
+  /** 탭에 따라 오른쪽 컨트롤 표시: 액션=없음, 텍스트=범위+파일타입+Cc/W/.*, 나머지=범위만 */
+  function updateControls() {
+    $controls.classList.toggle('hidden', tab === 'actions');
+    $controls.classList.toggle('text-mode', tab === 'text');
+    $filterbar.classList.toggle('hidden', !filterOpen || tab === 'actions');
+  }
+
+  function readOptions() {
+    options = {
+      scope: $scope.value,
+      text: {
+        fileMask: $fileMask.value.trim(),
+        caseSensitive: $optCase.classList.contains('on'),
+        wholeWord: $optWord.classList.contains('on'),
+        regex: $optRegex.classList.contains('on'),
+      },
+      paths: { include: $incl.value.trim(), exclude: $excl.value.trim() },
+    };
+    updateFilterBadge();
+    return options;
+  }
+
+  function renderOptions() {
+    $scope.value = options.scope;
+    $fileMask.value = options.text.fileMask || '';
+    $optCase.classList.toggle('on', !!options.text.caseSensitive);
+    $optWord.classList.toggle('on', !!options.text.wholeWord);
+    $optRegex.classList.toggle('on', !!options.text.regex);
+    const p = options.paths || { include: '', exclude: '' };
+    $incl.value = p.include || '';
+    $excl.value = p.exclude || '';
+    // 필터 값이 남아 있으면 줄을 펼쳐서 걸려 있다는 걸 보이게 한다
+    if (p.include || p.exclude) setFilterOpen(true);
+    updateFilterBadge();
+  }
+
+  // ───────── 포함/제외 경로 ─────────
+  function setFilterOpen(open) {
+    filterOpen = open;
+    $filterbar.classList.toggle('hidden', !open);
+    $optFilter.classList.toggle('on', open);
+  }
+
+  /** 필터 값이 있으면 버튼에 점 표시 (줄을 접어 둬도 걸려 있다는 걸 알 수 있게) */
+  function updateFilterBadge() {
+    const active = !!($incl.value.trim() || $excl.value.trim());
+    $optFilter.classList.toggle('active', active);
+    $optFilter.title = active
+      ? `포함: ${$incl.value.trim() || '(전체)'}\n제외: ${$excl.value.trim() || '(없음)'}\n(Alt+P)`
+      : '포함/제외 경로 (Alt+P)';
+  }
+
+  let pathDebounce;
+  for (const el of [$incl, $excl]) {
+    el.addEventListener('input', () => {
+      updateFilterBadge();
+      clearTimeout(pathDebounce);
+      pathDebounce = setTimeout(() => search(true), 250);
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(pathDebounce);
+        search(true);
+        $query.focus();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        $query.focus();
+      } else if (e.altKey && e.code === 'KeyP') {
+        e.preventDefault();
+        setFilterOpen(false);
+        $query.focus();
+      }
+      e.stopPropagation(); // 경로 입력 중에는 ↑↓/Tab 같은 전역 키를 쓰지 않음
+    });
+  }
+  $optFilter.addEventListener('mousedown', (e) => e.preventDefault());
+  $optFilter.addEventListener('click', () => {
+    setFilterOpen(!filterOpen);
+    (filterOpen ? $incl : $query).focus();
+  });
+  $useCurDir.addEventListener('mousedown', (e) => e.preventDefault());
+  $useCurDir.addEventListener('click', () => vscode.postMessage({ type: 'currentFolder' }));
+  $clearPaths.addEventListener('mousedown', (e) => e.preventDefault());
+  $clearPaths.addEventListener('click', () => {
+    $incl.value = '';
+    $excl.value = '';
+    updateFilterBadge();
+    search(true);
+    $query.focus();
+  });
+
+  function optionsChanged() {
+    readOptions();
+    search(true);
+    $query.focus();
   }
 
   function moveTab(delta) {
@@ -74,8 +198,9 @@
     clearTimeout(debounce);
     const run = () => {
       runId++;
+      sentAt[runId] = performance.now();
       $results.classList.add('busy');
-      vscode.postMessage({ type: 'search', runId, tab, query: $query.value });
+      vscode.postMessage({ type: 'search', runId, tab, query: $query.value, options: readOptions() });
     };
     immediate ? run() : (debounce = setTimeout(run, 120));
   }
@@ -229,6 +354,8 @@
   $query.addEventListener('input', () => search(false));
 
   document.addEventListener('keydown', (e) => {
+    // 범위 드롭다운에 포커스가 있으면 ↑↓/Enter는 드롭다운이 쓰고, Esc/Tab만 처리
+    if (e.target === $scope && !['Escape', 'Tab'].includes(e.key) && !e.altKey) return;
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -259,20 +386,50 @@
         moveTab(e.shiftKey ? -1 : 1);
         break;
       default:
-        if (e.altKey && (e.key === 'n' || e.key === 'N' || e.code === 'KeyN')) {
+        if (!e.altKey) break;
+        if (e.code === 'KeyP' && tab !== 'actions') {
           e.preventDefault();
-          $nonProject.checked = !$nonProject.checked;
-          onNonProjectChange();
+          setFilterOpen(!filterOpen);
+          (filterOpen ? $incl : $query).focus();
+        } else if (e.code === 'KeyN') {
+          e.preventDefault();
+          $scope.value = $scope.value === 'projectAndLibs' ? 'project' : 'projectAndLibs';
+          optionsChanged();
+        } else if (tab === 'text' && e.code === 'KeyC') {
+          e.preventDefault();
+          $optCase.classList.toggle('on');
+          optionsChanged();
+        } else if (tab === 'text' && e.code === 'KeyW') {
+          e.preventDefault();
+          $optWord.classList.toggle('on');
+          optionsChanged();
+        } else if (tab === 'text' && e.code === 'KeyX') {
+          e.preventDefault();
+          $optRegex.classList.toggle('on');
+          optionsChanged();
         }
     }
   });
 
-  function onNonProjectChange() {
-    vscode.postMessage({ type: 'toggleNonProject', value: $nonProject.checked });
-    search(true);
+  $scope.addEventListener('change', optionsChanged);
+  $fileMask.addEventListener('change', optionsChanged);
+  $fileMask.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      optionsChanged();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      $query.focus();
+    }
+    e.stopPropagation(); // 파일타입 입력 중에는 전역 키(↑↓/Tab) 동작 안 함
+  });
+  for (const b of [$optCase, $optWord, $optRegex]) {
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => {
+      b.classList.toggle('on');
+      optionsChanged();
+    });
   }
-  $nonProject.addEventListener('change', onNonProjectChange);
-  $nonProject.addEventListener('mouseup', () => setTimeout(() => $query.focus(), 0));
 
   // 패널이 다시 포커스를 받으면 입력창으로
   window.addEventListener('focus', () => $query.focus());
@@ -281,13 +438,59 @@
   window.addEventListener('message', (event) => {
     const m = event.data;
     if (m.type === 'init') {
+      showTiming = !!m.timing;
+      openMs = m.openMs;
+      if (m.scopes) {
+        $scope.innerHTML = '';
+        for (const sc of m.scopes) {
+          const o = document.createElement('option');
+          o.value = sc.id;
+          o.textContent = sc.label;
+          $scope.appendChild(o);
+        }
+      }
+      if (m.fileMasks) {
+        $fileMaskList.innerHTML = '';
+        for (const fm of m.fileMasks) {
+          const o = document.createElement('option');
+          o.value = fm;
+          $fileMaskList.appendChild(o);
+        }
+      }
+      if (m.recentIncludes) {
+        $inclList.innerHTML = '';
+        for (const v of m.recentIncludes) {
+          const o = document.createElement('option');
+          o.value = v;
+          $inclList.appendChild(o);
+        }
+      }
+      if (m.options) {
+        options = m.options;
+      } else if (m.includeNonProject) {
+        options.scope = 'projectAndLibs';
+      }
+      renderOptions();
+      updateControls();
+      $timing.textContent = showTiming && openMs !== undefined ? `창 열기 ${openMs}ms` : '';
       tab = m.tab || 'all';
-      $nonProject.checked = !!m.includeNonProject;
       if (m.query) $query.value = m.query;
       renderTabs();
       $query.focus();
       $query.select();
       search(true);
+    } else if (m.type === 'currentFolder') {
+      if (m.path) {
+        $incl.value = m.path;
+        setFilterOpen(true);
+        updateFilterBadge();
+        search(true);
+      }
+      $query.focus();
+    } else if (m.type === 'focus') {
+      // 패널이 다시 보일 때: 검색창으로 커서, 기존 검색어는 전체 선택해서 바로 덮어쓸 수 있게
+      $query.focus();
+      $query.select();
     } else if (m.type === 'results') {
       if (m.runId !== runId) return; // 오래된 결과 무시
       shownRunId = m.runId;
@@ -296,8 +499,35 @@
       selected = 0;
       renderResults(m.query);
       $results.scrollTop = 0;
+      renderTiming(m);
     }
   });
+
+  /**
+   * 하단 오른쪽에 속도 표시. 예) 언어서버 420ms · 파일 3ms · 텍스트 85ms | 전체 512ms
+   * 전체 = 검색 요청을 보낸 순간부터 화면에 그릴 때까지 (확장 처리 + 메시지 왕복 + 그리기)
+   */
+  function renderTiming(m) {
+    if (!showTiming) {
+      $timing.textContent = '';
+      return;
+    }
+    const total = sentAt[m.runId] !== undefined ? Math.round(performance.now() - sentAt[m.runId]) : undefined;
+    delete sentAt[m.runId];
+    const parts = (m.timings || []).map((t) => {
+      const note = t.note === 'ripgrep' ? '(rg)' : t.note === '캐시' ? '(캐시)' : '';
+      return `${t.part} ${t.ms}ms${note}`;
+    });
+    let text = parts.join(' · ');
+    if (total !== undefined) text += `${text ? ' | ' : ''}전체 ${total}ms`;
+    if (openMs !== undefined) text = `창 열기 ${openMs}ms | ` + text;
+    $timing.textContent = text;
+    // 기준: 0.1초 이하 초록, 0.3초 이하 기본, 그 이상 주황
+    $timing.className = 'footer-timing' + (total === undefined ? '' : total <= 100 ? ' fast' : total <= 300 ? '' : ' slow');
+    $timing.title = (m.timings || [])
+      .map((t) => `${t.part}: ${t.ms}ms, ${t.count}건${t.note ? ' (' + t.note + ')' : ''}`)
+      .join('\n');
+  }
 
   renderTabs();
   vscode.postMessage({ type: 'ready' });
