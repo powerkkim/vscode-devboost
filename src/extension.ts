@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Feature } from './features/feature';
+import { Feature } from './core/feature';
 import { searchEverywhere } from './features/searchEverywhere';
 
 /**

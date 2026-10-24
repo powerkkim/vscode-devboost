@@ -1,0 +1,283 @@
+{
+  "name": "devboost",
+  "displayName": "DevBoost",
+  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere) 등. 기능별로 켜고 끌 수 있음",
+  "version": "0.8.0",
+  "publisher": "powerkkim",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/powerkkim/vscode-devboost.git"
+  },
+  "bugs": {
+    "url": "https://github.com/powerkkim/vscode-devboost/issues"
+  },
+  "homepage": "https://github.com/powerkkim/vscode-devboost#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "devBoost.searchEverywhere.open",
+        "title": "모두",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.classes",
+        "title": "클래스",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.files",
+        "title": "파일",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.symbols",
+        "title": "심볼",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.actions",
+        "title": "액션",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.text",
+        "title": "텍스트",
+        "category": "Search Everywhere"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devBoost.sidebar",
+          "title": "DevBoost",
+          "icon": "$(rocket)"
+        }
+      ]
+    },
+    "views": {
+      "devBoost.sidebar": [
+        {
+          "type": "webview",
+          "id": "devBoost.searchEverywhere.sidebar",
+          "name": "Search Everywhere",
+          "when": "config.devBoost.searchEverywhere.enabled && devBoost.searchEverywhere.panelUi"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "devBoost.searchEverywhere.open",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.classes",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.files",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.symbols",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.actions",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.text",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "devBoost.searchEverywhere.open",
+        "key": "shift shift",
+        "mac": "shift shift",
+        "when": "config.devBoost.searchEverywhere.enabled && config.devBoost.searchEverywhere.doubleShift"
+      },
+      {
+        "command": "devBoost.searchEverywhere.open",
+        "key": "ctrl+alt+shift+f",
+        "mac": "cmd+alt+shift+f",
+        "when": "config.devBoost.searchEverywhere.enabled"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "DevBoost: 기능 켜기/끄기",
+        "properties": {
+          "devBoost.searchEverywhere.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 0,
+            "markdownDescription": "**Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 (`Shift` 두 번 / `Ctrl+Alt+Shift+F`)"
+          }
+        }
+      },
+      {
+        "title": "Search Everywhere",
+        "properties": {
+          "devBoost.searchEverywhere.ui": {
+            "type": "string",
+            "enum": [
+              "popup",
+              "panel",
+              "window",
+              "quickPick"
+            ],
+            "enumDescriptions": [
+              "검색 창을 에디터 탭으로 열기 (기본)",
+              "왼쪽 Activity Bar의 DevBoost 사이드바 (Ctrl+Shift+F 검색처럼 독립 패널) — 끌어서 오른쪽/하단으로 옮길 수 있음",
+              "검색 창을 별도 창으로 열기 — VS Code 창 틀(제목줄·탭줄)이 함께 표시됨",
+              "VS Code 기본 QuickPick 목록 (코드 위 팝업, 가볍지만 모양이 다름)"
+            ],
+            "default": "popup",
+            "description": "Search Everywhere 화면 방식"
+          },
+          "devBoost.searchEverywhere.panelKeepOpen": {
+            "type": "boolean",
+            "default": false,
+            "description": "사이드바 방식에서 항목을 열거나 Esc를 눌러도 사이드바를 닫지 않고 그대로 둠"
+          },
+          "devBoost.searchEverywhere.showTiming": {
+            "type": "boolean",
+            "default": true,
+            "description": "검색 창 하단에 단계별 소요 시간 표시 + 출력 패널 'DevBoost'에 기록"
+          },
+          "devBoost.searchEverywhere.doubleShift": {
+            "type": "boolean",
+            "default": true,
+            "description": "Shift 키를 빠르게 두 번 눌러 Search Everywhere 열기"
+          },
+          "devBoost.searchEverywhere.maxResults": {
+            "type": "number",
+            "default": 50,
+            "description": "탭별 최대 결과 개수"
+          },
+          "devBoost.searchEverywhere.defaultScope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "projectAndLibs",
+              "production",
+              "test",
+              "recentViewed",
+              "recentChanged"
+            ],
+            "enumDescriptions": [
+              "프로젝트 파일 (라이브러리·vendor 제외)",
+              "프로젝트 및 라이브러리 (~/.m2, JDK, vendor 포함)",
+              "프로젝트 프로덕션 파일 (src/test 등 테스트 제외)",
+              "프로젝트 테스트 파일",
+              "최근에 본 파일",
+              "최근 변경된 파일 (Git 작업 트리)"
+            ],
+            "default": "project",
+            "description": "검색 창을 열 때의 기본 범위"
+          },
+          "devBoost.searchEverywhere.fileMasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "*.java, *mapper*.xml, *.properties, *.yml",
+              "*.vue, *.ts, *.js",
+              "*.java",
+              "*mapper*.xml",
+              "*.vue",
+              "*.ts, *.js",
+              "*.xml",
+              "*.properties, *.yml, *.yaml",
+              "*.sql",
+              "*.html, *.jsp",
+              "*.css, *.scss",
+              "*.json",
+              "*.md"
+            ],
+            "markdownDescription": "텍스트 탭 파일 타입 드롭다운에 보여줄 목록. 쉼표로 여러 패턴을 묶으면 그중 하나라도 맞는 파일을 검색합니다. `*`는 이름 어디에나 쓸 수 있고 대소문자는 구분하지 않습니다 (예: `*mapper*.xml` → `OrderMapper.xml`). 입력란에 직접 써도 됩니다."
+          },
+          "devBoost.searchEverywhere.exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/node_modules/**",
+              "**/.git/**",
+              "**/.svn/**",
+              "**/target/**",
+              "**/build/**",
+              "**/out/**",
+              "**/dist/**",
+              "**/bin/**",
+              "**/.gradle/**",
+              "**/.mvn/**",
+              "**/.idea/**",
+              "**/.vscode/**",
+              "**/.settings/**",
+              "**/logs/**",
+              "**/coverage/**",
+              "**/.next/**",
+              "**/.nuxt/**",
+              "**/*.log"
+            ],
+            "markdownDescription": "**검색에서 완전히 뺄** 경로 (파일·텍스트·클래스·심볼 모든 탭에 적용). 빌드 결과물·캐시·로그처럼 볼 일이 없는 것. 텍스트 검색은 `.gitignore`도 자동 반영됩니다.\n\n라이브러리로 취급해 *프로젝트 및 라이브러리* 범위에서만 보고 싶은 것은 `library`에 넣으세요."
+          },
+          "devBoost.searchEverywhere.library": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/vendor/**",
+              "**/vendors/**",
+              "**/static/lib/**",
+              "**/*.min.js",
+              "**/*.min.css"
+            ],
+            "markdownDescription": "**라이브러리로 취급**할 경로 (bootstrap, fontawesome 등 프로젝트 안에 복사해 둔 외부 코드). 기본 범위(*프로젝트 파일*)에서는 안 보이고, 범위를 *프로젝트 및 라이브러리*로 바꾸면 보입니다.\n\n아예 검색하지 않으려면 `exclude`에 넣으세요."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  },
+  "keywords": [
+    "search",
+    "search everywhere",
+    "find file",
+    "find class",
+    "java",
+    "spring",
+    "vue",
+    "ripgrep"
+  ]
+}
