@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "VS Code: DevBoost 실행",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode/devboost"],
+      "outFiles": ["${workspaceFolder}/vscode/devboost/out/**/*.js"],
+      "preLaunchTask": "devboost: compile"
+    }
+  ]
+}
