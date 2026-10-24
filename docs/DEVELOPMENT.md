@@ -20,16 +20,30 @@ vscode-devboost/
 │        │  ├─ scope.ts           범위·파일 타입·경로 규칙 (vscode 의존 없음)
 │        │  ├─ glob.ts            glob → 정규식 (vscode 의존 없음)
 │        │  └─ recent.ts          최근 본 파일, Git 변경 파일
-│        └─ ui/             화면
-│           ├─ webviewSession.ts  Webview 화면과 확장 사이 메시지 처리, HTML
-│           ├─ webviewPanel.ts    에디터 탭 / 별도 창으로 열기 (ui = popup, window)
-│           ├─ panelView.ts       Activity Bar 사이드바 (ui = panel)
-│           └─ quickPick.ts       VS Code 기본 목록 (ui = quickPick)
+│     │  └─ ui/             화면
+│     │     ├─ webviewSession.ts  Webview 화면과 확장 사이 메시지 처리, HTML
+│     │     ├─ webviewPanel.ts    에디터 탭 / 별도 창으로 열기 (ui = popup, window)
+│     │     ├─ panelView.ts       Activity Bar 사이드바 (ui = panel)
+│     │     └─ quickPick.ts       VS Code 기본 목록 (ui = quickPick)
+│     └─ mybatisRunner/     MyBatis SQL 실행
+│        ├─ index.ts        명령·CodeLens 등록
+│        ├─ mapper/         mapper 해석·SQL 생성 — vscode 의존 없음
+│        │  ├─ xml.ts             위치를 보존하는 작은 XML 파서
+│        │  ├─ mapperDoc.ts       namespace, statement, <sql> 조각
+│        │  ├─ ognl.ts            test 식(OGNL) 파싱·평가
+│        │  ├─ values.ts          입력값 변환, SQL 리터럴(TO_DATE 등)
+│        │  └─ render.ts          동적 SQL 렌더링, 파라미터 수집
+│        ├─ store.ts        입력값·조건 지정 기억 (workspaceState)
+│        ├─ mapperIndex.ts  워크스페이스 mapper 색인 (다른 파일의 <sql> 조각)
+│        ├─ oracleBridge.ts Oracle SQL Developer 워크시트로 보내기·실행
+│        └─ ui/runnerPanel.ts   실행 화면 (Webview)
 ├─ media/
-│  └─ searchEverywhere/     Webview 안에서 도는 화면 JS·CSS
+│  ├─ searchEverywhere/     Webview 안에서 도는 화면 JS·CSS
+│  └─ mybatisRunner/        SQL 실행 화면 JS·CSS
 ├─ test/                    단위 테스트 (node --test). out/ 의 컴파일 결과를 불러 검사
 │  ├─ helpers.js            임시 샘플 프로젝트 생성, rg 찾기
-│  └─ searchEverywhere/
+│  ├─ searchEverywhere/
+│  └─ mybatisRunner/        mapper.test.js + fixtures/ (mapper XML 샘플)
 └─ docs/
 ```
 
@@ -55,6 +69,12 @@ npm test             # 컴파일 + 단위 테스트
 1. 환경변수 `RG_PATH`
 2. `PATH`의 `rg`
 3. VS Code 설치 폴더 안의 rg (`%LOCALAPPDATA%\Programs\Microsoft VS Code\resources\app\node_modules\@vscode\ripgrep\bin\rg.exe` 등)
+
+### MyBatis SQL 실행 테스트
+
+`test/mybatisRunner/mapper.test.js`는 `fixtures/`의 mapper XML 로 SQL 생성 결과를 검사한다.
+실제 프로젝트에서 SQL 이 잘못 나오는 쿼리를 찾으면 그 부분을 `fixtures/`에 옮기고(테이블·컬럼명은 바꿔도 됨) 케이스를 추가한다.
+조건식(OGNL) 해석 규칙은 `mapper/ognl.ts`, 태그 처리는 `mapper/render.ts`.
 
 ## 새 기능 추가
 

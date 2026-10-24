@@ -1,0 +1,408 @@
+/* MyBatis SQL 실행 화면. VS Code 테마 변수를 그대로 써서 밝은/어두운 테마 모두 맞춘다 */
+:root {
+  --on: var(--vscode-testing-iconPassed, #3fb950);
+  --unknown: var(--vscode-editorWarning-foreground, #d29922);
+  --muted: var(--vscode-descriptionForeground);
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+  cursor: pointer;
+}
+a:hover {
+  text-decoration: underline;
+}
+button {
+  font: inherit;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+button.primary {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+button.primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+button.primary.danger {
+  background: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+button.link {
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  padding: 0 0 0 10px;
+}
+button.link:hover {
+  text-decoration: underline;
+}
+input,
+select {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 2px;
+  padding: 2px 5px;
+}
+input:focus,
+select:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+input:disabled {
+  opacity: 0.4;
+}
+.empty {
+  padding: 24px;
+  color: var(--muted);
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.9em;
+}
+.pad {
+  padding: 6px 2px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editor-background);
+  z-index: 2;
+}
+#title {
+  font-size: 1.1em;
+}
+#file {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+.modes {
+  margin-left: auto;
+  display: inline-flex;
+}
+.modes button {
+  border-radius: 0;
+}
+.modes button:first-child {
+  border-radius: 3px 0 0 3px;
+}
+.modes button:last-child {
+  border-radius: 0 3px 3px 0;
+}
+.modes button.sel {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+.type {
+  display: inline-block;
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  vertical-align: 1px;
+}
+.type-select {
+  color: var(--vscode-symbolIcon-functionForeground, #4fc1ff);
+}
+.type-insert,
+.type-update,
+.type-delete {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1.2fr);
+  gap: 0;
+}
+@media (max-width: 760px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
+  /* 좁으면 SQL 을 위로 */
+  .right {
+    order: -1;
+    border-bottom: 1px solid var(--border);
+  }
+  .left {
+    border-right: none;
+  }
+}
+.left,
+.right {
+  padding: 8px 12px;
+  min-width: 0;
+}
+.left {
+  border-right: 1px solid var(--border);
+}
+section {
+  margin-bottom: 14px;
+}
+.sec-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-weight: 600;
+  margin: 4px 0 6px;
+  text-transform: none;
+}
+.badge {
+  font-weight: normal;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+/* 파라미터 */
+table.params {
+  width: 100%;
+  border-collapse: collapse;
+}
+table.params td {
+  padding: 2px 4px 2px 0;
+  vertical-align: middle;
+}
+.pname {
+  font-family: var(--vscode-editor-font-family);
+  white-space: nowrap;
+}
+.pname .jt {
+  margin-left: 4px;
+  font-size: 0.75em;
+  color: var(--muted);
+}
+.puses {
+  white-space: nowrap;
+}
+.use,
+.rem {
+  display: inline-block;
+  font-size: 0.75em;
+  padding: 0 4px;
+  margin-right: 2px;
+  border-radius: 3px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  opacity: 0.8;
+}
+.use-raw {
+  background: var(--vscode-inputValidation-warningBackground, #5a4a00);
+  color: var(--vscode-foreground);
+  opacity: 1;
+}
+.rem {
+  background: none;
+  border: 1px dashed var(--muted);
+  color: var(--muted);
+}
+.ptype {
+  width: 64px;
+}
+.pinput {
+  width: 100%;
+}
+.pval {
+  width: 100%;
+  font-family: var(--vscode-editor-font-family);
+}
+
+/* 조건 */
+#branches {
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-editor-font-size);
+}
+.br {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  min-height: 24px;
+}
+.br:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.br .dot {
+  width: 12px;
+  text-align: center;
+  flex: none;
+}
+.br.on .dot {
+  color: var(--on);
+}
+.br.off .dot {
+  color: var(--muted);
+}
+.br.unknown .dot {
+  color: var(--unknown);
+  font-weight: bold;
+}
+.br .expr {
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.br.off .expr {
+  opacity: 0.55;
+}
+.br.unknown .expr {
+  opacity: 1;
+  color: var(--unknown);
+}
+.br .note,
+.br .from,
+.br .hits {
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--vscode-font-family);
+}
+.br .seg {
+  margin-left: auto;
+  display: inline-flex;
+  flex: none;
+  opacity: 0.35;
+}
+.br:hover .seg,
+.br.manual .seg,
+.br.unknown .seg {
+  opacity: 1;
+}
+.seg button {
+  padding: 0 6px;
+  font-size: 0.8em;
+  border-radius: 0;
+  font-family: var(--vscode-font-family);
+}
+.seg button:first-child {
+  border-radius: 3px 0 0 3px;
+}
+.seg button:last-child {
+  border-radius: 0 3px 3px 0;
+}
+.seg button.sel {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+/* 경고·SQL */
+#warnings {
+  margin-bottom: 10px;
+}
+.warn {
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-left: 3px solid var(--unknown);
+  background: var(--vscode-inputValidation-warningBackground, rgba(210, 153, 34, 0.12));
+  font-size: 0.92em;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+#target {
+  margin: 2px 0 6px;
+}
+pre#sql {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-editor-font-size);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+pre#sql .k {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+}
+pre#sql .s {
+  color: var(--vscode-symbolIcon-stringForeground, #ce9178);
+}
+pre#sql .b {
+  color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+  font-weight: 600;
+}
+pre#sql .c {
+  color: var(--muted);
+  font-style: italic;
+}
+.sub {
+  margin: 10px 0 4px;
+  font-weight: 600;
+}
+table.bindtbl {
+  border-collapse: collapse;
+  font-family: var(--vscode-editor-font-family);
+}
+table.bindtbl td {
+  padding: 1px 12px 1px 0;
+}
+table.bindtbl td.b {
+  color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+}
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 4px;
+  background: var(--vscode-notifications-background, #252526);
+  color: var(--vscode-notifications-foreground);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  max-width: 90%;
+}
+.notice.show {
+  opacity: 1;
+}
+.notice.warn {
+  border-color: var(--unknown);
+}
+
+.hint {
+  margin-top: 6px;
+}

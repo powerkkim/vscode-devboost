@@ -1,6 +1,8 @@
 # 의존성 / 빌드 결과
 node_modules/
 out/
+dist/
+media/sourceAtlas/
 *.vsix
 release-notes.md
 

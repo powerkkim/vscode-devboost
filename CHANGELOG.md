@@ -1,5 +1,17 @@
 # Changelog
 
+## 다음 버전 (작업 중)
+- **MyBatis SQL 실행**: mapper XML 쿼리 위의 `▶ SQL 실행`(또는 `Ctrl+Alt+Enter`, 우클릭)으로 실행 화면을 열고, 파라미터 값을 넣으면 실행 가능한 SQL 이 바로 만들어짐
+  - `<if>`·`<choose>`·`<where>`·`<set>`·`<trim>`·`<foreach>`·`<bind>`·`<include>`(다른 mapper 의 `<sql>` 조각, `<property>` 포함) 처리
+  - 조건식은 값으로 자동 판단. 판단할 수 없는 식(정적 상수 등)은 꺼 두고 `?` 로 표시 → 켜기/끄기로 직접 지정. `모두 켜기`로 가장 긴 SQL 확인
+  - 값 넣기(`'홍길동'`, `TO_DATE(...)`) / 바인드 변수 두 방식. 바인드 변수는 `VARIABLE`·`EXEC` 로 값을 넣는 스크립트를 만들어 워크시트에서 F5 로 실행 (값 다시 입력할 필요 없음, 날짜는 `TO_DATE(:이름, …)`)
+  - `실행 계획` 버튼: 바인드 변수 형태의 SQL 로 실행 계획(F10) — 운영에서 MyBatis 가 실행하는 방식과 같은 조건
+  - 입력값은 쿼리별로 기억, 같은 이름의 파라미터는 다른 쿼리에도 채워 줌
+  - Oracle SQL Developer 워크시트로 보내기·실행 (마지막으로 쓴 워크시트, INSERT/UPDATE/DELETE 는 확인 후 실행)
+  - 화면이 열려 있는 동안 꺼진 조건을 XML 에서 흐리게 표시
+  - `'Y'` 처럼 한 글자 작은따옴표 비교(OGNL char), 빈 목록 foreach, `${}` 빈 값 등 실제 실행에서 문제 되는 부분을 경고
+- `SQL 복사` CodeLens: 화면 없이 마지막 입력값으로 SQL 을 바로 복사
+
 ## 0.8.0 - 2026-10-24
 저장소를 `editor-plugins`(모노레포) → **`vscode-devboost`**(VS Code 플러그인 전용)로 정리. 기능 변화는 없음.
 - 저장소 최상위가 곧 플러그인: `src/core`, `src/features/searchEverywhere/{search,ui}`, `media/searchEverywhere`

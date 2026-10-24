@@ -1,0 +1,7 @@
+{
+  // JSONC: 주석과 후행 쉼표가 있어도 읽어야 한다
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"], },
+  }
+}
