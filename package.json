@@ -1,7 +1,7 @@
 {
   "name": "devboost",
   "displayName": "DevBoost",
-  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere) 등. 기능별로 켜고 끌 수 있음",
+  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행 등. 기능별로 켜고 끌 수 있음",
   "version": "0.8.0",
   "publisher": "powerkkim",
   "license": "MIT",
@@ -22,7 +22,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
@@ -54,6 +54,27 @@
         "command": "devBoost.searchEverywhere.text",
         "title": "텍스트",
         "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.sourceAtlas.open",
+        "title": "Atlas 화면 열기 (열린 .vue 기준)",
+        "category": "Source Atlas"
+      },
+      {
+        "command": "devBoost.sourceAtlas.dump",
+        "title": "분석 결과 JSON 보기 (열린 .vue 기준)",
+        "category": "Source Atlas"
+      },
+      {
+        "command": "devBoost.mybatisRunner.open",
+        "title": "SQL 실행 화면 열기 (커서 위치 쿼리)",
+        "category": "MyBatis",
+        "icon": "$(play)"
+      },
+      {
+        "command": "devBoost.mybatisRunner.copy",
+        "title": "SQL 복사 (마지막 입력값)",
+        "category": "MyBatis"
       }
     ],
     "viewsContainers": {
@@ -100,6 +121,34 @@
         {
           "command": "devBoost.searchEverywhere.text",
           "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.sourceAtlas.open",
+          "when": "config.devBoost.sourceAtlas.enabled && resourceExtname == .vue"
+        },
+        {
+          "command": "devBoost.sourceAtlas.dump",
+          "when": "config.devBoost.sourceAtlas.enabled && resourceExtname == .vue"
+        },
+        {
+          "command": "devBoost.mybatisRunner.open",
+          "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+        },
+        {
+          "command": "devBoost.mybatisRunner.copy",
+          "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "devBoost.sourceAtlas.open",
+          "when": "config.devBoost.sourceAtlas.enabled && resourceExtname == .vue",
+          "group": "navigation@99"
+        },
+        {
+          "command": "devBoost.mybatisRunner.open",
+          "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml",
+          "group": "navigation@98"
         }
       ]
     },
@@ -115,6 +164,12 @@
         "key": "ctrl+alt+shift+f",
         "mac": "cmd+alt+shift+f",
         "when": "config.devBoost.searchEverywhere.enabled"
+      },
+      {
+        "command": "devBoost.mybatisRunner.open",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
+        "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
       }
     ],
     "configuration": [
@@ -126,6 +181,18 @@
             "default": true,
             "order": 0,
             "markdownDescription": "**Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 (`Shift` 두 번 / `Ctrl+Alt+Shift+F`)"
+          },
+          "devBoost.sourceAtlas.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "markdownDescription": "**Source Atlas** — 열린 Vue 파일의 컴포넌트·composable·store·API 관계를 Atlas 화면으로 분석 (에디터 우클릭 → Atlas 화면 열기)"
+          },
+          "devBoost.mybatisRunner.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "markdownDescription": "**MyBatis SQL 실행** — mapper XML 쿼리 위의 `▶ SQL 실행`으로 파라미터 값을 넣어 실행 가능한 SQL 을 만들고 Oracle 워크시트로 보냄 (`Ctrl+Alt+Enter`)"
           }
         }
       },
@@ -254,21 +321,98 @@
             "markdownDescription": "**라이브러리로 취급**할 경로 (bootstrap, fontawesome 등 프로젝트 안에 복사해 둔 외부 코드). 기본 범위(*프로젝트 파일*)에서는 안 보이고, 범위를 *프로젝트 및 라이브러리*로 바꾸면 보입니다.\n\n아예 검색하지 않으려면 `exclude`에 넣으세요."
           }
         }
+      },
+      {
+        "title": "Source Atlas",
+        "properties": {
+          "devBoost.sourceAtlas.maxDepth": {
+            "type": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 10,
+            "markdownDescription": "열린 파일에서 import 를 몇 단계까지 따라갈지"
+          },
+          "devBoost.sourceAtlas.aliases": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "markdownDescription": "import alias 수동 지정 (vite.config / tsconfig 에서 자동으로 못 읽을 때). 예: `{ \"@\": \"src\" }` — 값은 워크스페이스 기준 경로"
+          },
+          "devBoost.sourceAtlas.maxUpDepth": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "maximum": 10,
+            "markdownDescription": "열린 컴포넌트를 사용하는 **상위** 컴포넌트·라우트를 몇 단계까지 찾을지 (0 이면 끔)"
+          },
+          "devBoost.sourceAtlas.backend.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "워크스페이스에 Spring 컨트롤러가 있으면 API 호출 → Controller → Service → MyBatis SQL → 테이블까지 분석 (없으면 UI 의 API 호출까지만)"
+          },
+          "devBoost.sourceAtlas.backend.maxDepth": {
+            "type": "number",
+            "default": 6,
+            "minimum": 1,
+            "maximum": 12,
+            "markdownDescription": "컨트롤러에서 Service/Mapper 를 몇 단계까지 따라갈지"
+          }
+        }
+      },
+      {
+        "title": "MyBatis SQL 실행",
+        "properties": {
+          "devBoost.mybatisRunner.codeLens": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "mapper XML 의 각 쿼리 위에 `▶ SQL 실행` / `SQL 복사` 표시"
+          },
+          "devBoost.mybatisRunner.dimInactive": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "SQL 실행 화면이 열려 있는 동안, 현재 값으로 꺼진 `<if>`·`<when>` 을 XML 에서 흐리게 표시"
+          },
+          "devBoost.mybatisRunner.worksheetInsert": {
+            "type": "string",
+            "enum": [
+              "append",
+              "replace"
+            ],
+            "enumDescriptions": [
+              "워크시트 끝에 이어 붙이고 그 부분을 선택",
+              "워크시트 내용을 바꿈"
+            ],
+            "default": "append",
+            "markdownDescription": "Oracle 워크시트로 보낼 때 기존 내용 처리. 보낼 곳은 마지막으로 사용한 Oracle 워크시트(접속에서 `Open SQL Worksheet` 로 연 것)이고, 없으면 새 워크시트를 엽니다"
+          }
+        }
       }
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "vscode:prepublish": "tsc -p ./ --noEmit && tsc -p tsconfig.webview.json && node esbuild.mjs --production",
+    "compile": "tsc -p ./ && tsc -p tsconfig.webview.json && node esbuild.mjs",
+    "build": "tsc -p ./ --noEmit && tsc -p tsconfig.webview.json && node esbuild.mjs",
+    "build:watch": "node esbuild.mjs --watch",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node --test",
+    "test": "npm run compile && node --test \"test/**/*.test.js\"",
     "package": "vsce package"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.11",
+    "@dagrejs/dagre": "^3.1.2",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
-    "typescript": "^5.4.0"
+    "@vue-flow/background": "^1.3.2",
+    "@vue-flow/controls": "^1.1.3",
+    "@vue-flow/core": "^1.48.2",
+    "@vue/compiler-sfc": "^3.5.44",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.4.0",
+    "vue": "^3.5.44"
   },
   "keywords": [
     "search",
@@ -278,6 +422,9 @@
     "java",
     "spring",
     "vue",
-    "ripgrep"
+    "ripgrep",
+    "mybatis",
+    "oracle",
+    "sql"
   ]
 }

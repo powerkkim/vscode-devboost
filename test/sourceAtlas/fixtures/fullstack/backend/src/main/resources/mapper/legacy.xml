@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapper namespace="com.acme.legacy">
+  <select id="countAll" resultType="int">
+    WITH recent AS (SELECT ID FROM AUDIT_LOG)
+    SELECT COUNT(*) FROM recent
+  </select>
+</mapper>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.acme.order.mapper.OrderMapper">
+
+  <sql id="orderCols">o.ID, o.STATUS, c.NAME AS CUST_NAME</sql>
+
+  <select id="selectOrders" resultType="OrderDto">
+    SELECT <include refid="orderCols"/>
+      FROM ORDER_HDR o, ORDER_LINE l
+      JOIN CUSTOMER c ON c.ID = o.CUST_ID
+     <where>
+       <if test="keyword != null"> AND o.NAME LIKE #{keyword} </if>
+       AND l.HDR_ID = o.ID
+     </where>
+  </select>
+
+  <select id="selectOne" resultType="OrderDto">
+    SELECT * FROM ${schema}.ORDER_HDR WHERE ID = #{id}
+  </select>
+
+  <insert id="insertOrder">
+    <selectKey keyProperty="id" resultType="long" order="BEFORE">SELECT SEQ_ORDER.NEXTVAL FROM DUAL</selectKey>
+    INSERT INTO ORDER_HDR (ID, STATUS) VALUES (#{id}, #{status})
+  </insert>
+
+  <update id="updateStatus">
+    UPDATE ORDER_HDR SET STATUS = #{status} WHERE ID = #{id}
+  </update>
+
+  <delete id="deleteOld">
+    <![CDATA[ DELETE FROM ORDER_HIST WHERE CREATED < SYSDATE - 30 ]]>
+  </delete>
+</mapper>
