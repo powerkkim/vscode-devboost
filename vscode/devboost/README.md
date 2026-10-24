@@ -6,13 +6,17 @@ IntelliJ의 편리한 기능들을 VS Code에서 쓸 수 있게 모은 플러그
 
 | 기능 | 단축키 | 설정 (켜기/끄기) |
 |---|---|---|
-| Search Everywhere — 모두/클래스/파일/심볼/액션/텍스트 통합 검색 | `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
+| Search Everywhere — 모두/클래스/파일/심볼/액션/텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
 
 기능을 끄려면: 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 즉시 반영됩니다.
 
 ### Search Everywhere 사용법
-- 탭 전환: 입력창 오른쪽 위 아이콘, 또는 접두어 `c/` 클래스 · `f/` 파일 · `s/` 심볼 · `a/` 액션 · `t/` 텍스트
-- 맨 오른쪽 아이콘: "비 프로젝트 항목 포함"(~/.m2, JDK) 토글
+- `Tab` / `Shift+Tab`: 탭 전환 · `↑↓` `PageUp/Down`: 이동 · `Enter`: 열기 · `Esc`: 닫기
+- `Alt+N`: "비 프로젝트 항목 포함" 토글 — 프로젝트 밖(~/.m2, JDK)과 `libraryGlobs` 경로(vendor, *.min.js 등)
+- 액션 탭: 명령 팔레트 / 설정 / 단축키 설정을 검색어가 채워진 상태로 엽니다
+- 텍스트 검색은 VS Code 내장 ripgrep 사용 (`.gitignore` 반영)
+- 에디터에서 단어를 선택하고 열면 그 단어로 바로 검색
+- 화면 방식: 설정 `devBoost.searchEverywhere.ui` — `popup`(IntelliJ 모양, 기본) / `quickPick`(VS Code 기본 목록. 접두어 `c/` `f/` `s/` `a/` `t/` 지원)
 - 클래스·심볼 탭은 언어 플러그인(Java라면 *Extension Pack for Java*)이 필요합니다.
 
 ## 개발

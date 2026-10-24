@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "IntelliJ의 편리한 기능들을 VS Code에서 — 기능별로 켜고 끌 수 있음",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "engines": {
@@ -33,6 +33,12 @@
     "keybindings": [
       {
         "command": "devBoost.searchEverywhere.open",
+        "key": "shift shift",
+        "mac": "shift shift",
+        "when": "config.devBoost.searchEverywhere.enabled && config.devBoost.searchEverywhere.doubleShift"
+      },
+      {
+        "command": "devBoost.searchEverywhere.open",
         "key": "ctrl+alt+shift+f",
         "mac": "cmd+alt+shift+f",
         "when": "config.devBoost.searchEverywhere.enabled"
@@ -46,13 +52,28 @@
             "type": "boolean",
             "default": true,
             "order": 0,
-            "markdownDescription": "**Search Everywhere** — IntelliJ식 통합 검색 창 (`Ctrl+Alt+Shift+F`)"
+            "markdownDescription": "**Search Everywhere** — IntelliJ식 통합 검색 창 (`Shift` 두 번 / `Ctrl+Alt+Shift+F`)"
           }
         }
       },
       {
         "title": "Search Everywhere",
         "properties": {
+          "devBoost.searchEverywhere.ui": {
+            "type": "string",
+            "enum": ["popup", "quickPick"],
+            "enumDescriptions": [
+              "IntelliJ 모양 검색 창 (탭 바, 비 프로젝트 체크박스, 하이라이트, Tab 키로 탭 전환)",
+              "VS Code 기본 QuickPick 목록 (가볍지만 모양이 다름)"
+            ],
+            "default": "popup",
+            "description": "Search Everywhere 화면 방식"
+          },
+          "devBoost.searchEverywhere.doubleShift": {
+            "type": "boolean",
+            "default": true,
+            "description": "Shift 키를 빠르게 두 번 눌러 Search Everywhere 열기 (IntelliJ와 동일)"
+          },
           "devBoost.searchEverywhere.maxResults": {
             "type": "number",
             "default": 50,
@@ -61,12 +82,18 @@
           "devBoost.searchEverywhere.includeNonProject": {
             "type": "boolean",
             "default": false,
-            "description": "클래스/심볼 검색에 프로젝트 밖 항목(~/.m2 의존성 jar, JDK 등)을 포함할지 기본값"
+            "description": "클래스/심볼 검색에 프로젝트 밖 항목(~/.m2 의존성 jar, JDK)과 libraryGlobs 경로(vendor 등)를 포함할지 기본값"
+          },
+          "devBoost.searchEverywhere.libraryGlobs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["**/vendor/**", "**/vendors/**", "**/static/lib/**", "**/*.min.js", "**/*.min.css"],
+            "description": "프로젝트 안에 있지만 라이브러리로 취급할 경로 (bootstrap, fontawesome 등). '비 프로젝트 항목 포함'을 끄면 클래스·심볼 검색에서 제외되고, 텍스트 검색에서는 맨 뒤로 정렬됩니다"
           },
           "devBoost.searchEverywhere.excludeGlob": {
             "type": "string",
             "default": "**/{node_modules,.git,out,dist,build,target}/**",
-            "description": "검색에서 제외할 glob 패턴"
+            "description": "파일·텍스트 검색에서 제외할 glob 패턴 (텍스트 검색은 .gitignore도 자동 반영)"
           }
         }
       }

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SearchService, SearchItem, TabId } from './searchService';
 import { Feature } from '../feature';
+import { SearchEverywherePanel } from './webviewPanel';
 
 /** 탭 정의: IntelliJ의 "모두/클래스/파일/심볼/액션/텍스트" 와 동일한 순서 */
 const TABS: { id: TabId; label: string; icon: string }[] = [
@@ -46,9 +47,17 @@ export const searchEverywhere: Feature = {
   start(context) {
     const service = new SearchService(context);
     const cmd = (command: string, tab: TabId) =>
-      vscode.commands.registerCommand(`devBoost.searchEverywhere.${command}`, () =>
-        openSearch(service, tab)
-      );
+      vscode.commands.registerCommand(`devBoost.searchEverywhere.${command}`, () => {
+        // 설정 devBoost.searchEverywhere.ui: "popup"(IntelliJ 모양 Webview, 기본) | "quickPick"(VS Code 기본 목록)
+        const ui = vscode.workspace
+          .getConfiguration('devBoost.searchEverywhere')
+          .get<string>('ui', 'popup');
+        if (ui === 'quickPick') {
+          openSearch(service, tab);
+        } else {
+          SearchEverywherePanel.show(context, service, tab);
+        }
+      });
     return [
       cmd('open', 'all'),
       cmd('classes', 'classes'),
