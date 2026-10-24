@@ -1,0 +1,15 @@
+# Node / VS Code
+node_modules/
+out/
+*.vsix
+release-notes.md
+
+# Gradle / IntelliJ
+.gradle/
+build/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
