@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
-import { SearchService, SearchItem, TabId } from './searchService';
-import { Feature } from '../feature';
-import { SearchEverywherePanel } from './webviewPanel';
-import { SearchEverywhereView, PANEL_VIEW_ID } from './panelView';
+import { SearchService, SearchItem, TabId } from '../search/searchService';
 
-/** 탭 정의: IntelliJ의 "모두/클래스/파일/심볼/액션/텍스트" 와 동일한 순서 */
+/**
+ * Search Everywhere 를 VS Code 기본 QuickPick 목록으로 여는 방식 (설정 ui = "quickPick").
+ * 코드 위에 바로 뜨지만 화면 구성은 VS Code 목록 그대로다.
+ */
+
+/** 탭 정의: 모두 / 클래스 / 파일 / 심볼 / 액션 / 텍스트 */
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'all', label: '모두', icon: 'search' },
   { id: 'classes', label: '클래스', icon: 'symbol-class' },
@@ -38,58 +40,7 @@ class NonProjectToggle implements vscode.QuickInputButton {
   }
 }
 
-/**
- * Search Everywhere 기능.
- * start()가 돌려준 Disposable들을 dispose하면 커맨드 등록·파일 감시가 모두 해제된다 (기능 OFF).
- */
-export const searchEverywhere: Feature = {
-  id: 'searchEverywhere',
-  name: 'Search Everywhere',
-  start(context) {
-    const service = new SearchService(context);
-    const panelView = new SearchEverywhereView(context, service);
-
-    // 왼쪽 Activity Bar 아이콘은 ui 설정이 'panel'일 때만. 설정이 바뀌면 즉시 반영되도록 context key로 관리
-    const uiSetting = () => vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<string>('ui', 'popup');
-    const syncContext = () =>
-      void vscode.commands.executeCommand('setContext', 'devBoost.searchEverywhere.panelUi', uiSetting() === 'panel');
-    syncContext();
-    const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('devBoost.searchEverywhere.ui')) {
-        syncContext();
-      }
-    });
-    const cmd = (command: string, tab: TabId) =>
-      vscode.commands.registerCommand(`devBoost.searchEverywhere.${command}`, () => {
-        // 설정 devBoost.searchEverywhere.ui:
-        //   "panel"(기본: 하단/사이드 패널) | "popup"(에디터 탭) | "window"(실험: 떠 있는 창) | "quickPick"(VS Code 기본 목록)
-        const ui = uiSetting();
-        if (ui === 'quickPick') {
-          openSearch(service, tab);
-        } else if (ui === 'popup' || ui === 'window') {
-          SearchEverywherePanel.show(context, service, tab, ui);
-        } else {
-          void panelView.show(tab);
-        }
-      });
-    return [
-      configWatcher,
-      { dispose: () => void vscode.commands.executeCommand('setContext', 'devBoost.searchEverywhere.panelUi', false) },
-      vscode.window.registerWebviewViewProvider(PANEL_VIEW_ID, panelView, {
-        webviewOptions: { retainContextWhenHidden: true }, // 접었다 펴도 화면을 다시 만들지 않음 (빠름)
-      }),
-      cmd('open', 'all'),
-      cmd('classes', 'classes'),
-      cmd('files', 'files'),
-      cmd('symbols', 'symbols'),
-      cmd('actions', 'actions'),
-      cmd('text', 'text'),
-      service,
-    ];
-  },
-};
-
-function openSearch(service: SearchService, initialTab: TabId) {
+export function openQuickPick(service: SearchService, initialTab: TabId) {
   const qp = vscode.window.createQuickPick<PickItem>();
   let currentTab: TabId = initialTab;
   let runId = 0; // 오래된 검색 결과가 늦게 도착해도 무시하기 위한 토큰

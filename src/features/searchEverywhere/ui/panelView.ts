@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SearchService, TabId } from './searchService';
+import { SearchService, TabId } from '../search/searchService';
 import { WebviewSession, FromWebview, selectedText } from './webviewSession';
 
 /**

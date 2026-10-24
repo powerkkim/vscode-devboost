@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 - 2026-10-24
+저장소를 `editor-plugins`(모노레포) → **`vscode-devboost`**(VS Code 플러그인 전용)로 정리. 기능 변화는 없음.
+- 저장소 최상위가 곧 플러그인: `src/core`, `src/features/searchEverywhere/{search,ui}`, `media/searchEverywhere`
+- QuickPick 화면 코드를 `ui/quickPick.ts`로 분리
+- 단위 테스트를 `test/`로 정식화 (`npm test`): 범위·파일 타입·포함/제외 경로·ripgrep 옵션 조합
+- 릴리스 태그 `vscode-v*` → `v*`. 릴리스 전에 테스트를 먼저 돌림
+- 개발 가이드 `docs/DEVELOPMENT.md`
+
 ## 0.7.1 - 2026-10-24
 - 필터 단축키 `Alt+F` → `Alt+P`: Windows에서 `Alt+F`가 VS Code 파일 메뉴와 겹쳐 메뉴가 같이 열리던 문제
 

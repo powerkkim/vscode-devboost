@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { performance } from 'perf_hooks';
-import { SearchService, TabId } from './searchService';
+import { SearchService, TabId } from '../search/searchService';
 import { WebviewSession, FromWebview, selectedText } from './webviewSession';
 
 /**

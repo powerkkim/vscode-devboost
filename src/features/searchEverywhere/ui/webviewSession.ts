@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
-import { SearchService, SearchItem, TabId } from './searchService';
-import { SearchOptions, SCOPES, isScopeId } from './scope';
+import { SearchService, SearchItem, TabId } from '../search/searchService';
+import { SearchOptions, SCOPES, isScopeId } from '../search/scope';
 
 /**
  * Webview 화면(media/searchEverywhere.js)과 확장 사이의 공통 로직.
@@ -166,8 +166,8 @@ export class WebviewSession {
   /** 화면 HTML. layout: 'popup'=가운데 박스, 'fill'=그릇을 꽉 채움(패널용) */
   html(extensionUri: vscode.Uri, layout: 'popup' | 'fill'): string {
     const mediaRoot = vscode.Uri.joinPath(extensionUri, 'media');
-    const css = this.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'searchEverywhere.css'));
-    const js = this.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'searchEverywhere.js'));
+    const css = this.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'searchEverywhere', 'searchEverywhere.css'));
+    const js = this.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'searchEverywhere', 'searchEverywhere.js'));
     const nonce = makeNonce();
     return /* html */ `<!DOCTYPE html>
 <html lang="ko">

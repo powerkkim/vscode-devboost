@@ -1,0 +1,13 @@
+# .vsix 패키지에 넣지 않을 것 (소스·테스트·개발 설정)
+.vscode/**
+.github/**
+src/**
+test/**
+docs/**
+node_modules/**
+**/*.map
+**/*.ts
+tsconfig.json
+.gitignore
+*.vsix
+release-notes.md

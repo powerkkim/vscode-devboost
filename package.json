@@ -1,24 +1,60 @@
 {
   "name": "devboost",
   "displayName": "DevBoost",
-  "description": "개발 편의 기능 모음 — 통합 검색 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.7.1",
+  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere) 등. 기능별로 켜고 끌 수 있음",
+  "version": "0.8.0",
   "publisher": "powerkkim",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/powerkkim/vscode-devboost.git"
+  },
+  "bugs": {
+    "url": "https://github.com/powerkkim/vscode-devboost/issues"
+  },
+  "homepage": "https://github.com/powerkkim/vscode-devboost#readme",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      { "command": "devBoost.searchEverywhere.open", "title": "모두", "category": "Search Everywhere" },
-      { "command": "devBoost.searchEverywhere.classes", "title": "클래스", "category": "Search Everywhere" },
-      { "command": "devBoost.searchEverywhere.files", "title": "파일", "category": "Search Everywhere" },
-      { "command": "devBoost.searchEverywhere.symbols", "title": "심볼", "category": "Search Everywhere" },
-      { "command": "devBoost.searchEverywhere.actions", "title": "액션", "category": "Search Everywhere" },
-      { "command": "devBoost.searchEverywhere.text", "title": "텍스트", "category": "Search Everywhere" }
+      {
+        "command": "devBoost.searchEverywhere.open",
+        "title": "모두",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.classes",
+        "title": "클래스",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.files",
+        "title": "파일",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.symbols",
+        "title": "심볼",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.actions",
+        "title": "액션",
+        "category": "Search Everywhere"
+      },
+      {
+        "command": "devBoost.searchEverywhere.text",
+        "title": "텍스트",
+        "category": "Search Everywhere"
+      }
     ],
     "viewsContainers": {
       "activitybar": [
@@ -41,12 +77,30 @@
     },
     "menus": {
       "commandPalette": [
-        { "command": "devBoost.searchEverywhere.open", "when": "config.devBoost.searchEverywhere.enabled" },
-        { "command": "devBoost.searchEverywhere.classes", "when": "config.devBoost.searchEverywhere.enabled" },
-        { "command": "devBoost.searchEverywhere.files", "when": "config.devBoost.searchEverywhere.enabled" },
-        { "command": "devBoost.searchEverywhere.symbols", "when": "config.devBoost.searchEverywhere.enabled" },
-        { "command": "devBoost.searchEverywhere.actions", "when": "config.devBoost.searchEverywhere.enabled" },
-        { "command": "devBoost.searchEverywhere.text", "when": "config.devBoost.searchEverywhere.enabled" }
+        {
+          "command": "devBoost.searchEverywhere.open",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.classes",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.files",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.symbols",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.actions",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        },
+        {
+          "command": "devBoost.searchEverywhere.text",
+          "when": "config.devBoost.searchEverywhere.enabled"
+        }
       ]
     },
     "keybindings": [
@@ -80,7 +134,12 @@
         "properties": {
           "devBoost.searchEverywhere.ui": {
             "type": "string",
-            "enum": ["popup", "panel", "window", "quickPick"],
+            "enum": [
+              "popup",
+              "panel",
+              "window",
+              "quickPick"
+            ],
             "enumDescriptions": [
               "검색 창을 에디터 탭으로 열기 (기본)",
               "왼쪽 Activity Bar의 DevBoost 사이드바 (Ctrl+Shift+F 검색처럼 독립 패널) — 끌어서 오른쪽/하단으로 옮길 수 있음",
@@ -112,7 +171,14 @@
           },
           "devBoost.searchEverywhere.defaultScope": {
             "type": "string",
-            "enum": ["project", "projectAndLibs", "production", "test", "recentViewed", "recentChanged"],
+            "enum": [
+              "project",
+              "projectAndLibs",
+              "production",
+              "test",
+              "recentViewed",
+              "recentChanged"
+            ],
             "enumDescriptions": [
               "프로젝트 파일 (라이브러리·vendor 제외)",
               "프로젝트 및 라이브러리 (~/.m2, JDK, vendor 포함)",
@@ -126,7 +192,9 @@
           },
           "devBoost.searchEverywhere.fileMasks": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [
               "*.java, *mapper*.xml, *.properties, *.yml",
               "*.vue, *.ts, *.js",
@@ -146,19 +214,43 @@
           },
           "devBoost.searchEverywhere.exclude": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [
-              "**/node_modules/**", "**/.git/**", "**/.svn/**",
-              "**/target/**", "**/build/**", "**/out/**", "**/dist/**", "**/bin/**",
-              "**/.gradle/**", "**/.mvn/**", "**/.idea/**", "**/.vscode/**", "**/.settings/**",
-              "**/logs/**", "**/coverage/**", "**/.next/**", "**/.nuxt/**", "**/*.log"
+              "**/node_modules/**",
+              "**/.git/**",
+              "**/.svn/**",
+              "**/target/**",
+              "**/build/**",
+              "**/out/**",
+              "**/dist/**",
+              "**/bin/**",
+              "**/.gradle/**",
+              "**/.mvn/**",
+              "**/.idea/**",
+              "**/.vscode/**",
+              "**/.settings/**",
+              "**/logs/**",
+              "**/coverage/**",
+              "**/.next/**",
+              "**/.nuxt/**",
+              "**/*.log"
             ],
             "markdownDescription": "**검색에서 완전히 뺄** 경로 (파일·텍스트·클래스·심볼 모든 탭에 적용). 빌드 결과물·캐시·로그처럼 볼 일이 없는 것. 텍스트 검색은 `.gitignore`도 자동 반영됩니다.\n\n라이브러리로 취급해 *프로젝트 및 라이브러리* 범위에서만 보고 싶은 것은 `library`에 넣으세요."
           },
           "devBoost.searchEverywhere.library": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": ["**/vendor/**", "**/vendors/**", "**/static/lib/**", "**/*.min.js", "**/*.min.css"],
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/vendor/**",
+              "**/vendors/**",
+              "**/static/lib/**",
+              "**/*.min.js",
+              "**/*.min.css"
+            ],
             "markdownDescription": "**라이브러리로 취급**할 경로 (bootstrap, fontawesome 등 프로젝트 안에 복사해 둔 외부 코드). 기본 범위(*프로젝트 파일*)에서는 안 보이고, 범위를 *프로젝트 및 라이브러리*로 바꾸면 보입니다.\n\n아예 검색하지 않으려면 `exclude`에 넣으세요."
           }
         }
@@ -166,8 +258,10 @@
     ]
   },
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -175,5 +269,15 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
     "typescript": "^5.4.0"
-  }
+  },
+  "keywords": [
+    "search",
+    "search everywhere",
+    "find file",
+    "find class",
+    "java",
+    "spring",
+    "vue",
+    "ripgrep"
+  ]
 }

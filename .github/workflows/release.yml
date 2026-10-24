@@ -1,36 +1,41 @@
-# 태그 vscode-v<버전> 을 push하면 vscode/devboost 을 빌드해 GitHub Release에 .vsix를 첨부한다.
-# 예) git tag vscode-v0.2.0 && git push origin vscode-v0.2.0
-name: VS Code Release
+# 태그 v<버전> 을 push하면 빌드·테스트 후 GitHub Release에 .vsix를 첨부한다.
+# 예) git tag v0.8.0 && git push origin v0.8.0
+# 태그는 확인을 거친 main 커밋에만 단다.
+name: Release
 
 on:
   push:
-    tags: ['vscode-v*']
+    tags: ['v*']
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    defaults:
-      run:
-        working-directory: vscode/devboost
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
+
+      - name: ripgrep 설치 (텍스트 검색 테스트용)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
 
       - run: npm ci
 
       - name: 태그와 package.json 버전 일치 확인
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if [ "vscode-v$VERSION" != "$GITHUB_REF_NAME" ]; then
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
             echo "::error::태그($GITHUB_REF_NAME)와 package.json 버전($VERSION)이 다릅니다"
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: 컴파일 + 테스트
+        run: npm test
 
       - name: CHANGELOG에서 이번 버전 내용 추출
         run: |
@@ -45,6 +50,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          name: DevBoost (VS Code) ${{ env.VERSION }}
-          body_path: vscode/devboost/release-notes.md
-          files: vscode/devboost/*.vsix
+          name: DevBoost ${{ env.VERSION }}
+          body_path: release-notes.md
+          files: '*.vsix'

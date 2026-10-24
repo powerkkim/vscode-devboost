@@ -1,15 +1,10 @@
-# Node / VS Code
+# 의존성 / 빌드 결과
 node_modules/
 out/
 *.vsix
 release-notes.md
 
-# Gradle / IntelliJ
-.gradle/
-build/
+# 편집기·OS
 .idea/
-*.iml
-
-# OS
 .DS_Store
 Thumbs.db
