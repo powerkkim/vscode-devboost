@@ -108,4 +108,6 @@ npm test             # 컴파일 + 단위 테스트
 2. `CHANGELOG.md`에 `## x.y.z - YYYY-MM-DD` 섹션을 쓴다 (이 내용이 Release 설명이 된다)
 3. `develop` → `main` 으로 합친다
 4. `main`에서 태그: `git tag vx.y.z && git push origin vx.y.z`
-5. GitHub Actions가 테스트 → `.vsix` 생성 → Release 첨부. 태그와 `package.json` 버전이 다르면 실패한다
+5. GitHub Actions가 테스트 → `.vsix` 생성 → Release 첨부. 다음 경우엔 실패한다
+   - 태그가 달린 커밋이 `main`에 없을 때 (develop·feature 커밋에 잘못 단 태그)
+   - 태그와 `package.json` 버전이 다를 때
