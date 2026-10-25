@@ -1,4 +1,12 @@
-# DB 스키마 규격 (devboost-schema) — v6 (2026-10-26)
+# DB 스키마 규격 (devboost-schema) — v7 (2026-10-26)
+
+> v7 변경 (v6 대비) — 코드 검토 반영
+> - SUMMARY 의 스키마는 `USER`(로그인 계정): `USER_*` 뷰가 읽는 것과 같은 계정. `ALTER SESSION SET CURRENT_SCHEMA` 를 해도 틀리지 않음
+> - FK 참조 테이블·컬럼은 소유자(`r_owner`)까지 맞춰 찾음 (다른 스키마의 같은 이름 제약과 섞이지 않게)
+> - 가져오기: SUMMARY 행이 없거나 테이블·컬럼 행이 없으면 **오류** (기존 파일을 덮지 않게). 탭 구분(그리드 복사)은 따옴표를 글자 그대로 읽음
+> - 본 쿼리와 기본값 결과를 이어 붙여 한 번에 가져와도 기본값 반영
+> - 전체(접두어 없이)로 받아 기존 파일을 통째로 바꿀 때는 확인을 받음
+> - 정의서 CSV: `=`, `+`, `-`, `@` 로 시작하는 글(코멘트 등)은 앞에 공백을 붙여 Excel 이 수식으로 읽지 않게. CP949 CSV 도 읽음
 
 > v6 변경 (v5 대비) — DevBoost 구현에 맞춤
 > - 저장 파일 이름: `<스키마>@<환경>.json` (같은 스키마의 개발·운영을 따로 두기 위해. 환경을 비우면 `<스키마>.json`)
@@ -208,9 +216,10 @@ k AS (                                        -- PK / UK / FK (제약 컬럼마�
     FROM user_constraints con
     JOIN t ON t.table_name = con.table_name
     JOIN user_cons_columns col ON col.constraint_name = con.constraint_name
-    LEFT JOIN user_constraints rcon ON rcon.constraint_name = con.r_constraint_name
+    LEFT JOIN user_constraints rcon
+      ON rcon.owner = con.r_owner AND rcon.constraint_name = con.r_constraint_name
     LEFT JOIN user_cons_columns rcol
-      ON rcol.constraint_name = con.r_constraint_name AND rcol.position = col.position
+      ON rcol.owner = con.r_owner AND rcol.constraint_name = con.r_constraint_name AND rcol.position = col.position
    WHERE con.constraint_type IN ('P', 'U', 'R')
 ),
 x AS (                                        -- 인덱스 (인덱스 컬럼마다 한 행)
@@ -228,7 +237,7 @@ SELECT * FROM (
          CAST(NULL AS VARCHAR2(1)) nullable, CAST(NULL AS VARCHAR2(9)) uniqueness, CAST(NULL AS VARCHAR2(4)) descend,
          CAST(NULL AS VARCHAR2(128)) ref_table, CAST(NULL AS VARCHAR2(128)) ref_column,
          CAST(NULL AS VARCHAR2(9)) delete_rule, CAST(NULL AS VARCHAR2(8)) status,
-         'schema=' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+         'schema=' || USER
            || ';db=' || SYS_CONTEXT('USERENV', 'DB_NAME')
            || ';at=' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
            || ';prefix=' || (SELECT LISTAGG(prefix, ',') WITHIN GROUP (ORDER BY prefix) FROM p)
@@ -336,15 +345,19 @@ SELECT 'CODE' AS rec,
 1. 텍스트 판별: 탭 구분(그리드 복사) / CSV / JSON(이미 저장 규격이면 그대로)
 2. 헤더로 컬럼 위치 찾기 (대소문자 무시). 헤더가 없으면 5장 순서. 그리드가 맨 앞에 행 번호 칸을 붙여 복사해도 REC 위치로 맞춤. `(null)`·`[NULL]` 은 빈 값 (기본값의 `NULL` 글자는 값으로 둠). 여러 결과를 이어 붙였으면 헤더가 다시 나오는 곳에서 나눠 읽음.
    알려진 `REC` 값(SUMMARY/TABLE/COLUMN/CONS/INDEX/DEFAULT/CODE)으로 시작하지 않는 줄은 앞 행의 마지막 칸(COMMENTS)이 줄바꿈으로 나뉜 것으로 보고 이어 붙임
-3. SUMMARY 행 수와 실제 행 수 비교
+   탭 구분(그리드 복사)은 따옴표를 글자 그대로 읽는다 (그리드는 칸을 따옴표로 감싸지 않으므로). CSV(쉼표)만 `"…"` 를 한 칸으로 읽는다.
+   `REC` 는 맨 앞 칸(또는 행 번호 다음 칸)에서만 헤더로 본다 ('REC' 라는 컬럼이 있어도 헤더로 오인하지 않게)
+3. SUMMARY 행이 없거나(첫 행부터 복사하지 않음), 테이블·컬럼 행이 하나도 없으면 **오류** — 저장하지 않음
+4. SUMMARY 행 수와 실제 행 수 비교
    - TABLE·COLUMN·CONS·INDEX 가 다르면 **중단**하고 알림 (일부만 복사됨)
    - DEFAULT 행이 없거나 수가 다르면 **저장은 하되** "기본값 95개 중 0개 — 6.1 쿼리 결과를 이어서 가져오세요" 로 알림
-4. DEFAULT 행: `TABLE_NAME`+`NAME` 으로 컬럼을 찾아 `default` 에 넣음 (앞뒤 공백·줄바꿈 제거). 기존 파일에 DEFAULT 행만 가져오면 그 파일에 합침
-5. 묶기: CONS·INDEX 행을 이름별로 모아 `columns` 배열 (SEQ 순)
-6. 타입 정규화 (아래 표)
-7. `.devboost/schema/<스키마>.json` 에 저장
+5. DEFAULT 행: `TABLE_NAME`+`NAME` 으로 컬럼을 찾아 `default` 에 넣음 (앞뒤 공백·줄바꿈 제거). 본 쿼리 결과와 이어 붙여 가져와도 되고, DEFAULT 행만 가져오면 지금 보고 있는 파일에 합침
+6. 묶기: CONS·INDEX 행을 이름별로 모아 `columns` 배열 (SEQ 순)
+7. 타입 정규화 (아래 표)
+8. `.devboost/schema/<스키마>@<환경>.json` 에 저장
    - SUMMARY 에 접두어가 있으면 기존 파일에서 **그 접두어로 시작하는 테이블만 교체** (그 사이 DB 에서 지워진 테이블은 빠짐), 다른 테이블은 그대로. 업무별로 나눠 받아 하나의 파일로 쌓을 수 있다
-   - 접두어가 없으면(전체) 파일 전체를 교체 (같은 스키마면 덮어쓰기 전 확인), 결과 요약 표시 (테이블 120 · 컬럼 1840 · PK 118 …)
+   - 접두어가 없으면(전체) 파일 전체를 교체. 기존 파일이 있으면 "기존 테이블 N개 → 이번 M개" 확인을 받음
+   - REC 없는 컬럼 명세(6.6)는 스키마 이름을 물어봄 (같은 스키마면 덮어쓰기 전 확인), 결과 요약 표시 (테이블 120 · 컬럼 1840 · PK 118 …)
 
 ### 7.1 타입 정규화 (Oracle → 저장 규격)
 
@@ -395,6 +408,7 @@ SELECT 'CODE' AS rec,
 
 컬럼 명세 칸: `No, 컬럼명, 컬럼 설명, 데이터 타입, NULL(Y/N), 기본값, PK(Y, 복합키는 Y(1)·Y(2)), UK(제약 이름), FK 참조(참조테이블.컬럼), 인덱스(인덱스명(순서), PK 인덱스 제외)`
 뷰는 기본으로 빠지고, 화면의 `뷰 포함`을 켜면 목록에 나와 고를 수 있다.
+`=`, `+`, `-`, `@` 로 시작하는 글(예: `- 삭제예정`)은 Excel 이 수식으로 읽어 `#NAME?` 이 되므로 앞에 공백 하나를 붙인다 (숫자 `-1` 은 그대로).
 
 ## 12. 확인 필요 (실제 DB 에서)
 

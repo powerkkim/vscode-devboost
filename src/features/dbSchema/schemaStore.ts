@@ -17,13 +17,24 @@ export interface SavedSchemaInfo {
 
 /**
  * 워크스페이스의 .devboost/schema/*.json 읽기·쓰기.
- * 워크스페이스 폴더가 여러 개면 활성 편집기가 속한 폴더, 없으면 첫 번째 폴더.
+ * 워크스페이스 폴더가 여러 개면 화면을 열 때 활성 편집기가 속한 폴더, 없으면 첫 번째 폴더.
  */
 export class SchemaStore {
-  root(): vscode.Uri | undefined {
+  private pinned: vscode.Uri | undefined;
+
+  /**
+   * 화면을 여는 순간의 활성 편집기 기준으로 폴더를 정해 둔다.
+   * 화면(Webview)에 포커스가 가면 activeTextEditor 가 없어져 매번 계산하면 첫 폴더로 바뀌기 때문.
+   */
+  pinRoot() {
     const active = vscode.window.activeTextEditor?.document.uri;
-    const folder = (active && vscode.workspace.getWorkspaceFolder(active)) ?? vscode.workspace.workspaceFolders?.[0];
-    return folder?.uri;
+    const folder = active && vscode.workspace.getWorkspaceFolder(active);
+    if (folder) this.pinned = folder.uri;
+  }
+
+  root(): vscode.Uri | undefined {
+    if (this.pinned && vscode.workspace.getWorkspaceFolder(this.pinned)) return this.pinned;
+    return vscode.workspace.workspaceFolders?.[0]?.uri;
   }
 
   dir(): vscode.Uri | undefined {
@@ -66,7 +77,12 @@ export class SchemaStore {
     try {
       const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(dir, file));
       const j = JSON.parse(Buffer.from(bytes).toString('utf8')) as SchemaFile;
-      return j.format === 'devboost-schema' ? j : undefined;
+      if (j.format !== 'devboost-schema' || !j.source?.schema) return undefined;
+      // 손으로 고친 파일에서 목록이 빠져 있어도 화면이 멈추지 않게
+      for (const k of ['tables', 'columns', 'constraints', 'indexes'] as const) {
+        if (!Array.isArray(j[k])) (j as unknown as Record<string, unknown[]>)[k] = [];
+      }
+      return j;
     } catch {
       return undefined;
     }

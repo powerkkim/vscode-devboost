@@ -6,6 +6,7 @@ import { ImportPart, importText } from '../schema/importer';
 import { mergeImport } from '../schema/merge';
 import { buildTableDoc, localDate, tableDocFileNames } from '../schema/tableDoc';
 import { SchemaFile } from '../schema/types';
+import { decodeText } from '../schema/csv';
 import { SchemaStore } from '../schemaStore';
 
 /**
@@ -32,10 +33,13 @@ export class SchemaPanel {
   private defaults: ImportPart | undefined;
   private codes: ImportPart | undefined;
   private schema: SchemaFile | undefined;
+  /** 보고 있는 스키마가 바뀔 때마다 1씩 (화면이 열어 둔 상세·선택을 새로 맞추는 기준) */
+  private rev = 0;
   private lastExport: { index: string; detail: string; dir: string; tables: number } | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
   static show(context: vscode.ExtensionContext, deps: SchemaDeps) {
+    deps.store.pinRoot();
     if (SchemaPanel.current) {
       SchemaPanel.current.panel.reveal();
       void SchemaPanel.current.refresh();
@@ -84,12 +88,14 @@ export class SchemaPanel {
         this.setUi({ prefixes: normalizePrefixes(m.prefixes ?? []), label: (m.label ?? '').trim() });
         return this.refresh();
       case 'send': {
+        this.applyInputs(m);
         const sql = this.sql(m.which);
         const msg = await this.deps.oracle.send(sql, { action: m.run ? 'statement' : 'none', insert: 'append' });
         this.notice(m.run ? `${msg} 결과 그리드 전체를 헤더와 함께 복사한 뒤 [클립보드에서 가져오기]를 누르세요.` : msg);
         return;
       }
       case 'copySql':
+        this.applyInputs(m);
         await vscode.env.clipboard.writeText(this.sql(m.which));
         this.notice('쿼리를 복사했습니다. 다른 DB 도구에서 실행한 뒤 결과를 복사해 오세요.');
         return;
@@ -102,7 +108,10 @@ export class SchemaPanel {
           title: '수집 결과 파일 (CSV / JSON)',
         });
         for (const f of picked ?? []) {
-          await this.importFrom(Buffer.from(await vscode.workspace.fs.readFile(f)).toString('utf8'), f.path.split('/').pop() ?? '파일');
+          const { text, encoding } = decodeText(await vscode.workspace.fs.readFile(f));
+          const name = f.path.split('/').pop() ?? '파일';
+          if (encoding === 'cp949') this.notice(`${name}: UTF-8 이 아니라 한국어 Windows 인코딩(CP949)으로 읽었습니다.`);
+          await this.importFrom(text, name);
         }
         return;
       }
@@ -114,6 +123,7 @@ export class SchemaPanel {
       case 'select':
         this.setUi({ file: m.file });
         this.schema = m.file ? await this.deps.store.read(m.file) : undefined;
+        this.rev++;
         return this.refresh();
       case 'detail':
         return this.sendDetail(m.table ?? '');
@@ -127,6 +137,11 @@ export class SchemaPanel {
         }
         return;
     }
+  }
+
+  /** 버튼과 함께 온 입력값을 바로 반영 (입력칸의 저장 지연 400ms 안에 버튼을 눌러도 화면의 접두어로 만들도록) */
+  private applyInputs(m: Msg) {
+    if (m.prefixes) this.setUi({ prefixes: normalizePrefixes(m.prefixes), label: (m.label ?? this.ui.label).trim() });
   }
 
   private sql(which: string | undefined): string {
@@ -145,8 +160,9 @@ export class SchemaPanel {
     else if (part.kind === 'codes') this.codes = part;
     else this.main = part; // main / columns / json
     if (part.kind === 'main' && part.summary) {
-      const now = normalizePrefixes(this.ui.prefixes).join(',');
-      const got = part.summary.prefixes.join(',');
+      // 결과(LISTAGG)는 정렬되어 오므로 양쪽 다 정렬해서 비교
+      const now = normalizePrefixes(this.ui.prefixes).sort().join(',');
+      const got = normalizePrefixes(part.summary.prefixes).sort().join(',');
       if (now !== got) {
         part.problems.push({ level: 'warn', message: `결과의 접두어(${got || '전체'})가 화면의 접두어(${now || '전체'})와 다릅니다. 결과 기준으로 저장합니다.` });
       }
@@ -154,10 +170,7 @@ export class SchemaPanel {
     return this.refresh();
   }
 
-  private async existingFor(): Promise<SchemaFile | undefined> {
-    const owner = this.main?.summary?.schema ?? this.main?.json?.source.schema ?? this.schema?.source.schema;
-    if (!owner) return this.schema;
-    const label = this.ui.label || undefined;
+  private async findSaved(owner: string, label: string | undefined): Promise<SchemaFile | undefined> {
     const files = await this.deps.store.list();
     const f = files.find((x) => x.schema === owner && (x.label ?? '') === (label ?? ''));
     return f ? this.deps.store.read(f.file) : undefined;
@@ -172,30 +185,53 @@ export class SchemaPanel {
       this.notice('본 쿼리 결과에 오류가 있어 저장하지 않습니다. 다시 복사해 가져오세요.', 'warn');
       return;
     }
-    const existing = await this.existingFor();
-    if (!this.main && !existing) {
-      this.notice('본 쿼리 결과를 먼저 가져오세요 (기본값·공통코드는 기존 스키마에 합쳐집니다).', 'warn');
-      return;
-    }
-    let fallbackSchema = existing?.source.schema;
-    if (this.main && !this.main.summary && !this.main.json && !fallbackSchema) {
-      fallbackSchema = (await vscode.window.showInputBox({ prompt: '스키마 이름 (결과에 스키마 정보가 없습니다)', value: 'APP' }))?.trim().toUpperCase();
+    // 어느 파일에 합칠지: 결과에 적힌 스키마 + 화면의 환경. 기본값·공통코드만 가져왔으면 지금 보고 있는 파일
+    const uiLabel = this.ui.label || undefined;
+    let existing: SchemaFile | undefined;
+    let label: string | undefined;
+    let fallbackSchema: string | undefined;
+    if (this.main?.json) {
+      const src = this.main.json.source;
+      existing = await this.findSaved(src.schema, src.label);
+    } else if (this.main?.summary?.schema) {
+      label = uiLabel;
+      existing = await this.findSaved(this.main.summary.schema, label);
+    } else if (this.main) {
+      // REC 없는 컬럼 명세: 스키마 이름을 물어본다 (지금 보고 있는 파일을 말없이 덮지 않게)
+      fallbackSchema = (
+        await vscode.window.showInputBox({
+          prompt: '이 결과의 스키마 이름 (결과에 스키마 정보가 없습니다)',
+          value: this.schema?.source.schema ?? 'APP',
+        })
+      )
+        ?.trim()
+        .toUpperCase();
       if (!fallbackSchema) return;
+      label = uiLabel;
+      existing = await this.findSaved(fallbackSchema, label);
+    } else {
+      existing = this.schema;
+      if (!existing) {
+        this.notice('본 쿼리 결과를 먼저 가져오세요 (기본값·공통코드는 저장된 스키마에 합쳐집니다).', 'warn');
+        return;
+      }
     }
-    const r = mergeImport({
-      existing,
-      main: this.main,
-      defaults: this.defaults,
-      codes: this.codes,
-      label: this.ui.label || undefined,
-      fallbackSchema,
-    });
+    const r = mergeImport({ existing, main: this.main, defaults: this.defaults, codes: this.codes, label, fallbackSchema });
     if (r.notes.some((n) => n.level === 'error')) {
       this.notice(r.notes.find((n) => n.level === 'error')!.message, 'warn');
       return;
     }
+    if (r.fullReplace && r.existingTables > 0) {
+      const ok = await vscode.window.showWarningMessage(
+        `저장된 ${r.schema.source.schema}${r.schema.source.label ? ' · ' + r.schema.source.label : ''} 스키마를 통째로 바꿉니다.`,
+        { modal: true, detail: `기존 테이블 ${r.existingTables}개 → 이번 결과 테이블 ${r.schema.tables.length}개.\n접두어 없이(전체로) 받은 결과라 기존 내용은 남지 않습니다.` },
+        '바꾸기'
+      );
+      if (ok !== '바꾸기') return;
+    }
     const file = await this.deps.store.write(r.schema);
     this.schema = r.schema;
+    this.rev++;
     this.setUi({ file });
     this.main = this.defaults = this.codes = undefined;
     const kept = r.keptTables ? ` (다른 테이블 ${r.keptTables}개 유지)` : '';
@@ -231,11 +267,11 @@ export class SchemaPanel {
     this.setUi({ exportDir: dir.fsPath });
     this.lastExport = { index: indexUri.fsPath, detail: detailUri.fsPath, dir: dir.fsPath, tables: doc.tableCount };
     this.notice(`테이블 ${doc.tableCount}개 · 컬럼 ${doc.columnCount}개 정의서를 저장했습니다.`);
+    await this.refresh();
     const open = await vscode.window.showInformationMessage(`테이블 정의서 ${doc.tableCount}개를 저장했습니다: ${names.detail}`, '정의서 열기', '목차 열기', '폴더 열기');
     if (open === '정의서 열기') await vscode.env.openExternal(detailUri);
     else if (open === '목차 열기') await vscode.env.openExternal(indexUri);
     else if (open === '폴더 열기') await vscode.commands.executeCommand('revealFileInOS', detailUri);
-    return this.refresh();
   }
 
   private sendDetail(table: string) {
@@ -258,11 +294,20 @@ export class SchemaPanel {
   }
 
   private async refresh() {
+    try {
+      await this.render();
+    } catch (e) {
+      this.notice(`화면을 그리지 못했습니다: ${(e as Error).message}`, 'warn');
+    }
+  }
+
+  private async render() {
     const ui = this.ui;
     const files = await this.deps.store.list();
     if (!this.schema && files.length) {
       const f = files.find((x) => x.file === ui.file) ?? files[0];
       this.schema = await this.deps.store.read(f.file);
+      this.rev++;
       if (this.schema) this.setUi({ file: f.file });
     }
     const s = this.schema;
@@ -293,6 +338,7 @@ export class SchemaPanel {
       staged: { main: stage(this.main), defaults: stage(this.defaults), codes: stage(this.codes) },
       files,
       current: s && {
+        rev: this.rev,
         file: files.find((f) => f.schema === s.source.schema && (f.label ?? '') === (s.source.label ?? ''))?.file ?? ui.file,
         source: s.source,
         codes: s.codes?.length ?? 0,

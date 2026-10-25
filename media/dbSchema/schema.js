@@ -12,6 +12,9 @@
   /** 정의서로 뽑을 테이블 (파일별로 기억) */
   let selected = new Set();
   let selectedFile = null;
+  /** 지금 화면이 알고 있는 스키마 판 (저장·파일 선택 때 바뀜) */
+  let seenRev = null;
+  let knownTables = new Set();
   let filter = '';
   let includeViews = false;
   let openTable = null;
@@ -94,14 +97,21 @@
     return h('div', {}, h('div', { class: bad ? 'bad-line' : 'ok' }, bad ? '⚠ ' : '✔ ', `기본값 ${fmt(d.defaults)}개${bad ? ` / ${fmt(exp)}` : ''}`), problems(d.problems));
   }
 
+  /** 입력칸의 지금 값 (저장 지연과 관계없이 버튼에 실어 보냄) */
+  function currentInputs() {
+    const p = app.querySelector('input.prefix');
+    const l = document.getElementById('label');
+    return { prefixes: p ? p.value.split(/[,\s]+/) : undefined, label: l ? l.value : undefined };
+  }
+
   function queryButtons(which, s) {
     const o = s.oracle;
     return h(
       'div',
       { class: 'btns' },
-      h('button', { class: 'primary', onclick: () => post({ type: 'send', which, run: true }), title: o.target ? `보낼 곳: ${o.target}` : '접속에서 Open SQL Worksheet 로 연 워크시트가 있으면 그곳으로, 없으면 새 워크시트' }, '▶ 워크시트에서 실행'),
-      h('button', { onclick: () => post({ type: 'send', which, run: false }) }, '워크시트에 넣기'),
-      h('button', { onclick: () => post({ type: 'copySql', which }), title: 'DBeaver 등 다른 도구에서 실행할 때' }, '쿼리 복사'),
+      h('button', { class: 'primary', onclick: () => post({ type: 'send', which, run: true, ...currentInputs() }), title: o.target ? `보낼 곳: ${o.target}` : '접속에서 Open SQL Worksheet 로 연 워크시트가 있으면 그곳으로, 없으면 새 워크시트' }, '▶ 워크시트에서 실행'),
+      h('button', { onclick: () => post({ type: 'send', which, run: false, ...currentInputs() }) }, '워크시트에 넣기'),
+      h('button', { onclick: () => post({ type: 'copySql', which, ...currentInputs() }), title: 'DBeaver 등 다른 도구에서 실행할 때' }, '쿼리 복사'),
       h('span', { class: 'sep' }),
       h('button', { class: 'accent', onclick: () => post({ type: 'importClipboard' }), title: '결과 그리드 전체(헤더 포함)를 복사한 뒤 누르세요' }, '📋 클립보드에서 가져오기')
     );
@@ -126,7 +136,9 @@
         timers.label = setTimeout(() => post({ type: 'settings', prefixes: prefixInput.value.split(/[,\s]+/), label: e.target.value }), 400);
       },
     });
-    const target = m && m.summary && m.summary.schema ? `.devboost/schema/${m.summary.schema}${s.ui.label ? '@' + s.ui.label : ''}.json` : '.devboost/schema/<스키마>.json';
+    // 실제 파일 이름과 같은 규칙 (merge.ts schemaFileName)
+    const safe = (x) => x.replace(/[\\/:*?"<>|\s]+/g, '_');
+    const target = m && m.summary && m.summary.schema ? `.devboost/schema/${safe(m.summary.schema)}${s.ui.label ? '@' + safe(s.ui.label) : ''}.json` : '.devboost/schema/<스키마>.json';
     return h(
       'section',
       { class: 'collect' },
@@ -202,7 +214,16 @@
     if (selectedFile !== cur.file) {
       selectedFile = cur.file;
       selected = new Set(cur.tables.filter((t) => t.kind === 'table').map((t) => t.name));
+      knownTables = new Set(cur.tables.map((t) => t.name));
       openTable = null;
+    } else {
+      // 같은 파일을 다시 저장해 새로 생긴 테이블은 선택에 넣는다
+      for (const t of cur.tables) {
+        if (!knownTables.has(t.name)) {
+          knownTables.add(t.name);
+          if (t.kind === 'table') selected.add(t.name);
+        }
+      }
     }
     const vis = visibleTables(cur);
     const picked = vis.filter((t) => selected.has(t.name));
@@ -319,8 +340,13 @@
   window.addEventListener('message', (e) => {
     const m = e.data;
     if (m.type === 'state') {
-      // 파일이 바뀌면 열어 둔 상세는 다시 받는다
-      if (state && state.current && m.current && state.current.file !== m.current.file) for (const k of Object.keys(details)) delete details[k];
+      // 보고 있는 스키마가 바뀌면(다른 파일·다시 저장) 받아 둔 상세는 버리고, 열려 있던 표는 다시 받는다
+      const rev = m.current ? m.current.rev : null;
+      if (rev !== seenRev) {
+        seenRev = rev;
+        for (const k of Object.keys(details)) delete details[k];
+        if (openTable && m.current && m.current.tables.some((t) => t.name === openTable)) post({ type: 'detail', table: openTable });
+      }
       state = m;
       const focusedPrefix = document.activeElement && document.activeElement.classList.contains('prefix');
       const focusedLabel = document.activeElement && document.activeElement.id === 'label';
