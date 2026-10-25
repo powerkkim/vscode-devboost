@@ -30,6 +30,8 @@ export interface FnSummary {
   line: number;
   col: number;
   params: string[];
+  /** 기본 인자값 (없으면 null) */
+  paramDefaults: (Val | null)[];
   calls: CallSite[];
   /** return 값 (여러 개면 alt). 없으면 null */
   returns: Val | null;
@@ -96,12 +98,27 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
     fnPaths.set(p.node, p);
   };
 
+  // TS enum 은 Babel 스코프에 바인딩이 없다 → 이름 → 멤버 객체로 미리 모아 둔다 (enum ApiPath { LIST = '/x' })
+  const enums = new Map<string, Val>();
   traverse(ast, {
     Function(p) {
       const name = namedFunction(p);
       if (name !== null) assign(p, name);
     },
+    TSEnumDeclaration(p) {
+      const members: Record<string, Val> = {};
+      const body = (p.node as unknown as { members?: t.TSEnumMember[]; body?: { members: t.TSEnumMember[] } });
+      for (const m of body.members ?? body.body?.members ?? []) {
+        const k = t.isIdentifier(m.id) ? m.id.name : m.id.value;
+        members[k] = m.initializer && t.isStringLiteral(m.initializer) ? lit(m.initializer.value) : m.initializer && t.isNumericLiteral(m.initializer) ? lit(String(m.initializer.value)) : unknown(`enum ${k}`);
+      }
+      enums.set(p.node.id.name, { k: 'obj', members });
+    },
   });
+  /** 변수 바인딩 → 값 메모 (같은 변수를 여러 번 참조해도 한 번만 계산, 자기 참조 대입은 unknown) */
+  const bindingMemo = new Map<Binding, Val>();
+  const bindingInProgress = new Set<Binding>();
+  const selfReferenced = new Set<Binding>();
 
   // ── 2) 각 함수 요약
   for (const [node, id] of fnIds) {
@@ -117,6 +134,20 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
 
   // ── 4) export · 컴포넌트 옵션 · entries
   collectExports(programPath, mod);
+  // Pinia options 스토어: actions 안의 this.otherAction() 해석용
+  programPath.traverse({
+    CallExpression(p) {
+      const cal = p.node.callee;
+      if (!t.isIdentifier(cal) || cal.name !== 'defineStore') return;
+      const a1 = p.get('arguments.1') as NodePath | undefined;
+      if (!a1?.isObjectExpression()) return;
+      for (const [key, valPath] of objectMembers(a1)) {
+        if ((key === 'actions' || key === 'getters') && valPath.isObjectExpression()) {
+          for (const [k2, v2] of objectMembers(valPath)) mod.thisMembers[k2] ??= valueOfPath(v2, null);
+        }
+      }
+    },
+  });
   if (opts.isComponent) {
     mod.entries.push(topId);
     // 최상위에서 이름 붙은 함수들 (script setup 의 함수는 템플릿에서 불린다)
@@ -182,9 +213,13 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
 
   function summarizeFn(p: NodePath<FnNode>, id: string, name: string): FnSummary {
     const params = p.node.params.map((prm) => (t.isIdentifier(prm) ? prm.name : t.isAssignmentPattern(prm) && t.isIdentifier(prm.left) ? prm.left.name : '?'));
+    const paramPaths = p.get('params') as NodePath[];
+    const defaults = paramPaths.map((pp) => (pp.isAssignmentPattern() ? valueOfPath(pp.get('right') as NodePath, { ownFn: p.node, params }) : null));
     const bodyPath = p.get('body') as NodePath;
     const returnsExpr = !t.isBlockStatement(p.node.body) ? (p.get('body') as NodePath<t.Expression>) : null;
-    return summarizeBody(bodyPath, id, name, params, returnsExpr, p);
+    const sum = summarizeBody(bodyPath, id, name, params, returnsExpr, p);
+    sum.paramDefaults = defaults;
+    return sum;
   }
 
   /** scopeRoot 안의 호출·return 을 모은다. 안쪽의 "이름 붙은 함수"는 건너뛴다 (자기 요약이 있음) */
@@ -216,7 +251,7 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
     }
     if (exprBody) rets.push(valueOfPath(exprBody, ctx));
     const loc = (fnPath ?? root).node.loc?.start;
-    return { id, name, line: loc?.line ?? 1, col: (loc?.column ?? 0) + 1, params, calls, returns: rets.length ? alt(rets) : null };
+    return { id, name, line: loc?.line ?? 1, col: (loc?.column ?? 0) + 1, params, paramDefaults: params.map(() => null), calls, returns: rets.length ? alt(rets) : null };
   }
 
   interface ValCtx {
@@ -308,6 +343,8 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
     if (name === 'undefined') return unknown('undefined');
     const b: Binding | undefined = p.scope.getBinding(name);
     if (!b) {
+      const en = enums.get(name);
+      if (en) return en;
       if (name === 'fetch' || name === '$fetch' || name === 'useFetch') return { k: 'sink', sink: name };
       if (name === 'axios') return { k: 'sink', sink: 'axios' };
       return { k: 'ext', source: 'global', path: [name] };
@@ -349,22 +386,30 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
       case 'var': {
         const d = b.path;
         if (!d.isVariableDeclarator()) return unknown(name);
+        const memo = bindingMemo.get(b);
+        if (memo) return memo;
+        if (bindingInProgress.has(b)) {
+          selfReferenced.add(b); // u = u + '&a=' + x 처럼 자기 자신을 참조하는 누적 대입
+          return unknown(`누적 대입 ${name}`);
+        }
+        bindingInProgress.add(b);
         const init = d.get('init') as NodePath;
         const idNode = d.node.id;
         let v: Val;
         if (!d.node.init) v = unknown(`초기값 없는 ${name}`);
         else if (t.isIdentifier(idNode)) v = valueOfPath(init, c, depth + 1);
         else v = destructured(idNode as t.Node, name, valueOfPath(init, c, depth + 1));
-        // let 에 다시 대입한 값들
-        if (b.constantViolations.length) {
-          const more: Val[] = [];
-          for (const cv of b.constantViolations) {
-            if (cv.isAssignmentExpression() && t.isIdentifier(cv.node.left) && cv.node.left.name === name) {
-              more.push(valueOfPath(cv.get('right') as NodePath, c, depth + 1));
-            }
-          }
-          if (more.length) v = alt([v, ...more]);
+        // let 에 다시 대입한 값들: `=` 는 후보 추가, `+=` 는 이어 붙이기, 그 밖의 복합 대입은 unknown
+        for (const cv of b.constantViolations) {
+          if (!cv.isAssignmentExpression() || !t.isIdentifier(cv.node.left) || cv.node.left.name !== name) continue;
+          const rhs = valueOfPath(cv.get('right') as NodePath, c, depth + 1);
+          if (cv.node.operator === '=') v = alt([v, rhs]);
+          else if (cv.node.operator === '+=') v = alt([v, concat([v, rhs])]);
+          else v = unknown(`${cv.node.operator} 대입 ${name}`);
         }
+        bindingInProgress.delete(b);
+        if (selfReferenced.has(b)) v = unknown(`누적 대입 ${name} (실행 중에 만들어지는 값)`);
+        bindingMemo.set(b, v);
         return v;
       }
       default:
@@ -423,6 +468,9 @@ export function summarizeModule(code: string, opts: SummaryOptions): ModuleFlow 
         } else if (decl.isFunctionDeclaration() && decl.node.id) {
           const id = fnIds.get(decl.node);
           if (id) m.exports[decl.node.id.name] = { k: 'fn', id };
+        } else if (decl.isTSEnumDeclaration()) {
+          const en = enums.get(decl.node.id.name);
+          if (en) m.exports[decl.node.id.name] = en;
         } else if (decl.isClassDeclaration()) {
           /* 클래스는 미지원 */
         }

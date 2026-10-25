@@ -251,7 +251,7 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
       // context-path 가 있으면 프론트 경로에서 그만큼 떼고 비교 (없는 경우도 같이 시도)
       const segList = ctx ? [pathSegments(cand.startsWith(ctx + '/') ? cand.slice(ctx.length) : cand), segs] : [segs];
       for (const ep of endpoints) {
-        if (ep.httpMethod !== 'ANY' && ep.httpMethod !== method) continue;
+        if (ep.httpMethod !== 'ANY' && method !== 'ANY' && ep.httpMethod !== method) continue;
         for (const sg of segList) {
           const k = matchPaths(sg, ep.segs);
           if (k === 'exact') { if (!exact.includes(ep)) exact.push(ep); break; }

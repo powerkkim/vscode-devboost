@@ -515,3 +515,64 @@ test('V2. 파이프라인: 프로브 alias 가 import 해석에 쓰이고, 프�
   assert.ok(!off.notes.some((n) => n.includes('Vite 설정 읽음')));
   assert.ok(off.graph.nodes.some((n) => n.label === 'GET /api/orders'), '정적 alias 해석으로도 동작');
 });
+
+// ───────────── 재검토에서 나온 엣지 케이스 (flow/edge, flow/diamond) ─────────────
+test('R1. export * 순환(배럴)에서 죽지 않고 값이 풀린다 / enum / 기본 인자값 / 부분 확정 baseURL', () => {
+  const t0 = Date.now();
+  const g = flowGraph('src/views/EdgePage.vue');
+  assert.ok(Date.now() - t0 < 3000, '엣지 케이스 전체가 3초 안에 끝남');
+  const page = g.nodes.find((n) => n.id.endsWith('EdgePage.vue'));
+  const urls = (fn) => page.meta.apiCalls.filter((r) => r.fn === fn).map((r) => `${r.method} ${r.url}`).sort();
+  assert.deepStrictEqual(urls('barrel'), ['GET /edge/a', 'GET /edge/b'], 'export * 순환을 거쳐 상수를 찾음');
+  assert.deepStrictEqual(urls('enumUrl'), ['GET /api/enum/list'], 'TS enum 멤버');
+  assert.deepStrictEqual(urls('defaults'), ['GET /api/v2/users'], '기본 인자값 base = "/api/v2"');
+  const pb = page.meta.apiCalls.find((r) => r.fn === 'partialBase');
+  assert.strictEqual(pb.url, '/v1/users', '`${env}/v1` 의 고정 부분 /v1 은 살린다');
+  assert.ok(pb.unknowns[0].includes('baseURL 미확정'));
+});
+
+test('R2. 래퍼 자체 효과(GET /api/{}, /api/v2{})는 노드가 되지 않고, 경로 변수(/orders/{})는 남는다', () => {
+  const g = flowGraph('src/views/EdgePage.vue');
+  const labels = g.nodes.filter((n) => n.kind === 'api-call').map((n) => n.label);
+  assert.ok(!labels.some((l) => /\/api\/\{\}$|\/api\/v2\{\}$|^(GET|POST) \{\}$/.test(l)), labels.join(', '));
+  assert.ok(labels.includes('GET /api/users'), 'useHttp().get("/users") 는 호출자에서 실제 URL 로');
+  const o = flowGraph('src/views/OrderPage.vue');
+  const useOrder = o.nodes.find((n) => n.id.endsWith('useOrder.ts'));
+  assert.ok(useOrder.meta.apiCalls.some((r) => r.fn === 'detail' && r.url === '/api/orders/{}'), 'composable 표에 경로 변수 URL 유지');
+});
+
+test('R3. 자기 참조 누적 대입(u = u + …)은 지수 폭발 없이 미해석으로, `+=` 는 이어 붙이기, URL 변수는 미해석 목록', () => {
+  const t0 = Date.now();
+  const g = flowGraph('src/views/EdgePage.vue');
+  assert.ok(Date.now() - t0 < 3000);
+  const page = g.nodes.find((n) => n.id.endsWith('EdgePage.vue'));
+  assert.ok(!page.meta.apiCalls.some((r) => r.fn === 'selfRef'), 'selfRef 는 API 행 없음');
+  assert.ok(page.meta.unresolvedCalls.some((u) => u.startsWith('selfRef:') && u.includes('누적 대입')));
+  assert.ok(page.meta.unresolvedCalls.some((u) => u.startsWith('unknownUrl:') && u.includes('URL 을 알 수 없음')), '확실한 끝점이라도 URL 을 모르면 미해석 목록');
+  const plus = page.meta.apiCalls.filter((r) => r.fn === 'plusEq').map((r) => r.url).sort();
+  assert.deepStrictEqual(plus, ['/api/q?x=1', '/api/q?x=1&a={}', '/api/q?x=1&a={}&b={}', '/api/q?x=1&b={}']);
+  assert.ok(!g.nodes.some((n) => n.kind === 'api-call' && /^GET [&?]/.test(n.label)), '`+=` 조각이 독립 URL 로 새지 않음');
+});
+
+test('R4. Pinia options 스토어의 this.otherAction() / HTTP 메서드 미확정은 ANY / 라벨 4개 이상 병합', () => {
+  const g = flowGraph('src/views/EdgePage.vue');
+  const page = g.nodes.find((n) => n.id.endsWith('EdgePage.vue'));
+  assert.ok(page.meta.apiCalls.some((r) => r.fn === 'store' && r.url === '/api/opt/all'), 'refresh() → this.loadAll()');
+  const um = page.meta.apiCalls.find((r) => r.fn === 'unknownMethod');
+  assert.strictEqual(um.method, 'ANY');
+  assert.ok(um.unknowns[0].startsWith('HTTP 메서드 미확정'));
+  const many = g.edges.find((e) => e.to === 'api:GET /api/many');
+  assert.strictEqual(many.label, 'm1(), m2(), m3() 외 4');
+  assert.deepStrictEqual(many.via, ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7']);
+});
+
+test('R5. 다이아몬드 호출 그래프(폭 4 × 깊이 7)에서 메모로 빠르게 끝나고 행이 중복되지 않는다', () => {
+  const t0 = Date.now();
+  const g = flowGraph('src/views/DiamondPage.vue');
+  const ms = Date.now() - t0;
+  assert.ok(ms < 3000, `${ms}ms`);
+  const page = g.nodes.find((n) => n.id.endsWith('DiamondPage.vue'));
+  assert.strictEqual(page.meta.apiCalls.length, 4, '(fn, method, url) 당 한 행');
+  assert.deepStrictEqual(page.meta.apiCalls.map((r) => r.url).sort(), ['/api/deep/a', '/api/deep/b', '/api/deep/c', '/api/deep/d']);
+  assert.strictEqual(page.meta.apiCalls[0].via.length, 7, '경유 체인은 첫 경로 하나를 보존');
+});

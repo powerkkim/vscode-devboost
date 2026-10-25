@@ -5,7 +5,8 @@
 import { pathToFileURL } from 'node:url';
 
 const [root, configFile, viteEntry] = process.argv.slice(2);
-const vite = await import(pathToFileURL(viteEntry).href);
+const imported = await import(pathToFileURL(viteEntry).href);
+const vite = imported.loadConfigFromFile ? imported : (imported.default ?? imported); // vite 2 (CJS main) 대비
 const loaded = await vite.loadConfigFromFile({ command: 'serve', mode: 'development' }, configFile, root, 'silent');
 const cfg = (loaded && loaded.config) || {};
 
@@ -27,7 +28,11 @@ const proxies = [];
 const rawProxy = cfg.server && cfg.server.proxy;
 if (rawProxy && typeof rawProxy === 'object') {
   for (const [prefix, rule] of Object.entries(rawProxy)) {
-    const target = typeof rule === 'string' ? rule : rule && typeof rule.target === 'string' ? rule.target : '';
+    let target = typeof rule === 'string' ? rule : rule && typeof rule.target === 'string' ? rule.target : '';
+    if (!target && rule && rule.target && typeof rule.target === 'object') {
+      const t = rule.target; // { protocol, host, port } 형태
+      target = `${(t.protocol || 'http:').replace(/:?$/, ':')}//${t.host || 'localhost'}${t.port ? ':' + t.port : ''}`;
+    }
     let rewritten = prefix;
     if (rule && typeof rule.rewrite === 'function') {
       // rewrite 는 함수라 그대로 보낼 수 없다 → 표본 경로를 넣어 접두어가 어떻게 바뀌는지 알아낸다
@@ -40,4 +45,5 @@ if (rawProxy && typeof rawProxy === 'object') {
   }
 }
 
-process.stdout.write(JSON.stringify({ base: typeof cfg.base === 'string' ? cfg.base : '/', aliases, proxies }));
+// 플러그인 로그와 섞이지 않게 마커를 붙여 마지막 줄에 쓴다
+process.stdout.write('\n__DEVBOOST_VITE__' + JSON.stringify({ base: typeof cfg.base === 'string' ? cfg.base : '/', aliases, proxies }) + '\n');

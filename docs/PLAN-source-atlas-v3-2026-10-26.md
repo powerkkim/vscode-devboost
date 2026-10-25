@@ -38,6 +38,8 @@ engine.ts   요약을 이어 붙여 해석: import → 다른 모듈, call → �
 | 항목 | 상태 |
 |---|---|
 | 클래스 기반 API 클라이언트(`class Http { post() {} }`) | 미지원 → 이름 추정으로 폴백 |
+| 분기(`?:`, `\|\|`)·`+=` 로 조합되는 URL | 후보를 모두 만들되 8개까지로 제한. `u = u + …` 자기 참조 누적 대입은 미해석 처리 |
+| 함수·끝점 자체가 분기되는 값(`const f = c ? axios.get : axios.post`) | 소실(미해석에도 안 남음) |
 | 클로저로 잡힌 바깥 인자(`useApi(base)` 의 `base`) | unknown |
 | 템플릿 이벤트(`@click="save"`) → "이 버튼이 어떤 API 를 부른다" | 미구현 (요약 구조상 추가 용이) |
 | Vuex(`this.$store.dispatch`) | 미지원 |
@@ -51,5 +53,15 @@ engine.ts   요약을 이어 붙여 해석: import → 다른 모듈, call → �
 
 ## 6. 테스트
 
-`test/sourceAtlas/analyzer.test.js` — 기본 10종, 백엔드 B1~B8, 상위 U1~U2, 호출 위치 C1~C2, 심볼 위치 D1~D2, **호출 전파 F1~F7**, **Vite 프로브 V1~V2**.
-fixture: `app/`(기본), `viteapp/`, `fullstack/`(Vue+Spring+MyBatis), **`flow/`**(래퍼 2겹·composable·Pinia 두 방식·Options API·상수 URL·baseURL·삼항·콜백·순환·미해석) + `.vite-shim/`(프로브 테스트용 가짜 vite).
+`test/sourceAtlas/analyzer.test.js` — 기본 10종, 백엔드 B1~B8, 상위 U1~U2, 호출 위치 C1~C2, 심볼 위치 D1~D2, **호출 전파 F1~F7**, **Vite 프로브 V1~V2**, **재검토 엣지 케이스 R1~R5**(배럴 순환·enum·기본 인자·부분 baseURL·래퍼 자체 효과 제외·누적 대입·`+=`·options 스토어 this·메서드 미확정·라벨 병합·다이아몬드 호출 성능).
+fixture: `app/`(기본), `viteapp/`, `fullstack/`(Vue+Spring+MyBatis), **`flow/`**(래퍼 2겹·composable·Pinia 두 방식·Options API·상수 URL·baseURL·삼항·콜백·순환·미해석, `edge/`·`diamond/`) + `.vite-shim/`(프로브 테스트용 가짜 vite).
+
+## 7. 재검토 (2026-10-26)
+
+구현 후 코드를 보지 않은 별도 검토에서 찾은 것과 처리:
+- HIGH: `export *` 순환으로 스택 오버플로 → import 해석에 깊이·방문 가드 + 그래프 빌더에서 엔진 호출 try/catch
+- HIGH: 자기 참조 `let` 재대입이 지수 시간(25줄에 43초) → 바인딩별 메모 + 자기 참조는 미해석
+- HIGH: 다이아몬드 호출 그래프에서 경로 수가 곱으로 늘어 46k 행 → (함수, 인자) 효과 메모 + 행 dedupe
+- MEDIUM: baseURL 리터럴 래퍼가 `GET /api/{}` 노드 생성, URL 모르는 확실한 호출이 조용히 사라짐, `+=` 를 `=` 로 취급, options 스토어 `this.action()` 미해석, 기본 인자값 무시, 메서드 미확정이 `GET` 확실로, 라벨 병합 4개 이상 깨짐 → 모두 수정(R1~R5 로 고정)
+- Vite 프로브: stdout 마커·maxBuffer 16MB, vite 2(CJS) 폴백, target 객체 형태, `statSync` 예외 → 수정. 동기 spawn 15초 블로킹·`.env` 변경 시 캐시 stale 은 남은 과제
+- 남김(LOW): 분기된 함수 값 소실, 클로저 바깥 인자, 파일당 Babel 2회 파싱(scriptExtractor + summary 통합 과제)

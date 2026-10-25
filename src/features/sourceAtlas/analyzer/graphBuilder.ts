@@ -55,18 +55,17 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
   const addCallEdge = (from: string, to: string, fnName: string, certainty: 'sure' | 'guess', indirect: boolean) => {
     const fn = fnName === '<setup>' ? 'setup' : fnName === '<module>' ? 'module' : fnName;
     const key = `${from}|${to}|calls`;
-    const prev = edges.get(key);
-    if (!prev) {
-      edges.set(key, { from, to, type: 'calls', certainty, label: `${fn}()`, via: indirect ? [fn] : undefined, indirect: indirect || undefined });
-      return;
+    let e = edges.get(key);
+    if (!e) {
+      e = { from, to, type: 'calls', certainty, via: [], indirect: indirect || undefined };
+      edges.set(key, e);
     }
-    if (prev.certainty === 'guess' && certainty === 'sure') prev.certainty = 'sure';
-    const fns = (prev.label ?? '').split(', ').filter(Boolean);
-    if (!fns.includes(`${fn}()`)) {
-      fns.push(`${fn}()`);
-      prev.label = fns.length > 3 ? `${fns.slice(0, 3).join(', ')} 외 ${fns.length - 3}` : fns.join(', ');
-    }
-    if (!indirect) prev.indirect = undefined;
+    if (e.certainty === 'guess' && certainty === 'sure') e.certainty = 'sure';
+    if (!indirect) e.indirect = undefined;
+    // via = 이 API 를 부르는 진입 함수들 (원본 목록). 라벨은 매번 여기서 만든다
+    if (!e.via!.includes(fn)) e.via!.push(fn);
+    const names = e.via!.map((f) => `${f}()`);
+    e.label = names.length > 3 ? `${names.slice(0, 3).join(', ')} 외 ${names.length - 3}` : names.join(', ');
   };
   const warn = (n: AtlasNode, msg: string) => {
     (n.warnings ??= []);
@@ -224,12 +223,27 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
 
     // ── API 호출 (호출 전파): 컴포넌트는 진입 함수(setup·최상위 함수·methods)별, composable/store 는 함수별로
     //    래퍼·composable·store 를 거쳐 끝점(axios/fetch)에 닿는 호출을 모두 찾는다. 같은 URL 은 노드 하나.
-    const entries = node.kind === 'component' ? engine.componentEffects(abs) : engine.moduleFnEffects(abs);
+    let entries: ReturnType<typeof engine.componentEffects> = [];
+    try {
+      entries = node.kind === 'component' ? engine.componentEffects(abs) : engine.moduleFnEffects(abs);
+    } catch (e) {
+      warn(node, `호출 전파 분석 실패: ${(e as Error).message}`);
+    }
     const rows: ApiCallRow[] = [];
+    const rowKeys = new Set<string>();
+    const unresolvedExtra: string[] = [];
     for (const en of entries) {
       for (const ef of en.effects) {
-        // URL 이 전부 인자(`{}`)뿐인 것은 래퍼 함수 자체의 효과 → 노드로 만들지 않는다 (호출자 쪽에서 실제 URL 로 잡힌다)
-        if (ef.url.replace(/\{\}/g, '').replace(/[\/]/g, '') === '') continue;
+        // URL 이 자기 인자뿐인 것은 래퍼 함수 자체의 효과 → 노드로 만들지 않는다 (호출자 쪽에서 실제 URL 로 잡힌다)
+        if (ef.urlKind === 'param') continue;
+        // 실행 시 값이라 경로를 전혀 모르는 호출은 노드 대신 미해석 목록으로
+        if (ef.urlKind === 'unknown') {
+          const last = ef.chain[ef.chain.length - 1];
+          unresolvedExtra.push(`${en.fn === '<setup>' ? 'setup' : en.fn}: ${ef.sink}.${ef.method.toLowerCase()}(…) — URL 을 알 수 없음 (${ef.unknowns.join(', ')}) · ${path.basename(last.file)}:${last.line}`);
+          continue;
+        }
+        // 같은 진입 함수가 같은 API 를 여러 경로로 부르면 한 줄 (첫 경유만 보존)
+        const rowKey = `${en.fn}|${ef.method}|${ef.url}`;
         const apiId = `api:${ef.method} ${ef.url}`;
         const site = ef.chain[0];
         const via = ef.chain.slice(1).map((st) => ({ file: idOf(st.file), fn: st.fn, line: st.line, col: st.col }));
@@ -241,7 +255,7 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
         }
         const an = nodes.get(apiId)!;
         const callers = an.meta.callers as { file: string; line: number; col: number; fn?: string; from: string; via: ApiCallRow['via'] }[];
-        if (!callers.some((c) => c.file === idOf(site.file) && c.line === site.line && c.fn === en.fn)) {
+        if (!callers.some((c) => c.file === idOf(site.file) && c.line === site.line && c.col === site.col && c.fn === en.fn)) {
           callers.push({ file: idOf(site.file), line: site.line, col: site.col, fn: en.fn, from: node.label, via });
         }
         for (const u of ef.unknowns) {
@@ -250,7 +264,10 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
         if (ef.certainty === 'guess') {
           warn(an, `끝점을 코드로 확인하지 못해 이름으로 추정한 호출 (${ef.sink})`);
         }
-        rows.push({ fn: en.fn, method: ef.method, url: ef.url, certainty: ef.certainty, unknowns: ef.unknowns, via, line: site.line, col: site.col });
+        if (!rowKeys.has(rowKey)) {
+          rowKeys.add(rowKey);
+          rows.push({ fn: en.fn, method: ef.method, url: ef.url, certainty: ef.certainty, unknowns: ef.unknowns, via, line: site.line, col: site.col });
+        }
         // 경유지의 composable/store 노드가 같은 API 로 가는 선을 이미 갖고 있으면 간접 호출로 표시 (선이 두 번 보이는 이유를 알 수 있게)
         const indirect = via.some((v) => {
           const mid = v.file !== id ? nodes.get(v.file) : undefined;
@@ -261,7 +278,7 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
       }
     }
     if (rows.length) node.meta.apiCalls = rows;
-    const unresolvedCalls = [...new Set(entries.flatMap((en) => en.unresolved.map((u) => `${en.fn === '<setup>' ? 'setup' : en.fn}: ${u}`)))];
+    const unresolvedCalls = [...new Set([...entries.flatMap((en) => en.unresolved.map((u) => `${en.fn === '<setup>' ? 'setup' : en.fn}: ${u}`)), ...unresolvedExtra])];
     if (unresolvedCalls.length) node.meta.unresolvedCalls = unresolvedCalls;
     return id;
   }

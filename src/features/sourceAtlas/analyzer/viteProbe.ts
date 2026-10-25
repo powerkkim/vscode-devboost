@@ -86,7 +86,12 @@ function findScript(): string | null {
 export function probeVite(projectDir: string, opts: ProbeOptions = {}): ViteInfo | null {
   const configFile = findViteConfig(projectDir);
   if (!configFile) return null;
-  const mtime = fs.statSync(configFile).mtimeMs;
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(configFile).mtimeMs;
+  } catch {
+    return null;
+  }
   const hit = cache.get(configFile);
   if (hit && hit.mtime === mtime) return hit.info;
 
@@ -96,7 +101,7 @@ export function probeVite(projectDir: string, opts: ProbeOptions = {}): ViteInfo
   if (entry && script) {
     // PATH 의 node 를 먼저, 없으면(ENOENT) VS Code 자신의 Node(ELECTRON_RUN_AS_NODE) 로
     const run = (cmd: string) => spawnSync(cmd, [script, projectDir, configFile, entry], {
-      cwd: projectDir, encoding: 'utf8', timeout: opts.timeoutMs ?? 15000,
+      cwd: projectDir, encoding: 'utf8', timeout: opts.timeoutMs ?? 15000, maxBuffer: 16 * 1024 * 1024,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '' },
       windowsHide: true,
     });
@@ -106,7 +111,9 @@ export function probeVite(projectDir: string, opts: ProbeOptions = {}): ViteInfo
     }
     if (r.status === 0 && r.stdout) {
       try {
-        const j = JSON.parse(r.stdout.trim().split('\n').pop() ?? '');
+        // 플러그인이 stdout 에 로그를 찍어도 마지막 줄의 마커 뒤 JSON 만 읽는다
+        const line = r.stdout.split('\n').reverse().find((l) => l.startsWith('__DEVBOOST_VITE__')) ?? '';
+        const j = JSON.parse(line.slice('__DEVBOOST_VITE__'.length));
         info = { configFile, base: j.base ?? '/', aliases: j.aliases ?? [], proxies: j.proxies ?? [] };
       } catch {
         info = null;
@@ -125,10 +132,11 @@ export function applyProxy(url: string, proxies: ViteProxy[]): { path: string; t
   for (const rule of sorted) {
     const isRegex = rule.prefix.startsWith('^');
     if (isRegex) {
+      // 정규식 키: rewrite 는 접두어 방식으로 알 수 없으므로 경로는 그대로 (대상 서버만)
       try {
         if (new RegExp(rule.prefix).test(p)) return { path: p, target: rule.target };
       } catch {
-        continue;
+        /* 잘못된 정규식 */
       }
       continue;
     }
