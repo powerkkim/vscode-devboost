@@ -24,6 +24,10 @@ export interface MergeResult {
   /** 이번에 바뀐 테이블 수 */
   replacedTables: number;
   keptTables: number;
+  /** 기존 파일을 통째로 바꾸는지 (접두어 없이 받았을 때). 화면에서 확인을 받는다 */
+  fullReplace: boolean;
+  /** 바뀌기 전 기존 파일의 테이블 수 */
+  existingTables: number;
 }
 
 const startsWithAny = (name: string, prefixes: string[]) => prefixes.some((p) => name.startsWith(p));
@@ -34,10 +38,12 @@ export function mergeImport(input: MergeInput): MergeResult {
   let schema: SchemaFile;
   let replacedTables = 0;
   let keptTables = 0;
+  let fullReplace = false;
 
   if (main?.json) {
     schema = structuredClone(main.json);
     replacedTables = schema.tables.length;
+    fullReplace = !!existing && existing.source.schema === schema.source.schema && (existing.source.label ?? '') === (schema.source.label ?? '');
   } else if (main) {
     const s = main.summary;
     const owner = s?.schema ?? input.fallbackSchema ?? existing?.source.schema ?? 'SCHEMA';
@@ -51,6 +57,7 @@ export function mergeImport(input: MergeInput): MergeResult {
       label: input.label ?? (sameSchema ? existing!.source.label : undefined),
       prefixes: prefixes.length ? prefixes : undefined,
     });
+    fullReplace = !!sameSchema && prefixes.length === 0;
     if (sameSchema && prefixes.length > 0) {
       // 접두어 밖의 테이블은 기존 것을 그대로 둔다
       const keep = (t: string) => !startsWithAny(t, prefixes);
@@ -80,13 +87,14 @@ export function mergeImport(input: MergeInput): MergeResult {
     }
   }
 
-  // 기본값
+  // 기본값: 따로 가져온 것 + 본 쿼리와 함께 붙여 넣은 것(DEFAULT 행)
   const expectedDefaults = main?.summary?.counts.DEFAULT;
-  if (defaults) {
+  const defaultRows = [...(main?.defaults ?? []), ...(defaults?.defaults ?? [])];
+  if (defaultRows.length > 0) {
     const byKey = new Map(schema.columns.map((c) => [`${c.table}|${c.name}`, c]));
     let applied = 0;
     let missing = 0;
-    for (const d of defaults.defaults) {
+    for (const d of defaultRows) {
       const col = byKey.get(`${d.table}|${d.column}`);
       if (col) {
         col.default = d.value;
@@ -103,8 +111,9 @@ export function mergeImport(input: MergeInput): MergeResult {
     notes.push({ level: 'warn', message: `기본값 ${expectedDefaults}개를 아직 가져오지 않았습니다. ② 기본값 쿼리 결과를 가져오면 채워집니다 (나중에 가져와도 됨).` });
   }
 
-  if (codes && codes.codes.length) {
-    schema.codes = codes.codes;
+  const codeRows = [...(main?.codes ?? []), ...(codes?.codes ?? [])];
+  if (codeRows.length) {
+    schema.codes = codeRows;
   }
 
   schema.tables.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -117,7 +126,7 @@ export function mergeImport(input: MergeInput): MergeResult {
       known.add(c.table);
     }
   }
-  return { schema, notes, replacedTables, keptTables };
+  return { schema, notes, replacedTables, keptTables, fullReplace, existingTables: existing?.tables.length ?? 0 };
 }
 
 /** 저장 파일 이름: 스키마 이름 + 환경 (같은 스키마의 개발/운영을 따로 두기 위해) */

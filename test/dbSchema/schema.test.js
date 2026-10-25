@@ -9,7 +9,7 @@ const { importText, normalizeOracleType } = require(path.join(OUT, 'importer.js'
 const { mergeImport, schemaFileName } = require(path.join(OUT, 'merge.js'));
 const { buildMainSql, buildDefaultSql, normalizePrefixes } = require(path.join(OUT, 'collectSql.js'));
 const { buildTableDoc, tableDocFileNames } = require(path.join(OUT, 'tableDoc.js'));
-const { parseDelimited } = require(path.join(OUT, 'csv.js'));
+const { parseDelimited, csvCell, decodeText } = require(path.join(OUT, 'csv.js'));
 
 const H = ['REC', 'TABLE_NAME', 'NAME', 'SEQ', 'COLUMN_NAME', 'KIND', 'DATA_TYPE', 'CHAR_LENGTH', 'CHAR_USED', 'DATA_LENGTH',
   'DATA_PRECISION', 'DATA_SCALE', 'NULLABLE', 'UNIQUENESS', 'DESCEND', 'REF_TABLE', 'REF_COLUMN', 'DELETE_RULE', 'STATUS', 'COMMENTS'];
@@ -190,4 +190,78 @@ test('11. 테이블 정의서 CSV: 목차 + 정의서 (뷰 제외 기본), Excel
   assert.deepStrictEqual(tableDocFileNames(schema, '2026-10-26'), {
     index: '테이블정의서_목차_PLM_개발_20261026.csv', detail: '테이블정의서_PLM_개발_20261026.csv',
   });
+});
+
+// ───────────── 코드 검토에서 나온 경우들
+
+test('12. REC 라는 이름의 컬럼·코멘트가 있어도 헤더로 오인하지 않음', () => {
+  const rows = [...MAIN_ROWS];
+  rows[0] = SUMMARY('TABLE=3;COLUMN=8;CONS=4;INDEX=3;DEFAULT=2');
+  rows.splice(6, 0, { REC: 'COLUMN', TABLE_NAME: 'TB_CUSTOMER', NAME: 'REC', SEQ: 3, DATA_TYPE: 'CHAR', CHAR_LENGTH: 1, CHAR_USED: 'B', DATA_LENGTH: 1, NULLABLE: 'Y', COMMENTS: 'rec' });
+  const p = importText([H.join('\t'), ...rows.map(row)].join('\n'));
+  assert.deepStrictEqual(p.problems, []);
+  assert.strictEqual(p.columns.length, 8);
+  assert.ok(p.columns.some((c) => c.table === 'TB_CUSTOMER' && c.name === 'REC' && c.comment === 'rec'));
+});
+
+test('13. 그리드 복사(탭)에서는 따옴표를 글자 그대로 읽음', () => {
+  const rows = MAIN_ROWS.map((r) => (r.REC === 'TABLE' && r.TABLE_NAME === 'TB_CUSTOMER' ? { ...r, COMMENTS: '"고객 구분 (1:개인)' } : r));
+  const p = importText([H.join('\t'), ...rows.map(row)].join('\n'));
+  assert.deepStrictEqual(p.problems, []);
+  assert.strictEqual(p.tables.find((t) => t.name === 'TB_CUSTOMER').comment, '"고객 구분 (1:개인)');
+  assert.strictEqual(p.columns.length, 7, '뒤 행이 코멘트에 먹히지 않음');
+  const d = importText('REC\tTABLE_NAME\tNAME\tCOMMENTS\nDEFAULT\tTB_ORDER\tORDER_ID\t"PLM"."ISEQ$$_1".nextval\nDEFAULT\tTB_ORDER\tAMOUNT\t0');
+  assert.deepStrictEqual(d.defaults.map((x) => x.value), ['"PLM"."ISEQ$$_1".nextval', '0']);
+});
+
+test('14. 헤더만 / 첫 행(SUMMARY) 없이 복사하면 오류 (기존 파일을 덮지 않게)', () => {
+  const headerOnly = importText(H.join('\t') + '\n');
+  assert.ok(headerOnly.problems.some((p) => p.level === 'error'));
+  const noSummary = importText([H.join('\t'), ...MAIN_ROWS.slice(1).map(row)].join('\n'));
+  assert.ok(noSummary.problems.some((p) => p.level === 'error' && p.message.includes('SUMMARY')));
+  const emptyScope = importText([H.join('\t'), row(SUMMARY('TABLE=0;COLUMN=0;CONS=0;INDEX=0;DEFAULT=0'))].join('\n'));
+  assert.ok(emptyScope.problems.some((p) => p.level === 'error' && p.message.includes('테이블·컬럼 행이 없습니다')));
+});
+
+test('15. 본 쿼리와 기본값 결과를 이어 붙여 한 번에 가져와도 기본값 반영', () => {
+  const both = importText(MAIN_TEXT + '\n' + DEFAULT_TEXT);
+  assert.deepStrictEqual(both.problems, []);
+  assert.strictEqual(both.kind, 'main');
+  const r = mergeImport({ main: both });
+  assert.deepStrictEqual(r.notes, []);
+  assert.strictEqual(r.schema.columns.find((c) => c.name === 'REG_DT').default, 'SYSDATE');
+});
+
+test('16. 전체로 받으면 통째 교체 표시(화면에서 확인), 접두어로 받으면 아님', () => {
+  const existing = mergeImport({ main: importText(MAIN_TEXT) }).schema;
+  const all = MAIN_ROWS.map((r) => (r.REC === 'SUMMARY' ? { ...r, COMMENTS: r.COMMENTS.replace('prefix=TB_', 'prefix=') } : r));
+  const full = mergeImport({ existing, main: importText([H.join('\t'), ...all.map(row)].join('\n')) });
+  assert.strictEqual(full.fullReplace, true);
+  assert.strictEqual(full.existingTables, 3);
+  assert.strictEqual(mergeImport({ existing, main: importText(MAIN_TEXT) }).fullReplace, false);
+});
+
+test('17. CSV: 수식으로 읽히는 시작 글자 막기, 숫자는 그대로 / CP949 파일 읽기', () => {
+  assert.strictEqual(csvCell('- 삭제예정'), ' - 삭제예정');
+  assert.strictEqual(csvCell('=> 미사용'), ' => 미사용');
+  assert.strictEqual(csvCell('@user'), ' @user');
+  assert.strictEqual(csvCell('-1'), '-1');
+  assert.strictEqual(csvCell('a,b'), '"a,b"');
+  const cp949 = decodeText(new Uint8Array([0xb0, 0xa1, 0x2c, 0x41])); // "가,A"
+  assert.deepStrictEqual(cp949, { text: '가,A', encoding: 'cp949' });
+  assert.strictEqual(decodeText(new TextEncoder().encode('가')).encoding, 'utf-8');
+});
+
+test('18. JSON: 빠진 목록은 빈 목록으로, 스키마 이름 없으면 오류', () => {
+  const ok = importText(JSON.stringify({ format: 'devboost-schema', version: 1, source: { dbms: 'oracle', schema: 'X' }, tables: [], columns: [] }));
+  assert.deepStrictEqual([ok.json.constraints, ok.json.indexes], [[], []]);
+  const bad = importText(JSON.stringify({ format: 'devboost-schema', version: 1, source: {}, tables: [], columns: [] }));
+  assert.ok(bad.problems.some((p) => p.level === 'error'));
+});
+
+test('19. 수집 SQL: 로그인 계정 기준 스키마, FK 참조는 소유자까지 맞춤', () => {
+  const sql = buildMainSql(['TB_']);
+  assert.match(sql, /'schema=' \|\| USER/);
+  assert.match(sql, /rcon\.owner = con\.r_owner AND rcon\.constraint_name = con\.r_constraint_name/);
+  assert.match(sql, /rcol\.owner = con\.r_owner/);
 });

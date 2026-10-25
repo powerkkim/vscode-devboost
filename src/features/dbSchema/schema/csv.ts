@@ -13,7 +13,10 @@ export function detectDelimiter(text: string): Delimiter {
 }
 
 /**
- * 행 단위로 읽는다. 칸이 "로 시작하면 다음 "까지 한 칸 ("" 는 " 하나).
+ * 행 단위로 읽는다.
+ *  - CSV(쉼표): 칸이 "로 시작하면 다음 "까지 한 칸 ("" 는 " 하나)
+ *  - 탭 구분(그리드 복사): 따옴표를 특별 취급하지 않음. DB 도구의 그리드 복사는 칸을 따옴표로 감싸지 않으므로
+ *    "고객 구분 처럼 따옴표로 시작하는 코멘트나 "PLM"."ISEQ$$_1".nextval 같은 기본값을 그대로 읽어야 한다
  * 각 행에 원래 줄 텍스트(raw)도 같이 돌려준다: 따옴표 없이 줄바꿈이 섞인 값을 복구할 때 쓴다.
  */
 export function parseDelimited(text: string, delim: Delimiter): { cells: string[]; raw: string }[] {
@@ -49,7 +52,7 @@ export function parseDelimited(text: string, delim: Delimiter): { cells: string[
       i++;
       continue;
     }
-    if (c === '"' && atCellStart) {
+    if (c === '"' && atCellStart && delim === ',') {
       quoted = true;
       atCellStart = false;
       i++;
@@ -78,10 +81,28 @@ export function parseDelimited(text: string, delim: Delimiter): { cells: string[
 }
 
 const needsQuote = /[",\r\n]/;
+/** Excel 이 수식으로 읽는 시작 글자 (=, +, -, @). 숫자(-1 등)는 그대로 둔다 */
+const FORMULA_START = /^[=+\-@]/;
+const NUMBER = /^[+-]?\d+(\.\d+)?$/;
 
 export function csvCell(v: unknown): string {
-  const s = v === null || v === undefined ? '' : String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  // "- 삭제예정", "=> 미사용" 같은 코멘트가 수식(#NAME?)으로 열리지 않게 앞에 공백 하나
+  if (FORMULA_START.test(s) && !NUMBER.test(s)) s = ` ${s}`;
   return needsQuote.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** 파일 바이트 → 문자열. UTF-8 이 아니면 한국어 Windows 기본(CP949)으로 읽는다 (Excel 에서 다시 저장한 CSV) */
+export function decodeText(bytes: Uint8Array): { text: string; encoding: 'utf-8' | 'cp949' } {
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'utf-8' };
+  } catch {
+    try {
+      return { text: new TextDecoder('euc-kr').decode(bytes), encoding: 'cp949' };
+    } catch {
+      return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'utf-8' };
+    }
+  }
 }
 
 /** 행 목록 → Excel 용 CSV (BOM + CRLF) */

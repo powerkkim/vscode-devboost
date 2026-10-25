@@ -156,16 +156,18 @@ function toRecords(text: string, problems: ImportProblem[]): { recs: Rec[]; hasR
 
   for (const { cells, raw } of rows) {
     const upper = cells.map((c) => c.trim().toUpperCase());
-    // 헤더 줄?
-    const ri = upper.indexOf('REC');
-    if (ri >= 0 || (upper.includes('TABLE_NAME') && !upper.some((u) => REC_SET.has(u)))) {
+    // REC 값 위치 (행 번호 칸이 붙은 경우 1)
+    const at = REC_SET.has(upper[0]) ? 0 : REC_SET.has(upper[1] ?? '') ? 1 : -1;
+    // 헤더 줄? REC 는 맨 앞(또는 행 번호 다음)에만 본다: 'REC' 라는 컬럼·코멘트가 있는 데이터 행을 헤더로 오인하지 않게
+    const ri = at >= 0 ? -1 : upper[0] === 'REC' ? 0 : upper[1] === 'REC' ? 1 : -1;
+    // REC 없는 컬럼 명세(6.6)의 헤더는 첫 줄에만
+    const legacyHeader = ri < 0 && at < 0 && !header && recs.length === 0 && upper.includes('TABLE_NAME');
+    if (ri >= 0 || legacyHeader) {
       header = upper.map((h) => ALIASES[h] ?? h);
       recIdx = ri;
       if (ri >= 0) hasRec = true;
       continue;
     }
-    // REC 값 위치 (행 번호 칸이 붙은 경우 1)
-    const at = REC_SET.has(upper[0]) ? 0 : REC_SET.has(upper[1] ?? '') ? 1 : -1;
 
     if (header) {
       if (recIdx >= 0) {
@@ -237,6 +239,10 @@ export function importText(text: string): ImportPart {
   }
   const { recs, hasRec } = toRecords(t, part.problems);
   if (part.problems.some((p) => p.level === 'error')) return part;
+  if (recs.length === 0) {
+    part.problems.push({ level: 'error', message: '데이터 행이 없습니다 (헤더만 복사되었거나 결과가 비어 있음).' });
+    return part;
+  }
   if (!hasRec) return importColumnsOnly(recs, part);
 
   const cons = new Map<string, { info: ConstraintInfo; cols: [number, string, string][] }>();
@@ -355,7 +361,12 @@ export function importText(text: string): ImportPart {
 function validateCounts(part: ImportPart) {
   if (part.kind !== 'main') return;
   if (!part.summary) {
-    part.problems.push({ level: 'warn', message: 'SUMMARY 행이 없어 일부만 복사되었는지 확인할 수 없습니다. 첫 행부터 복사했는지 확인하세요.' });
+    // SUMMARY 가 없으면 접두어·스키마도 모르고 일부 복사도 못 잡는다 → 저장하면 기존 파일 전체를 덮을 수 있어 막는다
+    part.problems.push({ level: 'error', message: '첫 행(SUMMARY)이 없습니다. 결과 그리드의 첫 행부터 전체를 헤더와 함께 복사하세요.' });
+    return;
+  }
+  if (!part.received.TABLE && !part.received.COLUMN) {
+    part.problems.push({ level: 'error', message: '테이블·컬럼 행이 없습니다. 접두어에 맞는 테이블이 없거나, 헤더만 복사되었습니다.' });
     return;
   }
   const label: Record<string, string> = { TABLE: '테이블', COLUMN: '컬럼', CONS: '제약조건 컬럼', INDEX: '인덱스 컬럼' };
@@ -416,11 +427,15 @@ function importJson(text: string, part: ImportPart): ImportPart {
   part.kind = 'json';
   try {
     const j = JSON.parse(text) as SchemaFile;
-    if (j.format !== 'devboost-schema' || !Array.isArray(j.tables) || !Array.isArray(j.columns)) {
-      part.problems.push({ level: 'error', message: 'devboost-schema 형식의 JSON 이 아닙니다.' });
+    if (j.format !== 'devboost-schema' || !j.source?.schema || !Array.isArray(j.tables) || !Array.isArray(j.columns)) {
+      part.problems.push({ level: 'error', message: 'devboost-schema 형식의 JSON 이 아닙니다 (format, source.schema, tables, columns 필요).' });
       return part;
     }
+    // 빠진 목록은 빈 목록으로 (화면·정의서가 목록이 있다고 보고 읽으므로)
+    j.constraints = Array.isArray(j.constraints) ? j.constraints : [];
+    j.indexes = Array.isArray(j.indexes) ? j.indexes : [];
     part.json = j;
+    part.received = { TABLE: j.tables.length, COLUMN: j.columns.length };
   } catch (e) {
     part.problems.push({ level: 'error', message: `JSON 을 읽을 수 없습니다: ${(e as Error).message}` });
   }

@@ -23,6 +23,19 @@ export type SendAction = 'none' | keyof typeof COMMANDS;
 const KEY_OF: Record<SendAction, string> = { none: '', statement: 'Ctrl+Enter', script: 'F5', explain: 'F10' };
 const DONE: Record<SendAction, string> = { none: '', statement: '실행했습니다', script: '스크립트로 실행했습니다', explain: '실행 계획을 열었습니다' };
 
+/**
+ * SQL 을 보낼 워크시트인지: Oracle 언어이면서 프로젝트 파일이 아닌 것 (접속에서 연 워크시트·제목 없는 문서).
+ * 프로젝트의 .sql 파일도 oracle-sql 이라, 여기에 수집 SQL 이 덧붙으면 안 된다.
+ */
+function isWorksheet(d: vscode.TextDocument): boolean {
+  return d.languageId === ORACLE_LANG && d.uri.scheme !== 'file';
+}
+
+/** 줄바꿈을 한 가지로 맞춤 */
+export function toEol(text: string, eol: '\n' | '\r\n'): string {
+  return text.replace(/\r?\n/g, eol);
+}
+
 export class OracleBridge implements vscode.Disposable {
   private last: vscode.TextDocument | undefined;
   private readonly subs: vscode.Disposable[] = [];
@@ -31,7 +44,7 @@ export class OracleBridge implements vscode.Disposable {
 
   constructor() {
     const track = (e: vscode.TextEditor | undefined) => {
-      if (e && e.document.languageId === ORACLE_LANG && this.last !== e.document) {
+      if (e && isWorksheet(e.document) && this.last !== e.document) {
         this.last = e.document;
         this.changed.fire();
       }
@@ -46,7 +59,7 @@ export class OracleBridge implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidOpenTextDocument((d) => {
-        if (d.languageId === ORACLE_LANG && !this.last) {
+        if (isWorksheet(d) && !this.last) {
           this.last = d;
           this.changed.fire();
         }
@@ -68,7 +81,7 @@ export class OracleBridge implements vscode.Disposable {
   private target(): vscode.TextDocument | undefined {
     if (this.last && !this.last.isClosed) return this.last;
     // 이미 열린 Oracle 워크시트 중 하나
-    return vscode.workspace.textDocuments.find((d) => d.languageId === ORACLE_LANG && !d.isClosed);
+    return vscode.workspace.textDocuments.find((d) => isWorksheet(d) && !d.isClosed);
   }
 
   /**
@@ -91,19 +104,22 @@ export class OracleBridge implements vscode.Disposable {
       preserveFocus: false,
       preview: false,
     });
+    // 문서의 줄바꿈(Windows 는 CRLF)에 맞춰 넣어야 넣은 부분의 길이·위치가 맞는다
+    const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+    const body = toEol(text, eol);
     const full = new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
     await editor.edit((b) => {
       if (opts.insert === 'replace' || created || doc!.getText().trim() === '') {
-        b.replace(full, text);
+        b.replace(full, body);
       } else {
-        const sep = doc!.getText().endsWith('\n') ? '\n' : '\n\n';
-        b.insert(full.end, sep + text);
+        const sep = doc!.getText().endsWith('\n') ? eol : eol + eol;
+        b.insert(full.end, sep + body);
       }
     });
-    const all = doc.getText();
-    const at = all.lastIndexOf(text);
-    const start = doc.positionAt(at < 0 ? 0 : at);
-    const end = doc.positionAt((at < 0 ? 0 : at) + text.length);
+    // 넣은 글은 항상 문서 맨 끝 → 끝에서 넣은 길이만큼이 선택 범위
+    const total = doc.getText().length;
+    const start = doc.positionAt(Math.max(0, total - body.length));
+    const end = doc.positionAt(total);
     editor.selection = new vscode.Selection(start, end);
     editor.revealRange(new vscode.Range(start, end), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     this.last = doc;

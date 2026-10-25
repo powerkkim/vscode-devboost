@@ -56,9 +56,10 @@ k AS (
     FROM user_constraints con
     JOIN t ON t.table_name = con.table_name
     JOIN user_cons_columns col ON col.constraint_name = con.constraint_name
-    LEFT JOIN user_constraints rcon ON rcon.constraint_name = con.r_constraint_name
+    LEFT JOIN user_constraints rcon
+      ON rcon.owner = con.r_owner AND rcon.constraint_name = con.r_constraint_name
     LEFT JOIN user_cons_columns rcol
-      ON rcol.constraint_name = con.r_constraint_name AND rcol.position = col.position
+      ON rcol.owner = con.r_owner AND rcol.constraint_name = con.r_constraint_name AND rcol.position = col.position
    WHERE con.constraint_type IN ('P', 'U', 'R')
 ),
 x AS (
@@ -76,7 +77,7 @@ SELECT * FROM (
          CAST(NULL AS VARCHAR2(1)) nullable, CAST(NULL AS VARCHAR2(9)) uniqueness, CAST(NULL AS VARCHAR2(4)) descend,
          CAST(NULL AS VARCHAR2(128)) ref_table, CAST(NULL AS VARCHAR2(128)) ref_column,
          CAST(NULL AS VARCHAR2(9)) delete_rule, CAST(NULL AS VARCHAR2(8)) status,
-         'schema=' || SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+         'schema=' || USER
            || ';db=' || SYS_CONTEXT('USERENV', 'DB_NAME')
            || ';at=' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
            || ';prefix=' || (SELECT LISTAGG(prefix, ',') WITHIN GROUP (ORDER BY prefix) FROM p)
