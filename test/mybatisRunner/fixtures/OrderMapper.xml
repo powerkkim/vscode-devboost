@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.demo.order.OrderMapper">
+
+  <resultMap id="orderMap" type="OrderVo">
+    <id property="orderId" column="ORDER_ID"/>
+    <result property="status" column="STATUS"/>
+    <collection property="items" column="ORDER_ID" select="selectItems"/>
+  </resultMap>
+
+  <sql id="baseColumns">
+    ${alias}.ORDER_ID, ${alias}.STATUS, ${alias}.ORDER_DT
+  </sql>
+
+  <sql id="authCond">
+    <if test="loginUser != null and loginUser.roleCd != 'ADMIN'">
+      AND ${alias}.DEPT_CD = #{loginUser.deptCd}
+    </if>
+  </sql>
+
+  <!-- 목록 조회: 조건이 많은 쿼리 -->
+  <select id="selectList" parameterType="map" resultMap="orderMap">
+    <bind name="kw" value="'%' + keyword + '%'"/>
+    SELECT <include refid="baseColumns"><property name="alias" value="o"/></include>
+         , c.NAME AS CUST_NAME
+      FROM TB_ORDER o
+      JOIN TB_CUSTOMER c ON c.CUST_ID = o.CUST_ID
+    <where>
+      <if test="keyword != null and keyword != ''">
+        AND c.NAME LIKE #{kw}
+      </if>
+      <if test="status != null">AND o.STATUS = #{status}</if>
+      <if test="ids != null and ids.size() > 0">
+        AND o.ORDER_ID IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+      <if test="fromDt != null">
+        AND o.ORDER_DT &gt;= #{fromDt, jdbcType=DATE}
+      </if>
+      <if test="toDt != null"><![CDATA[ AND o.ORDER_DT < #{toDt,jdbcType=DATE} ]]></if>
+      <choose>
+        <when test="sort == 'amount'">AND o.AMOUNT > 0</when>
+        <when test="sort == 'date'">AND o.ORDER_DT IS NOT NULL</when>
+        <otherwise>AND 1 = 1</otherwise>
+      </choose>
+      <include refid="authCond"><property name="alias" value="o"/></include>
+      <if test="@org.apache.commons.lang3.StringUtils@isNotBlank(memo)">AND o.MEMO = #{memo}</if>
+      <if test="@com.demo.Code@ACTIVE == useYn">AND o.USE_YN = #{useYn}</if>
+    </where>
+    ORDER BY ${orderBy}
+  </select>
+
+  <select id="selectItems" resultType="ItemVo">
+    SELECT * FROM TB_ORDER_ITEM WHERE ORDER_ID = #{orderId}
+  </select>
+
+  <update id="updateOrder">
+    UPDATE TB_ORDER
+    <set>
+      <if test="status != null">STATUS = #{status},</if>
+      <if test="memo != null">MEMO = #{memo},</if>
+    </set>
+    WHERE ORDER_ID = #{orderId}
+  </update>
+
+  <insert id="insertItems">
+    INSERT ALL
+    <foreach collection="list" item="it" separator=" ">
+      INTO TB_ORDER_ITEM (ORDER_ID, SEQ, NAME) VALUES (#{it.orderId}, #{it.seq}, #{it.name})
+    </foreach>
+    SELECT 1 FROM DUAL
+  </insert>
+
+  <select id="trimCase">
+    SELECT * FROM T
+    <trim prefix="WHERE" prefixOverrides="AND |OR ">
+      <if test="a != null">OR A = #{a}</if>
+      <if test="b == 'Y'">AND B = #{b}</if>
+    </trim>
+  </select>
+
+  <select id="crossInclude">
+    SELECT <include refid="com.demo.common.CommonMapper.audit"/> FROM T
+  </select>
+</mapper>
