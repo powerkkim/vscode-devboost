@@ -1,6 +1,6 @@
 # Changelog
 
-## 다음 버전 (작업 중)
+## 0.9.0 - 2026-10-25
 - **MyBatis SQL 실행**: mapper XML 쿼리 위의 `▶ SQL 실행`(또는 `Ctrl+Alt+Enter`, 우클릭)으로 실행 화면을 열고, 파라미터 값을 넣으면 실행 가능한 SQL 이 바로 만들어짐
   - `<if>`·`<choose>`·`<where>`·`<set>`·`<trim>`·`<foreach>`·`<bind>`·`<include>`(다른 mapper 의 `<sql>` 조각, `<property>` 포함) 처리
   - 조건식은 값으로 자동 판단. 판단할 수 없는 식(정적 상수 등)은 꺼 두고 `?` 로 표시 → 켜기/끄기로 직접 지정. `모두 켜기`로 가장 긴 SQL 확인
@@ -11,6 +11,13 @@
   - 화면이 열려 있는 동안 꺼진 조건을 XML 에서 흐리게 표시
   - `'Y'` 처럼 한 글자 작은따옴표 비교(OGNL char), 빈 목록 foreach, `${}` 빈 값 등 실제 실행에서 문제 되는 부분을 경고
 - `SQL 복사` CodeLens: 화면 없이 마지막 입력값으로 SQL 을 바로 복사
+- **Source Atlas** (Vue 파일에서 우클릭 → `Atlas 화면 열기`): 열린 `.vue` 하나를 기준으로 연결 관계를 한 화면에 그림
+  - 아래: 자식 컴포넌트, props·emits·slots, composable, Pinia store, axios·fetch API 호출
+  - 서버까지: API URL → `@RestController` → Service(구현체) → MyBatis SQL → 읽기·쓰기 테이블 (워크스페이스에 Spring 컨트롤러가 있을 때)
+  - 위: 이 컴포넌트를 쓰는 부모 컴포넌트와 라우트 (기본 3단계, `maxUpDepth`)
+  - 노드를 클릭하면 오른쪽에 상세(사용하는 것·사용되는 곳), 더블클릭하면 해당 파일이 열림
+  - vite.config / tsconfig 의 import alias 자동 인식 (`aliases` 로 직접 지정 가능)
+  - 확실한 연결과 추정 연결(경로 일부 일치, 구현체 여러 개 등)을 구분해 표시
 
 ## 0.8.0 - 2026-10-24
 저장소를 `editor-plugins`(모노레포) → **`vscode-devboost`**(VS Code 플러그인 전용)로 정리. 기능 변화는 없음.
