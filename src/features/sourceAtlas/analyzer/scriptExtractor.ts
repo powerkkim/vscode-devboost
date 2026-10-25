@@ -12,16 +12,6 @@ export interface PropInfo {
   type?: string;
   required?: boolean;
 }
-export interface ApiCallInfo {
-  method: string;
-  url: string;
-  via: 'axios' | 'fetch' | 'custom';
-  certainty: Certainty;
-  line: number;
-  col: number;
-  /** 호출을 감싸고 있는 함수 이름 (addItem 등). 최상위면 undefined */
-  fn?: string;
-}
 export interface UseCall {
   name: string;
   line: number;
@@ -37,7 +27,6 @@ export interface ScriptInfo {
   props: PropInfo[];
   emits: string[];
   uses: UseCall[];
-  apis: ApiCallInfo[];
   refs: string[];
   computed: string[];
   watchers: string[];
@@ -56,7 +45,7 @@ export interface SymLoc {
 
 export function emptyScriptInfo(lang: 'ts' | 'js' = 'js'): ScriptInfo {
   return {
-    style: 'unknown', lang, imports: [], dynamicImports: [], props: [], emits: [], uses: [], apis: [],
+    style: 'unknown', lang, imports: [], dynamicImports: [], props: [], emits: [], uses: [],
     refs: [], computed: [], watchers: [], registered: {}, storeDefs: [], warnings: [], locs: {},
   };
 }
@@ -76,7 +65,6 @@ export function mergeScriptInfo(a: ScriptInfo, b: ScriptInfo): ScriptInfo {
     props: byName([...a.props, ...b.props]),
     emits: uniq([...a.emits, ...b.emits]),
     uses: byName([...a.uses, ...b.uses]),
-    apis: [...a.apis, ...b.apis],
     refs: uniq([...a.refs, ...b.refs]),
     computed: uniq([...a.computed, ...b.computed]),
     watchers: uniq([...a.watchers, ...b.watchers]),
@@ -100,8 +88,6 @@ export interface ExtractOptions {
 
 const REF_FNS = new Set(['ref', 'shallowRef', 'reactive', 'shallowReactive', 'toRef', 'toRefs', 'customRef']);
 const WATCH_FNS = new Set(['watch', 'watchEffect', 'watchPostEffect', 'watchSyncEffect']);
-const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
-const API_RECEIVER = /api|http|request|client|service|axios/i;
 
 export function extractScript(code: string, opts: ExtractOptions): ScriptInfo {
   const info = emptyScriptInfo(opts.lang);
@@ -126,7 +112,6 @@ export function extractScript(code: string, opts: ExtractOptions): ScriptInfo {
     const k = `${section}:${name}`;
     if (n?.loc && !info.locs[k]) info.locs[k] = { line: lineOf(n), col: colOf(n) };
   };
-  let currentFn: string | undefined; // 지금 순회 중인 함수 이름 (API 호출 위치 표시용)
   const text = (n: any): string => (n && n.start != null ? code.slice(n.start, n.end) : '');
 
   // ── 1차: 최상위 import 와 같은 파일 안의 타입 선언을 모은다
@@ -278,15 +263,6 @@ export function extractScript(code: string, opts: ExtractOptions): ScriptInfo {
     }
   };
 
-  const urlOf = (n: any): string => {
-    if (n?.type === 'StringLiteral') {
-      return n.value;
-    }
-    if (n?.type === 'TemplateLiteral') {
-      return n.quasis.map((q: any, i: number) => q.value.cooked + (i < n.expressions.length ? '{}' : '')).join('');
-    }
-    return '?';
-  };
 
   // ── 2차: 전체 순회
   const visit = (node: any, parent: any) => {
@@ -349,52 +325,17 @@ export function extractScript(code: string, opts: ExtractOptions): ScriptInfo {
             const w = fn === 'watch' && a?.type === 'Identifier' ? a.name : fn === 'watch' ? text(a).slice(0, 40) || 'watch' : fn;
             info.watchers.push(w);
             mark('watchers', w, node);
-          } else if (fn === 'fetch') {
-            const opt = node.arguments[1];
-            const m = opt?.type === 'ObjectExpression' ? opt.properties.find((q: any) => keyName(q.key) === 'method') : null;
-            info.apis.push({
-              method: (m?.value?.type === 'StringLiteral' ? m.value.value : 'GET').toUpperCase(),
-              url: urlOf(node.arguments[0]), via: 'fetch', certainty: 'sure', line: lineOf(node), col: colOf(node), fn: currentFn,
-            });
           } else if (/^use[A-Z]\w*$/.test(fn) && importedLocals.has(fn)) {
             if (!info.uses.some((u) => u.name === fn)) {
               info.uses.push({ name: fn, line: lineOf(node) });
             }
             mark('uses', fn, node);
           }
-        } else if (c?.type === 'MemberExpression' && !c.computed && c.property?.type === 'Identifier') {
-          const method = c.property.name;
-          const recv = c.object?.type === 'Identifier' ? c.object.name : null;
-          if (recv && HTTP_METHODS.has(method) && (recv === 'axios' || API_RECEIVER.test(recv))) {
-            const first = node.arguments[0];
-            // api.get(변수) 처럼 URL 을 모르는 경우, 커스텀 래퍼는 노이즈가 커서 문자열일 때만 기록
-            if (recv === 'axios' || first?.type === 'StringLiteral' || first?.type === 'TemplateLiteral') {
-              info.apis.push({
-                method: method.toUpperCase(), url: urlOf(first),
-                via: recv === 'axios' ? 'axios' : 'custom',
-                certainty: recv === 'axios' ? 'sure' : 'guess', line: lineOf(node), col: colOf(node), fn: currentFn,
-              });
-            }
-          }
         }
         break;
       }
       default:
         break;
-    }
-    // 함수에 들어갈 때 이름을 기억: function f(){} / const f = () => {} / { f() {} } / f: function(){}
-    const prevFn = currentFn;
-    if (node.type === 'FunctionDeclaration' && node.id?.name) {
-      currentFn = node.id.name;
-    } else if ((node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression') && parent) {
-      const n =
-        parent.type === 'VariableDeclarator' && parent.id?.type === 'Identifier' ? parent.id.name
-        : (parent.type === 'ObjectProperty' || parent.type === 'ClassProperty') ? keyName(parent.key)
-        : parent.type === 'AssignmentExpression' && parent.left?.type === 'MemberExpression' ? keyName(parent.left.property)
-        : null;
-      if (n) currentFn = n;
-    } else if ((node.type === 'ObjectMethod' || node.type === 'ClassMethod') && keyName(node.key)) {
-      currentFn = keyName(node.key)!;
     }
     for (const key of Object.keys(node)) {
       if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') {
@@ -407,7 +348,6 @@ export function extractScript(code: string, opts: ExtractOptions): ScriptInfo {
         visit(v, node);
       }
     }
-    currentFn = prevFn;
   };
   visit(ast.program, null);
 

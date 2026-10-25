@@ -374,6 +374,16 @@
             "minimum": 1,
             "maximum": 12,
             "markdownDescription": "컨트롤러에서 Service/Mapper 를 몇 단계까지 따라갈지"
+          },
+          "devBoost.sourceAtlas.vite.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "프로젝트의 Vite 로 `vite.config` 를 실제로 읽어 alias·`server.proxy` 를 반영 (별도 node 프로세스에서 설정 파일을 실행). 끄면 설정 파일을 텍스트로만 해석"
+          },
+          "devBoost.sourceAtlas.backend.contextPath": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "백엔드 context-path (예: `/plm`). 비워 두면 `application.yml/properties` 의 `server.servlet.context-path` 를 찾아 씀"
           }
         }
       },
@@ -418,7 +428,9 @@
   },
   "devDependencies": {
     "@babel/parser": "^7.29.11",
+    "@babel/traverse": "^7.29.10",
     "@dagrejs/dagre": "^3.1.2",
+    "@types/babel__traverse": "^7.28.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",

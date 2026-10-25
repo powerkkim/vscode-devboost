@@ -16,6 +16,7 @@ export function cardRows(n: AtlasNode): string[] {
       .filter(Boolean);
     if (state.length) rows.push(`state  ${state.join(' · ')}`);
     if (m.unresolvedTags?.length) rows.push(`전역 추정  ${m.unresolvedTags.join(', ')}`);
+    if (m.apiCalls?.length) rows.push(`api  ${new Set(m.apiCalls.map((r: any) => `${r.method} ${r.url}`)).size}개 (간접 포함)`);
   } else if (n.kind === 'controller') {
     if (m.httpMethod) rows.push(`${m.httpMethod} ${m.path}`);
   } else if (n.kind === 'service') {
@@ -26,9 +27,11 @@ export function cardRows(n: AtlasNode): string[] {
   } else if (n.kind === 'route') {
     rows.push('화면 진입 경로');
   } else if (n.kind === 'api-call') {
-    const c = (m.callers ?? []) as { file: string; line: number; fn?: string; from: string }[];
-    if (c.length === 1) rows.push(`← ${c[0].fn ? `${c[0].fn}() · ` : ''}${c[0].from}:${c[0].line}`);
+    const c = (m.callers ?? []) as { file: string; line: number; fn?: string; from: string; via?: { fn: string }[] }[];
+    const fnLabel = (f?: string) => (!f || f === '<setup>' ? '' : f === '<module>' ? '' : `${f}() · `);
+    if (c.length === 1) rows.push(`← ${fnLabel(c[0].fn)}${c[0].from}:${c[0].line}${c[0].via?.length ? ` (경유 ${c[0].via.length})` : ''}`);
     else if (c.length > 1) rows.push(`← 호출 ${c.length}곳`);
+    if (m.proxied) rows.push(`→ ${String(m.proxied).replace(/^https?:\/\//, '')}`);
     if (m.backend === 'unmatched') rows.push('백엔드 매칭 없음');
   } else if (n.kind === 'store') {
     rows.push(`store  ${m.storeId ?? '?'}`);

@@ -95,7 +95,7 @@ test('7. Pinia store 노드', () => {
   assert.strictEqual(n.label, 'useCartStore');
 });
 
-test('8. API 호출: axios/fetch 는 sure, 커스텀 래퍼는 guess (composable 안쪽 포함)', () => {
+test('8. API 호출: axios/fetch 는 sure, 끝점에 닿지 않는 이름뿐인 래퍼(stub)는 guess (composable 안쪽 포함)', () => {
   const g = at('src/views/Basic.vue');
   const api = (label) => g.nodes.find((n) => n.kind === 'api-call' && n.label === label);
   assert.ok(api('GET /api/orders'));
@@ -103,6 +103,7 @@ test('8. API 호출: axios/fetch 는 sure, 커스텀 래퍼는 guess (composable
   assert.ok(api('POST /orders'));
   assert.strictEqual(edge(g, 'Basic.vue', 'GET /api/orders', 'calls').certainty, 'sure');
   assert.strictEqual(edge(g, 'useOrder.ts', 'POST /orders', 'calls').certainty, 'guess');
+  assert.ok(api('POST /orders').warnings[0].includes('본문에서 끝점을 찾지 못함'));
 });
 
 test('9. 동적 컴포넌트: 경고, 변수 import 경고, 리터럴 import 는 추적', () => {
@@ -347,14 +348,15 @@ test('C1. API 노드에 호출 위치(파일·줄·함수)가 기록된다 — �
   assert.strictEqual(post.meta.callers[0].fn, 'create');
 });
 
-test('C2. 화살표 함수 / Options API 메서드 이름도 잡는다', () => {
-  const { extractScript } = require('../../out/features/sourceAtlas/analyzer/scriptExtractor.js');
-  const a = extractScript("const addItem = async () => { await api.post('/x', {}); };", { lang: 'ts' });
-  assert.strictEqual(a.apis[0].fn, 'addItem');
-  const b = extractScript("export default { methods: { save() { axios.put('/y'); }, del: function () { axios.delete('/z'); } } }", { lang: 'js' });
-  assert.deepStrictEqual(b.apis.map((x) => x.fn), ['save', 'del']);
-  const c = extractScript("axios.get('/top');", { lang: 'js' });
-  assert.strictEqual(c.apis[0].fn, undefined);
+test('C2. 화살표 함수 / Options API 메서드 이름도 잡는다 (요약 단계)', () => {
+  const { summarizeModule } = require('../../out/features/sourceAtlas/analyzer/flow/summary.js');
+  const names = (code, lang = 'ts') => [...summarizeModule(code, { file: 'x.' + lang, lang, isComponent: true, isSetup: true }).fns.values()].map((f) => f.name);
+  assert.ok(names("const addItem = async () => { await api.post('/x', {}); };").includes('addItem'));
+  const b = summarizeModule("export default { methods: { save() { axios.put('/y'); }, del: function () { axios.delete('/z'); } } }", { file: 'x.js', lang: 'js', isComponent: true });
+  assert.deepStrictEqual([...b.fns.values()].filter((f) => f.name !== '<module>').map((f) => f.name), ['save', 'del']);
+  assert.deepStrictEqual(Object.keys(b.thisMembers), ['save', 'del']);
+  const c = summarizeModule("axios.get('/top');", { file: 'x.js', lang: 'js', isComponent: true, isSetup: true });
+  assert.strictEqual(c.fns.get('<setup>').calls.length, 1);
 });
 
 test('D1. 심볼 위치(locs): props/emits/ref/computed/watch/slot/전역 태그 — .vue 파일 기준 줄', () => {
@@ -387,4 +389,129 @@ test('D2. 래퍼(api.post) 호출도 백엔드와 정확히 매칭되면 확실�
   } finally {
     fs.unlinkSync(tmpVue);
   }
+});
+
+// ───────────── 호출 전파 (flow fixture: 래퍼 2겹 · composable · Pinia · 상수 URL · Options API) ─────────────
+const FLOW = path.join(FIX, 'flow');
+const flowGraph = (rel) => analyzeSource(path.join(FLOW, rel), { workspaceRoot: FLOW, backend: false, maxUp: 0 }).graph;
+const apiNode = (g, label) => g.nodes.find((n) => n.kind === 'api-call' && n.label === label);
+const callsOf = (g, nodeSuffix) => g.edges.filter((e) => e.type === 'calls' && e.from.endsWith(nodeSuffix)).map((e) => `${e.to.slice(4)}${e.certainty === 'guess' ? '?' : ''}${e.indirect ? '~' : ''}`).sort();
+
+test('F1. composable 반환 함수의 구조 분해 호출 → 래퍼 2겹(request → axios 인스턴스 baseURL) 끝까지 추적', () => {
+  const g = flowGraph('src/views/OrderPage.vue');
+  const page = g.nodes.find((n) => n.id.endsWith('OrderPage.vue'));
+  const rows = page.meta.apiCalls;
+  const byFn = (fn) => rows.filter((r) => r.fn === fn).map((r) => `${r.method} ${r.url}`).sort();
+  assert.deepStrictEqual(byFn('<setup>'), ['GET /api/orders'], 'onMounted(() => load()) 콜백은 setup 효과');
+  assert.deepStrictEqual(byFn('open'), ['DELETE /api/orders/{}', 'GET /api/orders/{}'], 'detail(id) 는 상수 함수 URL, order.remove 는 객체 호출');
+  const load = rows.find((r) => r.fn === '<setup>');
+  assert.deepStrictEqual(load.via.map((v) => v.fn), ['load', 'get', 'request'], '경유 체인: useOrder.load → request.get → request.request');
+  assert.ok(load.via.every((v) => v.file && v.line > 0));
+  assert.strictEqual(load.certainty, 'sure', '이름이 아니라 코드로 끝점을 확인했으므로 확실');
+});
+
+test('F2. 래퍼 객체(useApi().post) + 삼항 URL + baseURL 환경변수 → 경로는 확정, baseURL 만 미확정 표시', () => {
+  const g = flowGraph('src/views/OrderPage.vue');
+  const page = g.nodes.find((n) => n.id.endsWith('OrderPage.vue'));
+  const save = page.meta.apiCalls.filter((r) => r.fn === 'save').map((r) => `${r.method} ${r.url}`).sort();
+  assert.deepStrictEqual(save, ['POST /api/admin/addGroupCode', 'POST /api/admin/modifyGroupCode', 'POST /api/auth/logout', 'POST /api/cart/items']);
+  const add = apiNode(g, 'POST /api/admin/addGroupCode');
+  assert.ok(add.meta.unknowns.some((u) => u.includes('baseURL 미확정') && u.includes('VITE_API_BASE')));
+  assert.ok(!add.warnings, '추정이 아니라 확실 (경고 없음)');
+});
+
+test('F3. Pinia setup 스토어 액션 / options 스토어 액션 / 인라인 useUserStore().logout()', () => {
+  const g = flowGraph('src/views/OrderPage.vue');
+  assert.ok(apiNode(g, 'POST /api/cart/items'), 'setup 스토어 add()');
+  assert.ok(apiNode(g, 'POST /api/auth/logout'), 'options 스토어 actions.logout()');
+  // 스토어 노드 자체도 함수별 효과를 가진다
+  const cart = g.nodes.find((n) => n.id.endsWith('stores/cart.ts'));
+  assert.deepStrictEqual(cart.meta.apiCalls.map((r) => [r.fn, r.url]), [['add', '/api/cart/items']]);
+  const user = g.nodes.find((n) => n.id.endsWith('stores/user.ts'));
+  assert.deepStrictEqual(user.meta.apiCalls.map((r) => r.fn).sort(), ['login', 'logout']);
+});
+
+test('F4. 간접 호출 표시: composable/store 노드를 거치면 indirect, 래퍼(비노드)만 거치면 직접', () => {
+  const g = flowGraph('src/views/OrderPage.vue');
+  const calls = callsOf(g, 'OrderPage.vue');
+  assert.ok(calls.includes('POST /api/cart/items~'), '스토어 노드 경유 → indirect');
+  assert.ok(calls.includes('GET /api/orders~'), 'useOrder 노드 경유 → indirect');
+  assert.ok(calls.includes('POST /api/admin/addGroupCode'), 'useApi 는 노드지만 URL 이 인자뿐인 래퍼라 자기 API 선이 없음 → 직접');
+  const useApi = g.nodes.find((n) => n.id.endsWith('useApi.ts'));
+  assert.ok(!useApi.meta.apiCalls, '래퍼 composable 은 API 노드를 만들지 않음');
+  assert.ok(!g.nodes.some((n) => n.kind === 'api-call' && /^(GET|POST) \{\}$/.test(n.label)));
+  const e = g.edges.find((x) => x.type === 'calls' && x.from.endsWith('OrderPage.vue') && x.to === 'api:GET /api/orders');
+  assert.strictEqual(e.label, 'setup()', '<setup> 은 setup() 으로 표시');
+  const lg = flowGraph('src/views/Legacy.vue');
+  const rows = lg.edges.find((x) => x.type === 'calls' && x.from.endsWith('Legacy.vue') && x.to === 'api:GET /api/legacy/rows');
+  assert.strictEqual(rows.label, 'created(), fetchRows()', '같은 API 로 가는 진입 함수들은 한 선에 모임');
+});
+
+test('F5. 돌려주지 않는 안쪽 헬퍼는 효과 아님 / 콜백 인자 호출은 효과 없음 / 순환 호출 종료', () => {
+  const g = flowGraph('src/views/OrderPage.vue');
+  assert.ok(!apiNode(g, 'GET /api/never'), 'useOrder 안의 neverCalled 는 반환되지 않음');
+  const page = g.nodes.find((n) => n.id.endsWith('OrderPage.vue'));
+  assert.ok(!page.meta.apiCalls.some((r) => r.fn === 'runCallback'));
+  assert.ok(page.meta.unresolvedCalls.some((u) => u.startsWith('dynamicUrl:') && u.includes('$legacyApi.get') && u.includes('URL 을 알 수 없음')), '전역 래퍼 + URL 변수는 미해석 목록');
+  assert.ok(!page.meta.apiCalls.some((r) => r.fn === 'dynamicUrl'));
+  const legacy = flowGraph('src/views/Legacy.vue');
+  const l = legacy.nodes.find((n) => n.id.endsWith('Legacy.vue'));
+  assert.ok(l.meta.apiCalls.some((r) => r.fn === 'loop' && r.url === '/api/legacy/loop'), 'loop ↔ loop2 순환에서도 끝남');
+});
+
+test('F6. Options API: created → this.fetchRows → http, this.$http 는 추정', () => {
+  const g = flowGraph('src/views/Legacy.vue');
+  const l = g.nodes.find((n) => n.id.endsWith('Legacy.vue'));
+  const created = l.meta.apiCalls.filter((r) => r.fn === 'created');
+  assert.deepStrictEqual(created.map((r) => [r.method, r.url, r.certainty]).sort(), [['GET', '/api/legacy/rows', 'sure'], ['POST', '/legacy/log', 'guess']]);
+  assert.deepStrictEqual(created[0].via.map((v) => v.fn), ['fetchRows']);
+  const log = apiNode(g, 'POST /legacy/log');
+  assert.ok(log.warnings[0].includes('this.$http'));
+});
+
+test('F7. 값 체계 단위: concat/alt/subst/render', () => {
+  const V = require('../../out/features/sourceAtlas/analyzer/flow/values.js');
+  const u = V.concat([V.lit('/a/'), { k: 'param', i: 0, name: 'id' }, V.lit('/x')]);
+  assert.deepStrictEqual(V.render(V.subst(u, [V.lit('7')]))[0], { text: '/a/7/x', unknowns: [] });
+  assert.deepStrictEqual(V.render(u)[0], { text: '/a/{}/x', unknowns: ["인자 'id'"] });
+  const a = V.alt([V.lit('/p'), V.lit('/q'), V.lit('/p')]);
+  assert.deepStrictEqual(V.render(V.concat([V.lit('/api'), a])).map((r) => r.text), ['/api/p', '/api/q']);
+  assert.strictEqual(V.concat([V.lit(''), V.lit('x')]).k, 'lit');
+});
+
+// ───────────── Vite 프로브 (자식 프로세스로 설정 실행) ─────────────
+test('V1. Vite 설정 프로브: alias·proxy(rewrite 포함)·base 를 받아 온다 / 없으면 null', () => {
+  const { probeVite, applyProxy, clearViteProbeCache } = require('../../out/features/sourceAtlas/analyzer/viteProbe.js');
+  clearViteProbeCache();
+  const info = probeVite(FLOW, { viteEntry: path.join(FLOW, '.vite-shim/index.mjs') });
+  assert.ok(info, '프로브 결과');
+  assert.deepStrictEqual(info.aliases, [{ find: '@', replacement: '/src' }]);
+  assert.deepStrictEqual(info.proxies, [{ prefix: '/api', target: 'http://localhost:8080', rewritten: '' }], 'rewrite 함수는 표본 경로로 접두어 변화를 알아낸다');
+  assert.deepStrictEqual(applyProxy('/api/orders/3?x=1', info.proxies), { path: '/orders/3', target: 'http://localhost:8080' });
+  assert.strictEqual(applyProxy('/other', info.proxies), null);
+  assert.strictEqual(probeVite(APP, {}), null, 'vite.config 없음');
+  clearViteProbeCache();
+  assert.strictEqual(probeVite(FLOW, { viteEntry: path.join(FLOW, 'no-such-vite.mjs') }), null, 'vite 실행 실패 → null (정적 해석 폴백)');
+});
+
+test('V2. 파이프라인: 프로브 alias 가 import 해석에 쓰이고, 프록시 경로가 백엔드 매칭·표시에 반영된다', () => {
+  const fs = require('fs');
+  const F = path.join(FIX, 'fullstack');
+  const cfg = path.join(F, 'frontend/vite.config.ts');
+  // fullstack 프론트에 임시로 "'/api' → 제거" 프록시를 두면, 컨트롤러 매핑이 '/api/orders' 라 프록시 경로('/orders')로는 안 맞고 원래 경로로 맞아야 한다
+  fs.writeFileSync(cfg, "import { defineConfig } from 'vite';\nexport default defineConfig({ server: { proxy: { '/api': { target: 'http://localhost:9090', rewrite: (p) => p.replace(/^\\/api/, '') } } } });\n");
+  try {
+    const r = analyzeSource(path.join(F, 'frontend/src/views/OrderPage.vue'), { workspaceRoot: F, fresh: true, vite: { viteEntry: path.join(FLOW, '.vite-shim/index.mjs') } });
+    assert.ok(r.notes.some((n) => n.includes('Vite 설정 읽음') && n.includes('proxy 1')));
+    const api = r.graph.nodes.find((n) => n.label === 'GET /api/orders');
+    assert.strictEqual(api.meta.proxied, 'http://localhost:9090/orders');
+    assert.strictEqual(api.meta.backend, 'matched', '프록시 경로로 안 맞으면 원래 경로로 매칭');
+    assert.deepStrictEqual(r.graph.meta.vite.proxies[0].prefix, '/api');
+  } finally {
+    fs.unlinkSync(cfg);
+  }
+  // 프로브 끄면 정적 해석만
+  const off = analyzeSource(path.join(FLOW, 'src/views/OrderPage.vue'), { workspaceRoot: FLOW, backend: false, maxUp: 0, vite: false });
+  assert.ok(!off.notes.some((n) => n.includes('Vite 설정 읽음')));
+  assert.ok(off.graph.nodes.some((n) => n.label === 'GET /api/orders'), '정적 alias 해석으로도 동작');
 });

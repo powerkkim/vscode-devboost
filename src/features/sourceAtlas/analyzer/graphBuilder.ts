@@ -6,6 +6,7 @@ import {
   extractScript, mergeScriptInfo, emptyScriptInfo, ScriptInfo,
 } from './scriptExtractor';
 import { Resolver } from './resolver';
+import { FlowEngine, Effect } from './flow/engine';
 import type { AtlasEdge, AtlasGraph, AtlasNode } from './types';
 
 export interface BuildOptions {
@@ -13,6 +14,21 @@ export interface BuildOptions {
   /** 루트 파일에서 몇 단계 아래까지 따라갈지 (기본 3) */
   maxDepth?: number;
   aliases?: Record<string, string>;
+  /** 호출 전파 엔진 (여러 번 분석할 때 모듈 요약 캐시를 공유) */
+  engine?: FlowEngine;
+}
+
+/** 노드 상세에 보이는 "이 노드가 부르는 API" 한 줄 */
+export interface ApiCallRow {
+  fn: string;
+  method: string;
+  url: string;
+  certainty: 'sure' | 'guess';
+  unknowns: string[];
+  /** 경유 함수들 (진입 함수 제외): "useOrder.load → request.get" */
+  via: { file: string; fn: string; line: number; col: number }[];
+  line: number;
+  col: number;
 }
 
 const posix = (p: string) => p.split(path.sep).join('/');
@@ -22,6 +38,7 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
   const root = path.resolve(opts.workspaceRoot);
   const maxDepth = opts.maxDepth ?? 3;
   const resolver = new Resolver({ workspaceRoot: root, aliases: opts.aliases });
+  const engine = opts.engine ?? new FlowEngine({ resolver });
 
   const nodes = new Map<string, AtlasNode>();
   const edges = new Map<string, AtlasEdge>();
@@ -33,6 +50,23 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
     if (!prev || (prev.certainty === 'guess' && e.certainty === 'sure')) {
       edges.set(key, e);
     }
+  };
+  /** 호출 엣지는 (from, to) 당 하나로 합치고, 진입 함수 이름을 라벨에 모은다 */
+  const addCallEdge = (from: string, to: string, fnName: string, certainty: 'sure' | 'guess', indirect: boolean) => {
+    const fn = fnName === '<setup>' ? 'setup' : fnName === '<module>' ? 'module' : fnName;
+    const key = `${from}|${to}|calls`;
+    const prev = edges.get(key);
+    if (!prev) {
+      edges.set(key, { from, to, type: 'calls', certainty, label: `${fn}()`, via: indirect ? [fn] : undefined, indirect: indirect || undefined });
+      return;
+    }
+    if (prev.certainty === 'guess' && certainty === 'sure') prev.certainty = 'sure';
+    const fns = (prev.label ?? '').split(', ').filter(Boolean);
+    if (!fns.includes(`${fn}()`)) {
+      fns.push(`${fn}()`);
+      prev.label = fns.length > 3 ? `${fns.slice(0, 3).join(', ')} 외 ${fns.length - 3}` : fns.join(', ');
+    }
+    if (!indirect) prev.indirect = undefined;
   };
   const warn = (n: AtlasNode, msg: string) => {
     (n.warnings ??= []);
@@ -188,25 +222,47 @@ export function buildAtlasGraph(rootFile: string, opts: BuildOptions): AtlasGrap
       }
     }
 
-    // ── API 호출: 같은 URL 은 노드 하나, 호출한 위치(파일·줄·함수)는 callers 에 모두 기록
-    for (const a of script.apis) {
-      const apiId = `api:${a.method} ${a.url}`;
-      if (!nodes.has(apiId)) {
-        nodes.set(apiId, {
-          id: apiId, kind: 'api-call', label: `${a.method} ${a.url}`, file: id, line: a.line,
-          meta: { method: a.method, url: a.url, via: a.via, callers: [] },
+    // ── API 호출 (호출 전파): 컴포넌트는 진입 함수(setup·최상위 함수·methods)별, composable/store 는 함수별로
+    //    래퍼·composable·store 를 거쳐 끝점(axios/fetch)에 닿는 호출을 모두 찾는다. 같은 URL 은 노드 하나.
+    const entries = node.kind === 'component' ? engine.componentEffects(abs) : engine.moduleFnEffects(abs);
+    const rows: ApiCallRow[] = [];
+    for (const en of entries) {
+      for (const ef of en.effects) {
+        // URL 이 전부 인자(`{}`)뿐인 것은 래퍼 함수 자체의 효과 → 노드로 만들지 않는다 (호출자 쪽에서 실제 URL 로 잡힌다)
+        if (ef.url.replace(/\{\}/g, '').replace(/[\/]/g, '') === '') continue;
+        const apiId = `api:${ef.method} ${ef.url}`;
+        const site = ef.chain[0];
+        const via = ef.chain.slice(1).map((st) => ({ file: idOf(st.file), fn: st.fn, line: st.line, col: st.col }));
+        if (!nodes.has(apiId)) {
+          nodes.set(apiId, {
+            id: apiId, kind: 'api-call', label: `${ef.method} ${ef.url}`, file: idOf(site.file), line: site.line,
+            meta: { method: ef.method, url: ef.url, via: ef.sink, callers: [], unknowns: [] },
+          });
+        }
+        const an = nodes.get(apiId)!;
+        const callers = an.meta.callers as { file: string; line: number; col: number; fn?: string; from: string; via: ApiCallRow['via'] }[];
+        if (!callers.some((c) => c.file === idOf(site.file) && c.line === site.line && c.fn === en.fn)) {
+          callers.push({ file: idOf(site.file), line: site.line, col: site.col, fn: en.fn, from: node.label, via });
+        }
+        for (const u of ef.unknowns) {
+          if (!(an.meta.unknowns as string[]).includes(u)) (an.meta.unknowns as string[]).push(u);
+        }
+        if (ef.certainty === 'guess') {
+          warn(an, `끝점을 코드로 확인하지 못해 이름으로 추정한 호출 (${ef.sink})`);
+        }
+        rows.push({ fn: en.fn, method: ef.method, url: ef.url, certainty: ef.certainty, unknowns: ef.unknowns, via, line: site.line, col: site.col });
+        // 경유지의 composable/store 노드가 같은 API 로 가는 선을 이미 갖고 있으면 간접 호출로 표시 (선이 두 번 보이는 이유를 알 수 있게)
+        const indirect = via.some((v) => {
+          const mid = v.file !== id ? nodes.get(v.file) : undefined;
+          const midRows = mid?.meta.apiCalls as ApiCallRow[] | undefined;
+          return !!midRows?.some((r) => r.method === ef.method && r.url === ef.url);
         });
-      }
-      const an = nodes.get(apiId)!;
-      const callers = an.meta.callers as { file: string; line: number; col: number; fn?: string; from: string }[];
-      if (!callers.some((c) => c.file === id && c.line === a.line)) {
-        callers.push({ file: id, line: a.line, col: a.col, fn: a.fn, from: node.label });
-      }
-      addEdge({ from: id, to: apiId, type: 'calls', certainty: a.certainty, label: a.fn ? `${a.fn}()` : undefined });
-      if (a.certainty === 'guess' && !an.warnings) {
-        an.warnings = ['커스텀 래퍼 호출로 추정 (이름이 api/http 등으로 보임)'];
+        addCallEdge(id, apiId, en.fn, ef.certainty, indirect);
       }
     }
+    if (rows.length) node.meta.apiCalls = rows;
+    const unresolvedCalls = [...new Set(entries.flatMap((en) => en.unresolved.map((u) => `${en.fn === '<setup>' ? 'setup' : en.fn}: ${u}`)))];
+    if (unresolvedCalls.length) node.meta.unresolvedCalls = unresolvedCalls;
     return id;
   }
 
