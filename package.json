@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
