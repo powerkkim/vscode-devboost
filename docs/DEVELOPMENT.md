@@ -10,7 +10,8 @@ vscode-devboost/
 ├─ src/
 │  ├─ extension.ts          진입점. 기능 목록(FEATURES)만 관리
 │  ├─ core/
-│  │  └─ feature.ts         기능 하나의 형태(Feature). 설정 devBoost.<id>.enabled 로 켜고 끔
+│  │  ├─ feature.ts         기능 하나의 형태(Feature). 설정 devBoost.<id>.enabled 로 켜고 끔
+│  │  └─ oracleBridge.ts    Oracle SQL Developer 워크시트로 SQL 보내기·실행 (MyBatis SQL 실행, DB 스키마가 같이 씀)
 │  └─ features/
 │     └─ searchEverywhere/
 │        ├─ index.ts        명령·단축키 등록, 화면 방식(ui 설정)에 따라 열기
@@ -25,7 +26,18 @@ vscode-devboost/
 │     │     ├─ webviewPanel.ts    에디터 탭 / 별도 창으로 열기 (ui = popup, window)
 │     │     ├─ panelView.ts       Activity Bar 사이드바 (ui = panel)
 │     │     └─ quickPick.ts       VS Code 기본 목록 (ui = quickPick)
-│     └─ mybatisRunner/     MyBatis SQL 실행
+│     ├─ mybatisRunner/     MyBatis SQL 실행
+│     └─ dbSchema/          DB 스키마 가져오기 · 테이블 정의서
+│        ├─ index.ts        명령 등록
+│        ├─ schema/         vscode 의존 없음
+│        │  ├─ collectSql.ts      수집 SQL (본 쿼리·기본값 쿼리, 접두어)
+│        │  ├─ csv.ts             탭/CSV 읽기, Excel 용 CSV 쓰기
+│        │  ├─ importer.ts        수집 결과 → 스키마 조각 (헤더·행 수 검증·타입 정리)
+│        │  ├─ merge.ts           저장 파일로 합치기 (접두어 테이블만 교체)
+│        │  ├─ tableDoc.ts        테이블 정의서 CSV (목차 + 정의서)
+│        │  └─ types.ts           저장 규격 (devboost-schema)
+│        ├─ schemaStore.ts  .devboost/schema/*.json 읽기·쓰기
+│        └─ ui/schemaPanel.ts   화면 (Webview)
 │        ├─ index.ts        명령·CodeLens 등록
 │        ├─ mapper/         mapper 해석·SQL 생성 — vscode 의존 없음
 │        │  ├─ xml.ts             위치를 보존하는 작은 XML 파서
@@ -39,11 +51,13 @@ vscode-devboost/
 │        └─ ui/runnerPanel.ts   실행 화면 (Webview)
 ├─ media/
 │  ├─ searchEverywhere/     Webview 안에서 도는 화면 JS·CSS
-│  └─ mybatisRunner/        SQL 실행 화면 JS·CSS
+│  ├─ mybatisRunner/        SQL 실행 화면 JS·CSS
+│  └─ dbSchema/             DB 스키마 화면 JS·CSS
 ├─ test/                    단위 테스트 (node --test). out/ 의 컴파일 결과를 불러 검사
 │  ├─ helpers.js            임시 샘플 프로젝트 생성, rg 찾기
 │  ├─ searchEverywhere/
-│  └─ mybatisRunner/        mapper.test.js + fixtures/ (mapper XML 샘플)
+│  ├─ mybatisRunner/        mapper.test.js + fixtures/ (mapper XML 샘플)
+│  └─ dbSchema/             schema.test.js (그리드 복사 텍스트 → 스키마 → 정의서)
 └─ docs/
 ```
 

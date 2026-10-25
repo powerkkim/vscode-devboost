@@ -7,6 +7,9 @@
 | 기능 | 단축키 | 켜기/끄기 설정 |
 |---|---|---|
 | **Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
+| **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
+| **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
+| **DB 스키마** — 스키마 가져오기, 테이블 정의서(CSV) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -41,6 +44,20 @@
 | `devBoost.searchEverywhere.fileMasks` | 파일 타입 드롭다운 목록 |
 | `devBoost.searchEverywhere.doubleShift` | `Shift` 두 번으로 열기 |
 | `devBoost.searchEverywhere.showTiming` | 검색 창 하단에 단계별 소요 시간 표시 (출력 패널 "DevBoost"에도 기록) |
+
+### DB 스키마 · 테이블 정의서
+
+DB 에 직접 접속하지 않습니다. 화면이 알려 주는 쿼리를 실행하고 결과를 복사해 오면 됩니다.
+
+1. 명령 팔레트(`Ctrl+Shift+P`) → `DB 스키마: 스키마 가져오기 · 테이블 정의서`
+2. **범위**: 테이블 접두어 (`TB_`, 여러 개는 쉼표, 비우면 전체)와 환경(개발/운영 …)
+3. **본 쿼리** `▶ 워크시트에서 실행` → 결과 그리드 전체를 헤더와 함께 복사 → `클립보드에서 가져오기`
+4. **기본값 쿼리**도 같은 방법 (Oracle 이 기본값을 LONG 으로 저장해 따로 받음. 나중에 해도 됨)
+5. **저장** → `.devboost/schema/<스키마>@<환경>.json`
+6. **가져온 데이터**에서 테이블을 고르고 `테이블 정의서로 추출 (CSV)` → 목차 CSV + 정의서 CSV
+
+- 결과가 많아 그리드가 일부 행만 복사하면 저장하지 않고 알려 줍니다 (끝까지 내려 다시 복사하거나 CSV 로 내보내 `파일에서 가져오기`)
+- 규격과 수집 쿼리: [docs/SPEC-db-schema-v6-2026-10-26.md](docs/SPEC-db-schema-v6-2026-10-26.md)
 
 ## 설치
 

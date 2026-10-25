@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Feature } from '../../core/feature';
 import { looksLikeMapper, parseMapper, statementAt } from './mapper/mapperDoc';
 import { MapperIndex } from './mapperIndex';
-import { OracleBridge } from './oracleBridge';
+import { OracleBridge } from '../../core/oracleBridge';
 import { RunnerStore } from './store';
 import { RunnerPanel, Deps } from './ui/runnerPanel';
 

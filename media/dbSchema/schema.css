@@ -1,0 +1,326 @@
+/* DB 스키마 화면. VS Code 테마 변수를 써서 밝은/어두운 테마 모두 맞춘다 */
+:root {
+  --ok: var(--vscode-testing-iconPassed, #3fb950);
+  --warn: var(--vscode-editorWarning-foreground, #d29922);
+  --err: var(--vscode-errorForeground, #f85149);
+  --muted: var(--vscode-descriptionForeground);
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  padding: 0 0 40px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+  cursor: pointer;
+}
+a:hover {
+  text-decoration: underline;
+}
+button {
+  font: inherit;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+button.primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+button.accent {
+  border-color: var(--vscode-button-background);
+}
+button.link {
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  padding: 0 0 0 10px;
+}
+input[type='text'],
+select {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 2px;
+  padding: 3px 6px;
+}
+input:focus,
+select:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.9em;
+}
+.pad {
+  padding: 8px 2px;
+}
+.mono {
+  font-family: var(--vscode-editor-font-family);
+}
+.empty {
+  padding: 24px;
+  color: var(--muted);
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.1em;
+}
+.warn-box {
+  margin: 10px 16px 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--vscode-inputValidation-warningBackground, rgba(210, 153, 34, 0.12));
+}
+section {
+  padding: 10px 16px 6px;
+}
+section + section {
+  border-top: 1px solid var(--border);
+}
+.sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+  margin: 2px 0 8px;
+}
+.sec-h .muted {
+  font-weight: normal;
+}
+
+/* 수집 단계 */
+.step {
+  padding: 8px 0 10px 30px;
+  position: relative;
+}
+.step + .step {
+  border-top: 1px dashed var(--border);
+}
+.step-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.step-h .no {
+  position: absolute;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.step-h .no.done {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.step-h .muted {
+  font-size: 0.9em;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.row label {
+  color: var(--muted);
+}
+.row .prefix {
+  width: 260px;
+  font-family: var(--vscode-editor-font-family);
+}
+.row .label {
+  width: 110px;
+}
+.btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.sep {
+  flex: 1;
+}
+.ok {
+  color: var(--ok);
+}
+.bad-line {
+  color: var(--warn);
+}
+.bad {
+  color: var(--err);
+  font-weight: 600;
+}
+.probs {
+  margin-top: 4px;
+}
+.probs .err,
+.probs .warn {
+  padding: 3px 8px;
+  margin-top: 3px;
+  font-size: 0.92em;
+  border-left: 3px solid var(--warn);
+  background: var(--vscode-inputValidation-warningBackground, rgba(210, 153, 34, 0.12));
+}
+.probs .err {
+  border-left-color: var(--err);
+  background: var(--vscode-inputValidation-errorBackground, rgba(248, 81, 73, 0.12));
+}
+
+/* 가져온 데이터 */
+.info {
+  margin-bottom: 8px;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.toolbar .filter {
+  width: 240px;
+}
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.exported {
+  margin: 0 0 8px;
+  padding: 5px 10px;
+  border-left: 3px solid var(--ok);
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+}
+table.tables {
+  width: 100%;
+  border-collapse: collapse;
+}
+table.tables th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 6px;
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editor-background);
+}
+table.tables td {
+  padding: 3px 6px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+  vertical-align: top;
+}
+table.tables tr.t:hover td {
+  background: var(--vscode-list-hoverBackground);
+}
+table.tables tr.open td {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.15));
+}
+table.tables th:first-child,
+table.tables td:first-child {
+  width: 28px;
+}
+table.tables .name {
+  white-space: nowrap;
+}
+table.tables .name a {
+  color: var(--vscode-foreground);
+}
+.num {
+  text-align: right;
+}
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 0.75em;
+  border-radius: 3px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+tr.detail > td {
+  padding: 4px 6px 12px 34px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.06));
+}
+table.cols {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+table.cols th,
+table.cols td {
+  padding: 2px 10px 2px 0;
+  text-align: left;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+}
+table.cols th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.idx {
+  margin-top: 6px;
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 4px;
+  background: var(--vscode-notifications-background, #252526);
+  color: var(--vscode-notifications-foreground);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  max-width: 90%;
+}
+.notice.show {
+  opacity: 1;
+}
+.notice.warn {
+  border-color: var(--warn);
+}
