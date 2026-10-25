@@ -324,6 +324,12 @@ test('B10. 백엔드 색인은 같은 결과를 다시 만들고, 비우면 새�
   assert.ok(a.classes.every((c) => c.methods.every((m) => !('body' in m) && !('bodyText' in m))));
 });
 
+test('B11. maskSource: 주석·문자열·텍스트 블록·끝나지 않은 문자열 (예전 구현과 같은 결과)', () => {
+  const { maskSource } = require('../../out/features/sourceAtlas/backend/javaParser.js');
+  const cases = [["a(\"x\\\"y\", 'c') // 주석 \"q\"\r\nb();", {"plain": "a(\"x\\\"y\", 'c')          \r\nb();", "masked": "a(\"    \", ' ')          \r\nb();"}], ["/* 여러\r\n줄 */ s = \"\"\"\n  텍스트 \"따옴표\"\n\"\"\"; t", {"plain": "     \r\n     s = \"\"\"\n  텍스트 \"따옴표\"\n\"\"\"; t", "masked": "     \r\n     s = \"\"\"\n           \n\"\"\"; t"}], ["x = \"끝나지 않음\ny = '\\\\'", {"plain": "x = \"끝나지 않음\ny = '\\\\'", "masked": "x = \"      \ny = '  '"}], ["s = \"abc\\\\", {"plain": "s = \"abc\\\\", "masked": "s = \"     "}]];
+  for (const [src, want] of cases) assert.deepStrictEqual(maskSource(src), want, JSON.stringify(src));
+});
+
 test('C1. API 노드에 호출 위치(파일·줄·함수)가 기록된다 — 같은 URL 은 노드 하나, 위치는 모두', () => {
   const g = at('src/views/Basic.vue');
   const api = g.nodes.find((n) => n.label === 'GET /api/orders');

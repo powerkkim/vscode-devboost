@@ -56,42 +56,55 @@ export interface JavaClass {
 
 /** 주석을 공백으로 바꾸고(줄바꿈 유지), 문자열 내용을 가린 버전도 같이 만든다. 둘 다 원본과 길이가 같다. */
 export function maskSource(src: string): { plain: string; masked: string } {
-  const plain = src.split('');
-  const masked = src.split('');
+  // 바뀌지 않는 구간은 통째로 잘라 붙이고, 가릴 구간만 공백으로 바꾼다 (글자 단위 배열을 만들지 않음)
   const n = src.length;
-  let i = 0;
-  const blank = (arr: string[], from: number, to: number) => {
-    for (let k = from; k < to; k++) {
-      if (arr[k] !== '\n' && arr[k] !== '\r') arr[k] = ' ';
-    }
+  const plain: string[] = [];
+  const masked: string[] = [];
+  let plainAt = 0; // plain 에 아직 옮기지 않은 원본 위치
+  let maskedAt = 0;
+  const blankOf = (from: number, to: number) => {
+    // 끝나지 않은 문자열이 \ 로 끝나면 to 가 n 을 넘을 수 있다 → 넘친 만큼 공백 (예전 구현과 같은 결과)
+    const seg = src.slice(from, Math.min(to, n)).replace(/[^\r\n]/g, ' ');
+    return to > n ? seg + ' '.repeat(to - n) : seg;
   };
+  const blankPlain = (from: number, to: number) => {
+    plain.push(src.slice(plainAt, from), blankOf(from, to));
+    plainAt = to;
+  };
+  const blankMasked = (from: number, to: number) => {
+    if (to <= from) return;
+    masked.push(src.slice(maskedAt, from), blankOf(from, to));
+    maskedAt = to;
+  };
+  let i = 0;
   while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === '/' && d === '/') {
-      let j = i;
-      while (j < n && src[j] !== '\n') j++;
-      blank(plain, i, j); blank(masked, i, j); i = j;
-    } else if (c === '/' && d === '*') {
+    const c = src.charCodeAt(i);
+    if (c === 47 /* / */ && src.charCodeAt(i + 1) === 47) {
+      let j = src.indexOf('\n', i);
+      if (j < 0) j = n;
+      blankPlain(i, j); blankMasked(i, j); i = j;
+    } else if (c === 47 && src.charCodeAt(i + 1) === 42 /* * */) {
       let j = src.indexOf('*/', i + 2);
       j = j < 0 ? n : j + 2;
-      blank(plain, i, j); blank(masked, i, j); i = j;
-    } else if (c === '"' && src.startsWith('"""', i)) {
+      blankPlain(i, j); blankMasked(i, j); i = j;
+    } else if (c === 34 /* " */ && src.startsWith('"""', i)) {
       let j = src.indexOf('"""', i + 3);
       j = j < 0 ? n : j + 3;
-      blank(masked, i + 3, j - 3); i = j;
-    } else if (c === '"' || c === "'") {
+      blankMasked(i + 3, j - 3); i = j;
+    } else if (c === 34 || c === 39 /* ' */) {
       let j = i + 1;
-      while (j < n && src[j] !== c && src[j] !== '\n') {
-        if (src[j] === '\\') j++;
+      while (j < n && src.charCodeAt(j) !== c && src.charCodeAt(j) !== 10) {
+        if (src.charCodeAt(j) === 92 /* \\ */) j++;
         j++;
       }
-      blank(masked, i + 1, j); // 따옴표는 남기고 내용만 가림
+      blankMasked(i + 1, j); // 따옴표는 남기고 내용만 가림
       i = j + 1;
     } else {
       i++;
     }
   }
+  plain.push(src.slice(plainAt));
+  masked.push(src.slice(maskedAt));
   return { plain: plain.join(''), masked: masked.join('') };
 }
 
@@ -202,9 +215,9 @@ export function parseJava(source: string, file: string): JavaClass[] {
   const depthAt = new Int32Array(masked.length + 1);
   for (let i = 0, d = 0; i < masked.length; i++) {
     depthAt[i] = d;
-    const c = masked[i];
-    if (c === '{' || c === '(') d++;
-    else if (c === '}' || c === ')') d = Math.max(0, d - 1);
+    const c = masked.charCodeAt(i);
+    if (c === 123 /* { */ || c === 40 /* ( */) d++;
+    else if (c === 125 /* } */ || c === 41 /* ) */) d = Math.max(0, d - 1);
   }
 
   const classes: JavaClass[] = [];

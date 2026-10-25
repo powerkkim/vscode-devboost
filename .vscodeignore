@@ -14,4 +14,3 @@ release-notes.md
 out/**
 esbuild.mjs
 webview/**
-**/*.map
