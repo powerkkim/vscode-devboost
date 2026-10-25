@@ -43,6 +43,42 @@ function walk(root: string, visit: (abs: string) => void) {
   }
 }
 
+/**
+ * 파서 결과의 문자열을 색인에 넣기 좋게 바꾼다 (객체는 그대로 두고 문자열만 교체).
+ * 1) 정규식·slice 로 잘라 낸 문자열은 V8 안에서 원본 파일 문자열 전체를 붙잡고 있어서(sliced string),
+ *    그대로 캐시하면 클래스 이름 하나 때문에 파일 전체가 메모리에 남는다 → 처음 보는 문자열은 새로 복사한다.
+ * 2) 'String', 'Long', 'list' 같은 같은 값의 문자열이 수만 번 나오므로 하나만 두고 공유한다 (pool).
+ */
+function detach<T>(value: T, pool: Map<string, string>): T {
+  const intern = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      let hit = pool.get(v);
+      if (hit === undefined) {
+        hit = copyString(v);
+        pool.set(hit, hit);
+      }
+      return hit;
+    }
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) v[i] = intern(v[i]);
+    } else if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      for (const k of Object.keys(o)) o[k] = intern(o[k]);
+    }
+    return v;
+  };
+  return intern(value) as T;
+}
+/**
+ * 원본과 연결이 끊긴 새 문자열 (Buffer 를 거치면 V8 이 새로 만든다).
+ * 12자 이하는 V8 이 원래 복사해서 만들므로 그대로 쓴다. 내용이 달라지는 경우(짝 없는 서로게이트)는 원본을 쓴다.
+ */
+function copyString(s: string): string {
+  if (s.length < 13) return s;
+  const c = Buffer.from(s, 'utf8').toString('utf8');
+  return c === s ? c : s;
+}
+
 const cache = new Map<string, BackendIndex>();
 export function clearBackendCache() {
   cache.clear();
@@ -54,6 +90,7 @@ export function buildBackendIndex(workspaceRoot: string, useCache = true): Backe
   if (hit) return hit;
 
   const classes: JavaClass[] = [];
+  const pool = new Map<string, string>(); // 색인을 만드는 동안만 쓰고 버린다
   const mappers: MapperXml[] = [];
   let javaFiles = 0, xmlFiles = 0;
   walk(root, (abs) => {
@@ -63,9 +100,9 @@ export function buildBackendIndex(workspaceRoot: string, useCache = true): Backe
       const rel = path.relative(root, abs).split(path.sep).join('/');
       if (abs.endsWith('.java')) {
         javaFiles++;
-        classes.push(...parseJava(text, rel));
+        classes.push(...detach(parseJava(text, rel), pool));
       } else if (/<(mapper|sqlMap)\b/.test(text)) {
-        const mx = parseMapperXml(text, rel);
+        const mx = detach(parseMapperXml(text, rel), pool);
         if (mx) {
           xmlFiles++;
           mappers.push(mx);

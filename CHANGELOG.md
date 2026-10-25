@@ -1,5 +1,9 @@
 # Changelog
 
+## 다음 버전 (작업 중)
+- **Source Atlas**: 백엔드 색인이 쓰는 메모리를 줄임 (Java 소스 22MB 프로젝트 기준 약 80MB → 25MB). 분석 결과는 같음
+- **Source Atlas**: Atlas 화면을 닫으면 색인도 메모리에서 비움
+
 ## 0.9.0 - 2026-10-25
 - **MyBatis SQL 실행**: mapper XML 쿼리 위의 `▶ SQL 실행`(또는 `Ctrl+Alt+Enter`, 우클릭)으로 실행 화면을 열고, 파라미터 값을 넣으면 실행 가능한 SQL 이 바로 만들어짐
   - `<if>`·`<choose>`·`<where>`·`<set>`·`<trim>`·`<foreach>`·`<bind>`·`<include>`(다른 mapper 의 `<sql>` 조각, `<property>` 포함) 처리

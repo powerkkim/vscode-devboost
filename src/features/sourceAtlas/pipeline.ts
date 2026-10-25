@@ -15,11 +15,16 @@ export interface PipelineOptions {
   fresh?: boolean;
 }
 
+/** 색인 캐시(프론트 import 역색인, 백엔드 색인)를 비운다 */
+export function clearAtlasCaches() {
+  clearReverseCache();
+  clearBackendCache();
+}
+
 /** 열린 .vue 한 개 → 아래(자식·API·백엔드)와 위(부모·라우트)를 모두 분석한 AtlasGraph */
 export function analyzeSource(rootFile: string, opts: PipelineOptions): { graph: AtlasGraph; notes: string[] } {
   if (opts.fresh) {
-    clearReverseCache();
-    clearBackendCache();
+    clearAtlasCaches();
   }
   const graph = buildAtlasGraph(rootFile, { workspaceRoot: opts.workspaceRoot, maxDepth: opts.maxDepth, aliases: opts.aliases });
   const notes: string[] = [];

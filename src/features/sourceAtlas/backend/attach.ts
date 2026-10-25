@@ -1,5 +1,5 @@
 import { buildBackendIndex, BackendIndex } from './indexer';
-import { JavaClass, JavaMethod, Ann, simpleType } from './javaParser';
+import { JavaClass, JavaMethod, Ann, Call, simpleType } from './javaParser';
 import { sqlFromAnnotationArgs } from './mybatisParser';
 import { extractTables } from './sqlTables';
 import { SqlStatement } from './mybatisParser';
@@ -23,7 +23,6 @@ interface Endpoint {
 const MAPPING_ANN: Record<string, string> = {
   GetMapping: 'GET', PostMapping: 'POST', PutMapping: 'PUT', DeleteMapping: 'DELETE', PatchMapping: 'PATCH', RequestMapping: 'ANY',
 };
-const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'new', 'synchronized', 'super', 'this', 'throw', 'else', 'try', 'do', 'assert']);
 
 /** 어노테이션 인자에서 경로 문자열들과 HTTP 메서드들을 읽는다 */
 function readMapping(ann: Ann): { paths: string[]; methods: string[] } {
@@ -75,39 +74,6 @@ function collectEndpoints(index: BackendIndex): Endpoint[] {
 }
 
 const simple = (t: string) => simpleType(t);
-
-/** 본문에서 `receiver.method(args)` 형태의 호출을 뽑는다 (문자열 내용은 가려진 본문 기준) */
-interface Call {
-  recv: string | null; // null 이면 같은 클래스의 메서드 호출
-  name: string;
-  argc: number;
-}
-function countArgs(body: string, openIdx: number): number {
-  let depth = 0, n = 0, any = false;
-  for (let i = openIdx; i < body.length; i++) {
-    const c = body[i];
-    if (c === '(' || c === '{' || c === '[') depth++;
-    else if (c === ')' || c === '}' || c === ']') {
-      depth--;
-      if (depth === 0) return any ? n + 1 : 0;
-    } else if (c === ',' && depth === 1) n++;
-    else if (depth >= 1 && !/\s/.test(c)) any = true;
-  }
-  return any ? n + 1 : 0;
-}
-function extractCalls(body: string): Call[] {
-  const calls: Call[] = [];
-  for (const m of body.matchAll(/(?<![\w.$])(?:this\s*\.\s*)?([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\(/g)) {
-    calls.push({ recv: m[1], name: m[2], argc: countArgs(body, m.index! + m[0].length - 1) });
-  }
-  for (const m of body.matchAll(/(?<![\w.$])(?:this\s*\.\s*)?([a-z_]\w*)\s*\(/g)) {
-    if (KEYWORDS.has(m[1])) continue;
-    const before = body.slice(Math.max(0, m.index! - 4), m.index!);
-    if (/new\s*$/.test(before) || /\.\s*$/.test(before.replace(/this\s*$/, ''))) continue;
-    calls.push({ recv: null, name: m[1], argc: countArgs(body, m.index! + m[0].length - 1) });
-  }
-  return calls;
-}
 
 export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: AttachOptions = {}): string {
   const index = buildBackendIndex(workspaceRoot, opts.useCache ?? true);
@@ -197,23 +163,24 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
   };
 
   function expand(c: JavaClass, m: JavaMethod, nodeId: string, depth: number, inlineSeen: Set<string>) {
-    if (!m.body) return;
+    const scan = m.scan;
+    if (!scan) return;
     const typeOf = new Map<string, string>();
     c.fields.forEach((f) => typeOf.set(f.name, f.type));
     c.ctorParams.forEach((f) => typeOf.set(f.name, f.type));
     m.params.forEach((p) => typeOf.set(p.name, p.type));
-    for (const lv of m.body.matchAll(/\b([A-Z][\w.]*(?:<[^;=()]*>)?)\s+([a-z_]\w*)\s*(?:=|;|:)/g)) typeOf.set(lv[2], simple(lv[1]));
+    scan.locals.forEach(([name, type]) => typeOf.set(name, type));
 
     // 1) sqlSession.selectList("namespace.id") 형태의 문자열 호출
-    for (const lit of (m.bodyText ?? '').matchAll(/\.\s*(?:select\w*|insert|update|delete|queryFor\w+)\s*\(\s*"([\w.]+)"/g)) {
-      const stmt = index.statements.get(lit[1]);
+    for (const id of scan.sqlIds) {
+      const stmt = index.statements.get(id);
       if (stmt) {
-        const sn = sqlNode(stmt, lit[1], `${stmt.namespace.split('.').pop()}.${stmt.id}`, stmt.file, stmt.line);
+        const sn = sqlNode(stmt, id, `${stmt.namespace.split('.').pop()}.${stmt.id}`, stmt.file, stmt.line);
         addEdge({ from: nodeId, to: sn.id, type: 'calls', certainty: 'sure', label: 'sqlSession' });
       }
     }
     // 2) 객체 메서드 호출 / 같은 클래스 메서드 호출
-    for (const call of extractCalls(m.body)) {
+    for (const call of scan.calls) {
       if (call.recv === null) {
         const own = c.methods.find((x) => x.name === call.name && x.params.length === call.argc);
         const key = `${c.fqcn}#${call.name}/${call.argc}`;

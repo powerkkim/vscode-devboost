@@ -282,6 +282,48 @@ test('단위: 경로 매칭 / Java 파서 / MyBatis XML', () => {
   assert.strictEqual(x.statements[0].sql, 'select * from t where a < 1 and b=1');
 });
 
+test('B9. 메서드 본문은 저장하지 않고 호출·지역 변수·sqlSession id 만 뽑아 둔다', () => {
+  const src = [
+    'package a; public class S {',
+    '  private final OrderMapper orderMapper;',
+    '  public List<Order> list(Long id) {',
+    '    OrderDto dto = new OrderDto(); // 주석 안 x.fake()',
+    '    String s = "y.notCall()";',
+    '    check(id, dto);',
+    '    sqlSession.selectList("order.findAll", id);',
+    '    return orderMapper.select(id, dto);',
+    '  }',
+    '  abstract void none();',
+    '  void empty() {}',
+    '}',
+  ].join('\n');
+  const [c] = parseJava(src, 'S.java');
+  const [list, none, empty] = c.methods;
+  assert.strictEqual(list.body, undefined, '본문 문자열은 없어야 함');
+  assert.deepStrictEqual(list.scan.locals, [['dto', 'OrderDto'], ['s', 'String']]);
+  assert.deepStrictEqual(list.scan.sqlIds, ['order.findAll']);
+  assert.deepStrictEqual(list.scan.calls, [
+    { recv: 'sqlSession', name: 'selectList', argc: 2 },
+    { recv: 'orderMapper', name: 'select', argc: 2 },
+    { recv: null, name: 'check', argc: 2 },
+  ]);
+  assert.strictEqual(none.scan, null, '추상 메서드');
+  assert.strictEqual(empty.scan, null, '빈 본문');
+});
+
+test('B10. 백엔드 색인은 같은 결과를 다시 만들고, 비우면 새로 만든다', () => {
+  const { buildBackendIndex, clearBackendCache } = require('../../out/features/sourceAtlas/backend/indexer.js');
+  const root = path.join(__dirname, 'fixtures', 'fullstack');
+  clearBackendCache();
+  const a = buildBackendIndex(root);
+  assert.strictEqual(buildBackendIndex(root), a, '캐시 사용');
+  clearBackendCache();
+  const b = buildBackendIndex(root);
+  assert.notStrictEqual(b, a, '비운 뒤에는 새로 만듦');
+  assert.deepStrictEqual(b.classes, a.classes);
+  assert.ok(a.classes.every((c) => c.methods.every((m) => !('body' in m) && !('bodyText' in m))));
+});
+
 test('C1. API 노드에 호출 위치(파일·줄·함수)가 기록된다 — 같은 URL 은 노드 하나, 위치는 모두', () => {
   const g = at('src/views/Basic.vue');
   const api = g.nodes.find((n) => n.label === 'GET /api/orders');
