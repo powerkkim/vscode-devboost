@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { analyzeSource } from '../pipeline';
+import { analyzeSource, clearAtlasCaches } from '../pipeline';
 
 /**
  * Atlas 화면(Webview). 한 번에 하나만 띄우고, 다시 열면 같은 패널에서 새 파일을 분석한다.
@@ -115,6 +115,8 @@ export class AtlasPanel {
         maxUp: cfg.get<number>('maxUpDepth', 3),
         backend: cfg.get<boolean>('backend.enabled', true),
         backendDepth: cfg.get<number>('backend.maxDepth', 6),
+        vite: cfg.get<boolean>('vite.enabled', true) ? {} : false,
+        contextPath: cfg.get<string>('backend.contextPath', '') || undefined,
         aliases: cfg.get<Record<string, string>>('aliases', {}),
         fresh: this.fresh,
       });
@@ -145,6 +147,7 @@ export class AtlasPanel {
 
   private dispose() {
     AtlasPanel.current = undefined;
+    clearAtlasCaches(); // 창을 닫으면 색인도 놓는다 (다시 열면 새로 만든다)
     this.disposables.forEach((d) => d.dispose());
     this.panel.dispose();
   }

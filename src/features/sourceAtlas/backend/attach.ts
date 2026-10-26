@@ -1,15 +1,20 @@
 import { buildBackendIndex, BackendIndex } from './indexer';
-import { JavaClass, JavaMethod, Ann, simpleType } from './javaParser';
+import { JavaClass, JavaMethod, Ann, Call, simpleType } from './javaParser';
 import { sqlFromAnnotationArgs } from './mybatisParser';
 import { extractTables } from './sqlTables';
 import { SqlStatement } from './mybatisParser';
 import { joinMapping, matchPaths, pathSegments } from './pathMatch';
+import { applyProxy, ViteProxy } from '../analyzer/viteProbe';
 import type { AtlasEdge, AtlasGraph, AtlasNode } from '../analyzer/types';
 
 export interface AttachOptions {
   /** 컨트롤러에서 몇 단계 아래까지 따라갈지 (기본 6) */
   maxDepth?: number;
   useCache?: boolean;
+  /** 프론트 개발 서버의 프록시 규칙 (Vite server.proxy). 있으면 rewrite 된 경로로도 매칭한다 */
+  proxies?: ViteProxy[];
+  /** 백엔드의 context-path ('/plm' 등). 매핑 경로 앞에 붙여 비교한다 */
+  contextPath?: string;
 }
 
 interface Endpoint {
@@ -23,7 +28,6 @@ interface Endpoint {
 const MAPPING_ANN: Record<string, string> = {
   GetMapping: 'GET', PostMapping: 'POST', PutMapping: 'PUT', DeleteMapping: 'DELETE', PatchMapping: 'PATCH', RequestMapping: 'ANY',
 };
-const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'new', 'synchronized', 'super', 'this', 'throw', 'else', 'try', 'do', 'assert']);
 
 /** 어노테이션 인자에서 경로 문자열들과 HTTP 메서드들을 읽는다 */
 function readMapping(ann: Ann): { paths: string[]; methods: string[] } {
@@ -75,39 +79,6 @@ function collectEndpoints(index: BackendIndex): Endpoint[] {
 }
 
 const simple = (t: string) => simpleType(t);
-
-/** 본문에서 `receiver.method(args)` 형태의 호출을 뽑는다 (문자열 내용은 가려진 본문 기준) */
-interface Call {
-  recv: string | null; // null 이면 같은 클래스의 메서드 호출
-  name: string;
-  argc: number;
-}
-function countArgs(body: string, openIdx: number): number {
-  let depth = 0, n = 0, any = false;
-  for (let i = openIdx; i < body.length; i++) {
-    const c = body[i];
-    if (c === '(' || c === '{' || c === '[') depth++;
-    else if (c === ')' || c === '}' || c === ']') {
-      depth--;
-      if (depth === 0) return any ? n + 1 : 0;
-    } else if (c === ',' && depth === 1) n++;
-    else if (depth >= 1 && !/\s/.test(c)) any = true;
-  }
-  return any ? n + 1 : 0;
-}
-function extractCalls(body: string): Call[] {
-  const calls: Call[] = [];
-  for (const m of body.matchAll(/(?<![\w.$])(?:this\s*\.\s*)?([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\(/g)) {
-    calls.push({ recv: m[1], name: m[2], argc: countArgs(body, m.index! + m[0].length - 1) });
-  }
-  for (const m of body.matchAll(/(?<![\w.$])(?:this\s*\.\s*)?([a-z_]\w*)\s*\(/g)) {
-    if (KEYWORDS.has(m[1])) continue;
-    const before = body.slice(Math.max(0, m.index! - 4), m.index!);
-    if (/new\s*$/.test(before) || /\.\s*$/.test(before.replace(/this\s*$/, ''))) continue;
-    calls.push({ recv: null, name: m[1], argc: countArgs(body, m.index! + m[0].length - 1) });
-  }
-  return calls;
-}
 
 export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: AttachOptions = {}): string {
   const index = buildBackendIndex(workspaceRoot, opts.useCache ?? true);
@@ -197,23 +168,24 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
   };
 
   function expand(c: JavaClass, m: JavaMethod, nodeId: string, depth: number, inlineSeen: Set<string>) {
-    if (!m.body) return;
+    const scan = m.scan;
+    if (!scan) return;
     const typeOf = new Map<string, string>();
     c.fields.forEach((f) => typeOf.set(f.name, f.type));
     c.ctorParams.forEach((f) => typeOf.set(f.name, f.type));
     m.params.forEach((p) => typeOf.set(p.name, p.type));
-    for (const lv of m.body.matchAll(/\b([A-Z][\w.]*(?:<[^;=()]*>)?)\s+([a-z_]\w*)\s*(?:=|;|:)/g)) typeOf.set(lv[2], simple(lv[1]));
+    scan.locals.forEach(([name, type]) => typeOf.set(name, type));
 
     // 1) sqlSession.selectList("namespace.id") 형태의 문자열 호출
-    for (const lit of (m.bodyText ?? '').matchAll(/\.\s*(?:select\w*|insert|update|delete|queryFor\w+)\s*\(\s*"([\w.]+)"/g)) {
-      const stmt = index.statements.get(lit[1]);
+    for (const id of scan.sqlIds) {
+      const stmt = index.statements.get(id);
       if (stmt) {
-        const sn = sqlNode(stmt, lit[1], `${stmt.namespace.split('.').pop()}.${stmt.id}`, stmt.file, stmt.line);
+        const sn = sqlNode(stmt, id, `${stmt.namespace.split('.').pop()}.${stmt.id}`, stmt.file, stmt.line);
         addEdge({ from: nodeId, to: sn.id, type: 'calls', certainty: 'sure', label: 'sqlSession' });
       }
     }
     // 2) 객체 메서드 호출 / 같은 클래스 메서드 호출
-    for (const call of extractCalls(m.body)) {
+    for (const call of scan.calls) {
       if (call.recv === null) {
         const own = c.methods.find((x) => x.name === call.name && x.params.length === call.argc);
         const key = `${c.fqcn}#${call.name}/${call.argc}`;
@@ -267,13 +239,26 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
   for (const api of graph.nodes.filter((n) => n.kind === 'api-call')) {
     apiTotal++;
     const method = String(api.meta.method ?? 'GET').toUpperCase();
-    const segs = pathSegments(String(api.meta.url ?? ''));
+    const rawUrl = String(api.meta.url ?? '');
+    // 개발 서버 프록시를 거치면 서버에는 rewrite 된 경로로 도착한다 → 그 경로를 먼저, 원래 경로를 다음으로 본다
+    const proxied = opts.proxies?.length ? applyProxy(rawUrl, opts.proxies) : null;
+    if (proxied) api.meta.proxied = `${proxied.target}${proxied.path}`;
+    const candidates = proxied ? [proxied.path, rawUrl] : [rawUrl];
+    const ctx = (opts.contextPath ?? '').replace(/\/$/, '');
     const exact: Endpoint[] = [], suffix: Endpoint[] = []; // suffix 에는 loose 도 포함 (둘 다 '추정')
-    for (const ep of endpoints) {
-      if (ep.httpMethod !== 'ANY' && ep.httpMethod !== method) continue;
-      const k = matchPaths(segs, ep.segs);
-      if (k === 'exact') exact.push(ep);
-      else if (k === 'suffix' || k === 'loose') suffix.push(ep);
+    for (const cand of candidates) {
+      const segs = pathSegments(cand);
+      // context-path 가 있으면 프론트 경로에서 그만큼 떼고 비교 (없는 경우도 같이 시도)
+      const segList = ctx ? [pathSegments(cand.startsWith(ctx + '/') ? cand.slice(ctx.length) : cand), segs] : [segs];
+      for (const ep of endpoints) {
+        if (ep.httpMethod !== 'ANY' && method !== 'ANY' && ep.httpMethod !== method) continue;
+        for (const sg of segList) {
+          const k = matchPaths(sg, ep.segs);
+          if (k === 'exact') { if (!exact.includes(ep)) exact.push(ep); break; }
+          if (k === 'suffix' || k === 'loose') { if (!suffix.includes(ep)) suffix.push(ep); }
+        }
+      }
+      if (exact.length) break; // 프록시 경로로 정확히 맞으면 원래 경로는 보지 않는다
     }
     // Spring 은 고정 문자열 경로가 {변수} 경로보다 우선한다 → 고정 세그먼트가 가장 많은 후보만 남긴다
     const literals = (ep: Endpoint) => ep.segs.filter((x) => x !== '{}').length;
@@ -288,7 +273,7 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
     if (exact.length) {
       // 래퍼(api.post 등)로 부른 호출도 서버 엔드포인트와 정확히 맞으면 실제 HTTP 호출로 확인된 것 → 확실로 올린다
       api.meta.confirmedBy = 'backend';
-      api.warnings = api.warnings?.filter((w) => !w.startsWith('커스텀 래퍼'));
+      api.warnings = api.warnings?.filter((w) => !w.startsWith('커스텀 래퍼') && !w.startsWith('끝점을 코드로 확인하지 못해'));
       if (!api.warnings?.length) delete api.warnings;
       for (const e of edges.values()) {
         if (e.to === api.id && e.type === 'calls') e.certainty = 'sure';

@@ -64,10 +64,15 @@ export default defineComponent({
         edges: edges.map((e, i) => ({
           id: `e${i}`, source: e.from, target: e.to,
           label: e.label && e.type !== 'uses' ? e.label : e.type === 'writes' ? '쓰기' : e.type === 'reads' ? '읽기' : undefined,
-          style: { stroke: EDGE_COLOR[e.type] ?? 'var(--edge-uses)', strokeDasharray: e.certainty === 'guess' ? '6 4' : undefined, strokeWidth: 1.6 },
+          // 간접 호출(composable/store 노드를 거쳐 가는 것, 그 노드 → API 선이 따로 있음)은 가늘고 연하게
+          style: {
+            stroke: EDGE_COLOR[e.type] ?? 'var(--edge-uses)',
+            strokeDasharray: e.certainty === 'guess' ? '6 4' : e.indirect ? '2 4' : undefined,
+            strokeWidth: e.indirect ? 1.1 : 1.6, opacity: e.indirect ? 0.55 : 1,
+          },
           markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--edge-arrow)' },
           animated: false,
-          class: e.certainty,
+          class: [e.certainty, e.indirect ? 'indirect' : ''].join(' '),
         })),
       };
     });
@@ -79,6 +84,32 @@ export default defineComponent({
       const s = new Set(hidden.value);
       s.has(k) ? s.delete(k) : s.add(k);
       hidden.value = s;
+    };
+
+    /** 경유 체인: 각 단계 클릭 → 그 위치로 이동 */
+    const viaChain = (via: { file: string; fn: string; line: number; col: number }[]) =>
+      h('div', { class: 'via' }, [
+        h('span', { class: 'dim' }, '경유 '),
+        ...via.flatMap((v, i) => [
+          i ? h('span', { class: 'dim' }, ' → ') : null,
+          h('a', { href: '#', class: 'sym', title: `${v.file}:${v.line}`, onClick: (ev: Event) => { ev.preventDefault(); openAt(v.file, v.line, v.col); } }, `${v.file.split('/').pop()?.replace(/\.(vue|ts|js)$/, '')}.${v.fn}`),
+        ]),
+      ]);
+    /** 컴포넌트·composable·store 가 부르는 API 표 (간접 호출 포함) */
+    const apiTable = (rows: any[]) => {
+      const byFn = new Map<string, any[]>();
+      rows.forEach((r) => byFn.set(r.fn, [...(byFn.get(r.fn) ?? []), r]));
+      return [
+        h('h4', `API 호출 (${rows.length})`),
+        ...[...byFn.entries()].map(([fn, rs]) => h('div', { class: 'api-group' }, [
+          h('div', { class: 'api-fn' }, fn === '<setup>' ? '(setup)' : fn === '<module>' ? '(모듈)' : `${fn}()`),
+          h('ul', rs.map((r) => h('li', [
+            h('a', { href: '#', class: 'sym', title: `${r.method} ${r.url}`, onClick: (ev: Event) => { ev.preventDefault(); selectedId.value = `api:${r.method} ${r.url}`; } }, `${r.method} ${r.url}`),
+            r.certainty === 'guess' ? h('span', { class: 'warn' }, ' 추정') : null,
+            r.via?.length ? viaChain(r.via) : null,
+          ]))),
+        ])),
+      ];
     };
 
     const detail = (n: AtlasNode) => {
@@ -123,10 +154,20 @@ export default defineComponent({
         ...(m.relation === 'ancestor' ? [h('div', { class: 'dim' }, '↑ 상위: 선택한 파일을 사용하는 쪽')] : []),
         ...(m.callers?.length
           ? [h('h4', `호출 위치 (${m.callers.length})`), h('ul', { class: 'callers' }, m.callers.map((c: any) =>
-              h('li', [h('a', { href: '#', title: `${c.file}:${c.line}`, onClick: (ev: Event) => { ev.preventDefault(); openAt(c.file, c.line, c.col); } },
-                [c.fn ? h('b', `${c.fn}()`) : h('i', '(최상위)'), h('span', { class: 'dim' }, `  ${c.from}:${c.line}`)])])))]
+              h('li', [
+                h('a', { href: '#', title: `${c.file}:${c.line}`, onClick: (ev: Event) => { ev.preventDefault(); openAt(c.file, c.line, c.col); } },
+                  [c.fn && c.fn !== '<setup>' && c.fn !== '<module>' ? h('b', `${c.fn}()`) : h('i', c.fn === '<setup>' ? '(setup)' : '(최상위)'), h('span', { class: 'dim' }, `  ${c.from}:${c.line}`)]),
+                ...(c.via?.length ? [viaChain(c.via)] : []),
+              ])))]
           : []),
-        ...(m.url ? [h('h4', '요청'), h('div', `${m.method} ${m.url}`), h('div', { class: 'dim' }, `via ${m.via}`)] : []),
+        ...(m.url ? [
+          h('h4', '요청'), h('div', `${m.method} ${m.url}`),
+          h('div', { class: 'dim' }, m.via && !String(m.via).includes('추정') && !String(m.via).includes('(') ? `끝점 ${m.via} (코드로 확인)` : `끝점 ${m.via ?? '?'}`),
+          ...(m.proxied ? [h('div', { class: 'dim' }, `개발 서버 프록시 → ${m.proxied}`)] : []),
+          ...(m.unknowns?.length ? [h('div', { class: 'warns' }, ['확정 못 한 부분: ', ...m.unknowns.map((u: string, i: number) => h('span', (i ? ' · ' : '') + u))])] : []),
+        ] : []),
+        ...(m.apiCalls?.length ? apiTable(m.apiCalls) : []),
+        ...(m.unresolvedCalls?.length ? [h('h4', `해석 못 한 호출 (${m.unresolvedCalls.length})`), h('ul', { class: 'warns' }, m.unresolvedCalls.map((u: string) => h('li', u)))] : []),
         ...linkSec('이 노드가 사용', outgoing.map((e) => ({ id: e.to, text: `${nameOf(e.to)}  (${e.type}${e.certainty === 'guess' ? ', 추정' : ''})` }))),
         ...linkSec('이 노드를 사용', incoming.map((e) => ({ id: e.from, text: `${nameOf(e.from)}  (${e.type}${e.certainty === 'guess' ? ', 추정' : ''})` }))),
       ]);
@@ -167,7 +208,7 @@ export default defineComponent({
           h('aside', selected.value ? [detail(selected.value)] : [h('div', { class: 'dim pad' }, '노드를 클릭하면 상세가 보입니다.\n더블클릭하면 파일이 열립니다.')]),
         ]),
         h('footer', { class: 'legend' }, [
-          h('span', '── 확실'), h('span', '- - 추정'), h('span', { class: 'calls' }, '── API 호출/서버 호출'), h('span', { class: 'rd' }, '── 읽기'), h('span', { class: 'wr' }, '── 쓰기'), h('span', '↑ 상위'), h('span', '⚠ 경고'),
+          h('span', '── 확실'), h('span', '- - 추정'), h('span', { class: 'calls' }, '── API 호출/서버 호출'), h('span', { class: 'rd' }, '── 읽기'), h('span', { class: 'wr' }, '── 쓰기'), h('span', '·· 간접 호출(composable/store 경유)'), h('span', '↑ 상위'), h('span', '⚠ 경고'),
         ]),
       ]);
     };

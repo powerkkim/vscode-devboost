@@ -12,16 +12,31 @@ export interface Param {
   type: string; // 제네릭·패키지 제거한 단순 이름
   name: string;
 }
+/** 본문 안의 `receiver.method(args)` 호출 */
+export interface Call {
+  recv: string | null; // null 이면 같은 클래스의 메서드 호출
+  name: string;
+  argc: number;
+}
+/**
+ * 메서드 본문에서 흐름 추적에 쓰는 것만 뽑아 둔 것.
+ * 본문 문자열을 통째로 들고 있으면 색인이 소스 크기의 몇 배가 되므로 파싱할 때 미리 뽑고 본문은 버린다.
+ */
+export interface BodyScan {
+  /** 지역 변수 [이름, 단순 타입] — 본문에 나온 순서 */
+  locals: [string, string][];
+  calls: Call[];
+  /** sqlSession.selectList("namespace.id") 같은 문자열 호출의 id — 나온 순서 */
+  sqlIds: string[];
+}
 export interface JavaMethod {
   name: string;
   line: number;
   annotations: Ann[];
   params: Param[];
   returnType: string;
-  /** 본문(문자열 내용은 가려진 상태) — 호출 분석용. 추상 메서드는 null */
-  body: string | null;
-  /** 본문(문자열 유지) — "namespace.id" 같은 문자열 인자 읽기용. body 와 같은 길이 */
-  bodyText: string | null;
+  /** 본문 분석 결과. 추상 메서드나 빈 본문은 null */
+  scan: BodyScan | null;
 }
 export interface JavaClass {
   name: string;
@@ -41,42 +56,55 @@ export interface JavaClass {
 
 /** 주석을 공백으로 바꾸고(줄바꿈 유지), 문자열 내용을 가린 버전도 같이 만든다. 둘 다 원본과 길이가 같다. */
 export function maskSource(src: string): { plain: string; masked: string } {
-  const plain = src.split('');
-  const masked = src.split('');
+  // 바뀌지 않는 구간은 통째로 잘라 붙이고, 가릴 구간만 공백으로 바꾼다 (글자 단위 배열을 만들지 않음)
   const n = src.length;
-  let i = 0;
-  const blank = (arr: string[], from: number, to: number) => {
-    for (let k = from; k < to; k++) {
-      if (arr[k] !== '\n' && arr[k] !== '\r') arr[k] = ' ';
-    }
+  const plain: string[] = [];
+  const masked: string[] = [];
+  let plainAt = 0; // plain 에 아직 옮기지 않은 원본 위치
+  let maskedAt = 0;
+  const blankOf = (from: number, to: number) => {
+    // 끝나지 않은 문자열이 \ 로 끝나면 to 가 n 을 넘을 수 있다 → 넘친 만큼 공백 (예전 구현과 같은 결과)
+    const seg = src.slice(from, Math.min(to, n)).replace(/[^\r\n]/g, ' ');
+    return to > n ? seg + ' '.repeat(to - n) : seg;
   };
+  const blankPlain = (from: number, to: number) => {
+    plain.push(src.slice(plainAt, from), blankOf(from, to));
+    plainAt = to;
+  };
+  const blankMasked = (from: number, to: number) => {
+    if (to <= from) return;
+    masked.push(src.slice(maskedAt, from), blankOf(from, to));
+    maskedAt = to;
+  };
+  let i = 0;
   while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === '/' && d === '/') {
-      let j = i;
-      while (j < n && src[j] !== '\n') j++;
-      blank(plain, i, j); blank(masked, i, j); i = j;
-    } else if (c === '/' && d === '*') {
+    const c = src.charCodeAt(i);
+    if (c === 47 /* / */ && src.charCodeAt(i + 1) === 47) {
+      let j = src.indexOf('\n', i);
+      if (j < 0) j = n;
+      blankPlain(i, j); blankMasked(i, j); i = j;
+    } else if (c === 47 && src.charCodeAt(i + 1) === 42 /* * */) {
       let j = src.indexOf('*/', i + 2);
       j = j < 0 ? n : j + 2;
-      blank(plain, i, j); blank(masked, i, j); i = j;
-    } else if (c === '"' && src.startsWith('"""', i)) {
+      blankPlain(i, j); blankMasked(i, j); i = j;
+    } else if (c === 34 /* " */ && src.startsWith('"""', i)) {
       let j = src.indexOf('"""', i + 3);
       j = j < 0 ? n : j + 3;
-      blank(masked, i + 3, j - 3); i = j;
-    } else if (c === '"' || c === "'") {
+      blankMasked(i + 3, j - 3); i = j;
+    } else if (c === 34 || c === 39 /* ' */) {
       let j = i + 1;
-      while (j < n && src[j] !== c && src[j] !== '\n') {
-        if (src[j] === '\\') j++;
+      while (j < n && src.charCodeAt(j) !== c && src.charCodeAt(j) !== 10) {
+        if (src.charCodeAt(j) === 92 /* \\ */) j++;
         j++;
       }
-      blank(masked, i + 1, j); // 따옴표는 남기고 내용만 가림
+      blankMasked(i + 1, j); // 따옴표는 남기고 내용만 가림
       i = j + 1;
     } else {
       i++;
     }
   }
+  plain.push(src.slice(plainAt));
+  masked.push(src.slice(maskedAt));
   return { plain: plain.join(''), masked: masked.join('') };
 }
 
@@ -187,9 +215,9 @@ export function parseJava(source: string, file: string): JavaClass[] {
   const depthAt = new Int32Array(masked.length + 1);
   for (let i = 0, d = 0; i < masked.length; i++) {
     depthAt[i] = d;
-    const c = masked[i];
-    if (c === '{' || c === '(') d++;
-    else if (c === '}' || c === ')') d = Math.max(0, d - 1);
+    const c = masked.charCodeAt(i);
+    if (c === 123 /* { */ || c === 40 /* ( */) d++;
+    else if (c === 125 /* } */ || c === 41 /* ) */) d = Math.max(0, d - 1);
   }
 
   const classes: JavaClass[] = [];
@@ -261,8 +289,7 @@ function parseBody(cls: JavaClass, plain: string, masked: string, from: number, 
     cls.methods.push({
       name, line: lineAt(starts, idx < 0 ? hs : idx), annotations: anns,
       params: parseParams(pm ? pm[3] : mm[3]), returnType: simpleType(mm[1]),
-      body: blockOpen >= 0 ? masked.slice(blockOpen + 1, blockClose) : null,
-      bodyText: blockOpen >= 0 ? plain.slice(blockOpen + 1, blockClose) : null,
+      scan: blockOpen >= 0 ? scanBody(masked.slice(blockOpen + 1, blockClose), plain.slice(blockOpen + 1, blockClose)) : null,
     });
   };
   for (let i = from; i < to; i++) {
@@ -280,4 +307,50 @@ function parseBody(cls: JavaClass, plain: string, masked: string, from: number, 
       i = close;
     }
   }
+}
+
+// ── 메서드 본문 분석 (흐름 추적용)
+
+const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'new', 'synchronized', 'super', 'this', 'throw', 'else', 'try', 'do', 'assert']);
+
+function countArgs(body: string, openIdx: number): number {
+  let depth = 0, n = 0, any = false;
+  for (let i = openIdx; i < body.length; i++) {
+    const c = body[i];
+    if (c === '(' || c === '{' || c === '[') depth++;
+    else if (c === ')' || c === '}' || c === ']') {
+      depth--;
+      if (depth === 0) return any ? n + 1 : 0;
+    } else if (c === ',' && depth === 1) n++;
+    else if (depth >= 1 && !/\s/.test(c)) any = true;
+  }
+  return any ? n + 1 : 0;
+}
+
+/** 본문에서 `receiver.method(args)` 형태의 호출을 뽑는다 (문자열 내용은 가려진 본문 기준) */
+export function extractCalls(body: string): Call[] {
+  const calls: Call[] = [];
+  for (const m of body.matchAll(/(?<![\w.$])(?:this\s*\.\s*)?([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\(/g)) {
+    calls.push({ recv: m[1], name: m[2], argc: countArgs(body, m.index! + m[0].length - 1) });
+  }
+  for (const m of body.matchAll(/(?<![\w.$])(?:this\s*\.\s*)?([a-z_]\w*)\s*\(/g)) {
+    if (KEYWORDS.has(m[1])) continue;
+    const before = body.slice(Math.max(0, m.index! - 4), m.index!);
+    if (/new\s*$/.test(before) || /\.\s*$/.test(before.replace(/this\s*$/, ''))) continue;
+    calls.push({ recv: null, name: m[1], argc: countArgs(body, m.index! + m[0].length - 1) });
+  }
+  return calls;
+}
+
+/**
+ * masked: 문자열 내용을 가린 본문 (호출·지역 변수용), text: 문자열을 유지한 본문 (sqlSession id 용).
+ * 뽑은 이름들은 원본 파일 문자열의 일부를 가리키지 않도록 indexer 에서 복사해 둔다.
+ */
+export function scanBody(masked: string, text: string): BodyScan | null {
+  if (!masked) return null;
+  const locals: [string, string][] = [];
+  for (const lv of masked.matchAll(/\b([A-Z][\w.]*(?:<[^;=()]*>)?)\s+([a-z_]\w*)\s*(?:=|;|:)/g)) locals.push([lv[2], simpleType(lv[1])]);
+  const sqlIds: string[] = [];
+  for (const lit of text.matchAll(/\.\s*(?:select\w*|insert|update|delete|queryFor\w+)\s*\(\s*"([\w.]+)"/g)) sqlIds.push(lit[1]);
+  return { locals, calls: extractCalls(masked), sqlIds };
 }

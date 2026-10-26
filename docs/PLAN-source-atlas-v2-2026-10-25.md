@@ -1,7 +1,6 @@
 # Source Atlas 설계 계획 (v2, 2026-10-25)
 
 > v1(2026-10-25) 대비 변경: 백엔드(Spring/MyBatis) 흐름 분석, 상위(부모·라우트) 분석, 빌드 방식 확정.
-> 이 문서가 최신입니다. (v1: PLAN-source-atlas-v1-2026-10-25.md)
 
 ## 한 줄 요약
 열려 있는 `.vue` 한 개를 기준으로 **아래**(자식 컴포넌트 · composable · store · API 호출 · 백엔드 Controller → Service → SQL → 테이블)와

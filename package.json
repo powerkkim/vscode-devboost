@@ -1,7 +1,7 @@
 {
   "name": "devboost",
   "displayName": "DevBoost",
-  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행 등. 기능별로 켜고 끌 수 있음",
+  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
   "version": "0.9.0",
   "publisher": "powerkkim",
   "license": "MIT",
@@ -75,6 +75,12 @@
         "command": "devBoost.mybatisRunner.copy",
         "title": "SQL 복사 (마지막 입력값)",
         "category": "MyBatis"
+      },
+      {
+        "command": "devBoost.dbSchema.open",
+        "title": "스키마 가져오기 · 테이블 정의서",
+        "category": "DB 스키마",
+        "icon": "$(database)"
       }
     ],
     "viewsContainers": {
@@ -137,6 +143,10 @@
         {
           "command": "devBoost.mybatisRunner.copy",
           "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+        },
+        {
+          "command": "devBoost.dbSchema.open",
+          "when": "config.devBoost.dbSchema.enabled"
         }
       ],
       "editor/context": [
@@ -193,6 +203,12 @@
             "default": true,
             "order": 2,
             "markdownDescription": "**MyBatis SQL 실행** — mapper XML 쿼리 위의 `▶ SQL 실행`으로 파라미터 값을 넣어 실행 가능한 SQL 을 만들고 Oracle 워크시트로 보냄 (`Ctrl+Alt+Enter`)"
+          },
+          "devBoost.dbSchema.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "**DB 스키마** — 수집 쿼리 결과를 가져와 테이블·컬럼·제약·인덱스 정보를 저장하고(`.devboost/schema`), 테이블 정의서(CSV: 목차 + 정의서)를 만듦. 명령: `DB 스키마: 스키마 가져오기 · 테이블 정의서`"
           }
         }
       },
@@ -358,6 +374,16 @@
             "minimum": 1,
             "maximum": 12,
             "markdownDescription": "컨트롤러에서 Service/Mapper 를 몇 단계까지 따라갈지"
+          },
+          "devBoost.sourceAtlas.vite.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "프로젝트의 Vite 로 `vite.config` 를 실제로 읽어 alias·`server.proxy` 를 반영 (별도 node 프로세스에서 설정 파일을 실행). 끄면 설정 파일을 텍스트로만 해석"
+          },
+          "devBoost.sourceAtlas.backend.contextPath": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "백엔드 context-path (예: `/plm`). 비워 두면 `application.yml/properties` 의 `server.servlet.context-path` 를 찾아 씀"
           }
         }
       },
@@ -402,7 +428,9 @@
   },
   "devDependencies": {
     "@babel/parser": "^7.29.11",
+    "@babel/traverse": "^7.29.10",
     "@dagrejs/dagre": "^3.1.2",
+    "@types/babel__traverse": "^7.28.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
@@ -425,6 +453,8 @@
     "ripgrep",
     "mybatis",
     "oracle",
-    "sql"
+    "sql",
+    "table definition",
+    "schema"
   ]
 }

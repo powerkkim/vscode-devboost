@@ -5,7 +5,7 @@ import { MapperDoc, MapperStatement, parseMapper } from '../mapper/mapperDoc';
 import { BranchOverride } from '../mapper/render';
 import { ParamInput, ParamType } from '../mapper/values';
 import { MapperIndex } from '../mapperIndex';
-import { OracleBridge } from '../oracleBridge';
+import { OracleBridge } from '../../../core/oracleBridge';
 import { RunnerStore, Prepared } from '../store';
 
 /**

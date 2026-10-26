@@ -60,3 +60,6 @@ aside { width: 300px; border-left: 1px solid var(--line); overflow: auto; backgr
 .callers li { margin: 3px 0; }
 .detail a.sym { color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; cursor: pointer; } .detail a.sym:hover { text-decoration: underline; }
 .detail .ln { color: var(--dim); font-size: 11px; } .detail .ok { color: #89d185; margin-top: 8px; }
+.via { font-size: 11.5px; margin: 2px 0 4px 2px; color: var(--dim); word-break: break-all; }
+.api-group { margin: 6px 0; } .api-fn { font-weight: 600; font-size: 12px; margin-bottom: 2px; } .api-group ul { margin-bottom: 4px; }
+.vue-flow__edge.indirect .vue-flow__edge-text { opacity: .6; }

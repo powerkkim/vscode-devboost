@@ -32,6 +32,10 @@ export interface AtlasEdge {
   type: EdgeType | (string & {});
   certainty: Certainty;
   label?: string;
+  /** calls 엣지: 진입 함수들 (간접 호출 표시용) */
+  via?: string[];
+  /** calls 엣지: composable/store 노드를 거쳐 가는 간접 호출 (그 노드 → API 선이 따로 있음) */
+  indirect?: boolean;
 }
 
 export interface AtlasGraph {
@@ -40,4 +44,6 @@ export interface AtlasGraph {
   analyzer: string; // 'vue3' 등
   nodes: AtlasNode[];
   edges: AtlasEdge[];
+  /** 분석 환경 정보 (Vite 프록시 등) */
+  meta?: Record<string, unknown>;
 }
