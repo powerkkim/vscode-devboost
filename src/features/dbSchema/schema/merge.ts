@@ -1,8 +1,8 @@
 /**
- * 가져온 조각(본 쿼리·기본값·공통코드)을 저장 파일로 합치기 (vscode 의존 없음).
+ * 가져온 조각(수집 결과·공통코드)을 저장 파일로 합치기 (vscode 의존 없음).
  *  - 접두어로 받은 결과는 기존 파일에서 그 접두어 테이블만 교체, 다른 테이블은 유지
  *  - 전체로 받은 결과는 파일 전체 교체 (공통코드는 유지)
- *  - 기본값만 가져오면 기존 파일의 컬럼에 채움
+ *  - 공통코드만 가져오면 기존 파일에 공통코드만 채움
  */
 import { ImportPart, ImportProblem } from './importer';
 import { emptySchema, SchemaFile } from './types';
@@ -10,11 +10,10 @@ import { emptySchema, SchemaFile } from './types';
 export interface MergeInput {
   existing?: SchemaFile;
   main?: ImportPart;
-  defaults?: ImportPart;
   codes?: ImportPart;
   /** 개발 / 검증 / 운영 */
   label?: string;
-  /** SUMMARY 에 스키마가 없을 때 (REC 없는 결과) */
+  /** 결과에 스키마 정보(META)가 없을 때 (다른 컬럼 명세 쿼리) */
   fallbackSchema?: string;
 }
 
@@ -34,7 +33,7 @@ const startsWithAny = (name: string, prefixes: string[]) => prefixes.some((p) =>
 
 export function mergeImport(input: MergeInput): MergeResult {
   const notes: ImportProblem[] = [];
-  const { existing, main, defaults, codes } = input;
+  const { existing, main, codes } = input;
   let schema: SchemaFile;
   let replacedTables = 0;
   let keptTables = 0;
@@ -82,43 +81,17 @@ export function mergeImport(input: MergeInput): MergeResult {
     if (input.label) schema.source.label = input.label;
   } else {
     schema = emptySchema({ dbms: 'oracle', schema: input.fallbackSchema ?? 'SCHEMA', label: input.label });
-    if (defaults && defaults.defaults.length) {
-      notes.push({ level: 'error', message: '기본값만으로는 저장할 수 없습니다. 본 쿼리 결과를 먼저 가져오세요.' });
-    }
+    notes.push({ level: 'error', message: '스키마 수집 결과를 먼저 가져오세요 (공통코드는 저장된 스키마에 합쳐집니다).' });
   }
 
-  // 기본값: 따로 가져온 것 + 본 쿼리와 함께 붙여 넣은 것(DEFAULT 행)
-  const expectedDefaults = main?.summary?.counts.DEFAULT;
-  const defaultRows = [...(main?.defaults ?? []), ...(defaults?.defaults ?? [])];
-  if (defaultRows.length > 0) {
-    const byKey = new Map(schema.columns.map((c) => [`${c.table}|${c.name}`, c]));
-    let applied = 0;
-    let missing = 0;
-    for (const d of defaultRows) {
-      const col = byKey.get(`${d.table}|${d.column}`);
-      if (col) {
-        col.default = d.value;
-        applied++;
-      } else {
-        missing++;
-      }
-    }
-    if (missing) notes.push({ level: 'warn', message: `기본값 ${missing}개는 맞는 컬럼이 없어 버렸습니다 (본 쿼리와 접두어가 다른지 확인).` });
-    if (expectedDefaults !== undefined && applied !== expectedDefaults) {
-      notes.push({ level: 'warn', message: `기본값 ${expectedDefaults}개 중 ${applied}개만 받았습니다. 기본값 쿼리 결과를 끝까지 복사했는지 확인하세요.` });
-    }
-  } else if (main && expectedDefaults) {
-    notes.push({ level: 'warn', message: `기본값 ${expectedDefaults}개를 아직 가져오지 않았습니다. ② 기본값 쿼리 결과를 가져오면 채워집니다 (나중에 가져와도 됨).` });
-  }
-
-  const codeRows = [...(main?.codes ?? []), ...(codes?.codes ?? [])];
+  const codeRows = codes?.codes ?? [];
   if (codeRows.length) {
     schema.codes = codeRows;
   }
 
   schema.tables.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   schema.columns.sort((a, b) => (a.table === b.table ? a.position - b.position : a.table < b.table ? -1 : 1));
-  // 테이블 행이 없는 컬럼(REC 없는 결과에서 테이블 코멘트가 없을 때)도 테이블로 등록
+  // 테이블 정보 없이 컬럼만 있는 경우도 테이블로 등록
   const known = new Set(schema.tables.map((t) => t.name));
   for (const c of schema.columns) {
     if (!known.has(c.table)) {

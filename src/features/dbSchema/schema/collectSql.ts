@@ -1,8 +1,14 @@
 /**
- * Oracle 스키마 수집 SQL 만들기 (vscode 의존 없음). docs/SPEC-db-schema 6장·6.1 과 같은 SQL.
- *  - 본 쿼리: 테이블·뷰, 컬럼, PK/UK/FK, 인덱스 + 행 수 검증용 SUMMARY
- *  - 기본값 쿼리: DATA_DEFAULT 가 LONG 이라 본 쿼리와 합칠 수 없어 따로
- * 두 쿼리에 같은 접두어가 들어가도록 여기서 함께 만든다.
+ * Oracle 스키마 수집 SQL 만들기 (vscode 의존 없음). docs/SPEC-db-schema-v8 6장과 같은 SQL.
+ *
+ * 한 번 실행·한 번 복사로 끝나는 "컬럼 1행" 쿼리:
+ *  - 테이블·컬럼 정보 + 기본값(DATA_DEFAULT) + PK 순서 + UK/FK/인덱스(컬럼별로 LISTAGG 로 묶은 글)
+ *  - DATA_DEFAULT 는 LONG 타입이라 UNION·함수·WITH 안에 쓸 수 없다. 그래서
+ *      · UNION 을 쓰지 않고 (컬럼마다 한 행)
+ *      · WITH 대신 FROM 안의 인라인 뷰로 쓰고
+ *      · 바깥 조인은 Oracle (+) 문법으로 쓴다 (ANSI 조인은 내부적으로 뷰로 바뀌어 LONG 오류가 나는 버전이 있음)
+ *      · DATA_DEFAULT 는 맨 끝 칸 (줄바꿈이 섞여 복사가 쪼개져도 DevBoost 가 이어 붙일 수 있게)
+ *  - META 칸: 스키마·수집 시각·접두어·전체 행 수. 그리드가 일부 행만 복사한 경우를 잡는 데 씀
  */
 
 /** 접두어 정리: 공백 제거, 대문자, 빈 값·중복 제거 */
@@ -17,119 +23,101 @@ export function normalizePrefixes(prefixes: string[]): string[] {
 
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
-/** p 의 행들: 접두어마다 한 줄. 없으면 NULL 한 줄(전체) */
-function prefixRows(prefixes: string[], indent: string): string {
+/** 접두어 목록 인라인 뷰 (prefix 한 칸). 없으면 NULL 한 줄 = 전체 */
+function prefixView(prefixes: string[], indent: string): string {
   const ps = normalizePrefixes(prefixes);
-  if (ps.length === 0) return `SELECT CAST(NULL AS VARCHAR2(128)) AS prefix FROM dual   -- 전체`;
-  return ps.map((p, i) => (i === 0 ? `SELECT ${lit(p)} AS prefix FROM dual` : `${indent}UNION ALL SELECT ${lit(p)} FROM dual`)).join('\n');
+  if (ps.length === 0) return `(SELECT CAST(NULL AS VARCHAR2(128)) AS prefix FROM dual)`;
+  return `(${ps.map((p, i) => (i === 0 ? `SELECT ${lit(p)} AS prefix FROM dual` : `\n${indent} UNION ALL SELECT ${lit(p)} FROM dual`)).join('')})`;
 }
 
-export function buildMainSql(prefixes: string[]): string {
-  const ps = normalizePrefixes(prefixes);
-  const title = ps.length ? `접두어 ${ps.join(', ')}` : '전체';
-  return `-- DevBoost 스키마 수집 ① 본 쿼리 (${title})
--- 실행(Ctrl+Enter) 후 결과 그리드 전체를 헤더와 함께 복사 → DevBoost 화면의 [클립보드에서 가져오기]
-WITH p AS (
-  ${prefixRows(prefixes, '  ')}
-),
-t AS (
-  SELECT table_name, table_type, comments
-    FROM user_tab_comments
-   WHERE table_type IN ('TABLE', 'VIEW')
-     AND table_name NOT LIKE 'BIN$%'
-     AND EXISTS (SELECT 1 FROM p
-                  WHERE p.prefix IS NULL
-                     OR SUBSTR(table_name, 1, LENGTH(p.prefix)) = p.prefix)
-),
-c AS (
-  SELECT tc.table_name, tc.column_name, tc.column_id, tc.data_type, tc.char_length, tc.char_used,
-         tc.data_length, tc.data_precision, tc.data_scale, tc.nullable, cc.comments
-    FROM user_tab_columns tc
-    JOIN t ON t.table_name = tc.table_name
-    LEFT JOIN user_col_comments cc
-      ON cc.table_name = tc.table_name AND cc.column_name = tc.column_name
-),
-k AS (
-  SELECT con.table_name, con.constraint_name, con.constraint_type, con.status, con.delete_rule,
-         col.position, col.column_name,
-         rcon.table_name AS ref_table, rcol.column_name AS ref_column
-    FROM user_constraints con
-    JOIN t ON t.table_name = con.table_name
-    JOIN user_cons_columns col ON col.constraint_name = con.constraint_name
-    LEFT JOIN user_constraints rcon
-      ON rcon.owner = con.r_owner AND rcon.constraint_name = con.r_constraint_name
-    LEFT JOIN user_cons_columns rcol
-      ON rcol.owner = con.r_owner AND rcol.constraint_name = con.r_constraint_name AND rcol.position = col.position
-   WHERE con.constraint_type IN ('P', 'U', 'R')
-),
-x AS (
-  SELECT ix.table_name, ix.index_name, ix.index_type, ix.uniqueness,
-         ic.column_position, ic.column_name, ic.descend
-    FROM user_indexes ix
-    JOIN t ON t.table_name = ix.table_name
-    JOIN user_ind_columns ic ON ic.index_name = ix.index_name
-)
-SELECT * FROM (
-  SELECT 'SUMMARY' rec, CAST(NULL AS VARCHAR2(128)) table_name, 'devboost-schema/1' name,
-         TO_NUMBER(NULL) seq, CAST(NULL AS VARCHAR2(128)) column_name, CAST(NULL AS VARCHAR2(30)) kind,
-         CAST(NULL AS VARCHAR2(128)) data_type, TO_NUMBER(NULL) char_length, CAST(NULL AS VARCHAR2(1)) char_used,
-         TO_NUMBER(NULL) data_length, TO_NUMBER(NULL) data_precision, TO_NUMBER(NULL) data_scale,
-         CAST(NULL AS VARCHAR2(1)) nullable, CAST(NULL AS VARCHAR2(9)) uniqueness, CAST(NULL AS VARCHAR2(4)) descend,
-         CAST(NULL AS VARCHAR2(128)) ref_table, CAST(NULL AS VARCHAR2(128)) ref_column,
-         CAST(NULL AS VARCHAR2(9)) delete_rule, CAST(NULL AS VARCHAR2(8)) status,
-         'schema=' || USER
-           || ';db=' || SYS_CONTEXT('USERENV', 'DB_NAME')
-           || ';at=' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
-           || ';prefix=' || (SELECT LISTAGG(prefix, ',') WITHIN GROUP (ORDER BY prefix) FROM p)
-           || ';TABLE=' || (SELECT COUNT(*) FROM t)
-           || ';COLUMN=' || (SELECT COUNT(*) FROM c)
-           || ';CONS=' || (SELECT COUNT(*) FROM k)
-           || ';INDEX=' || (SELECT COUNT(*) FROM x)
-           || ';DEFAULT=' || (SELECT COUNT(*) FROM user_tab_columns d JOIN t ON t.table_name = d.table_name
-                               WHERE d.data_default IS NOT NULL) AS comments
-    FROM dual
-  UNION ALL
-  SELECT 'TABLE', table_name, NULL, NULL, NULL, table_type,
-         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-         REPLACE(REPLACE(REPLACE(comments, CHR(13), ' '), CHR(10), ' '), CHR(9), ' ')
-    FROM t
-  UNION ALL
-  SELECT 'COLUMN', table_name, column_name, column_id, NULL, NULL,
-         data_type, char_length, char_used, data_length, data_precision, data_scale, nullable,
-         NULL, NULL, NULL, NULL, NULL, NULL,
-         REPLACE(REPLACE(REPLACE(comments, CHR(13), ' '), CHR(10), ' '), CHR(9), ' ')
-    FROM c
-  UNION ALL
-  SELECT 'CONS', table_name, constraint_name, position, column_name, constraint_type,
-         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-         ref_table, ref_column, delete_rule, status, NULL
-    FROM k
-  UNION ALL
-  SELECT 'INDEX', table_name, index_name, column_position, column_name, index_type,
-         NULL, NULL, NULL, NULL, NULL, NULL, NULL, uniqueness, descend,
-         NULL, NULL, NULL, NULL, NULL
-    FROM x
-)
-ORDER BY DECODE(rec, 'SUMMARY', 0, 'TABLE', 1, 'COLUMN', 2, 'CONS', 3, 4), table_name, name, seq;
-`;
+/** 대상 테이블 조건 (table_name 컬럼에 대해) */
+function scopeCond(col: string, prefixes: string[], indent: string): string {
+  return `EXISTS (SELECT 1 FROM ${prefixView(prefixes, indent + '                ')} p
+${indent}         WHERE p.prefix IS NULL OR SUBSTR(${col}, 1, LENGTH(p.prefix)) = p.prefix)`;
 }
 
-export function buildDefaultSql(prefixes: string[]): string {
+const clean = (expr: string) => `REPLACE(REPLACE(REPLACE(${expr}, CHR(13), ' '), CHR(10), ' '), CHR(9), ' ')`;
+
+export function buildCollectSql(prefixes: string[]): string {
   const ps = normalizePrefixes(prefixes);
   const title = ps.length ? `접두어 ${ps.join(', ')}` : '전체';
-  return `-- DevBoost 스키마 수집 ② 기본값 쿼리 (${title}, ①과 같은 범위)
--- DATA_DEFAULT 가 LONG 타입이라 ①과 합칠 수 없어 따로 받는다. 실행 후 결과 그리드 전체 복사 → [클립보드에서 가져오기]
-SELECT 'DEFAULT' AS rec, tc.table_name, tc.column_name AS name, tc.data_default AS comments
-  FROM user_tab_columns tc
-  JOIN user_tab_comments t ON t.table_name = tc.table_name
- WHERE t.table_type IN ('TABLE', 'VIEW')
-   AND t.table_name NOT LIKE 'BIN$%'
-   AND EXISTS (SELECT 1
-                 FROM (${prefixRows(prefixes, '                       ')}
-                      ) p
-                WHERE p.prefix IS NULL
-                   OR SUBSTR(tc.table_name, 1, LENGTH(p.prefix)) = p.prefix)
-   AND tc.data_default IS NOT NULL
+  return `-- DevBoost 스키마 수집 (${title}) — 실행(Ctrl+Enter) 후 결과 그리드 전체를 헤더와 함께 복사 → DevBoost [클립보드에서 가져오기]
+-- 컬럼마다 한 행. 기본값(DATA_DEFAULT, LONG)까지 한 번에 나오도록 UNION·WITH 없이 씀
+SELECT tc.table_name,
+       t.table_type,
+       t.table_comment,
+       tc.column_id,
+       tc.column_name,
+       ${clean('cc.comments')} AS column_comment,
+       tc.data_type,
+       tc.char_length,
+       tc.char_used,
+       tc.data_length,
+       tc.data_precision,
+       tc.data_scale,
+       tc.nullable,
+       pk.pk_pos,
+       pk.pk_name,
+       uk.uks,
+       fk.fks,
+       ix.idxs,
+       m.meta,
+       tc.data_default
+  FROM user_tab_columns tc,
+       -- 대상 테이블·뷰 (접두어, 휴지통 제외)
+       (SELECT table_name, table_type, ${clean('comments')} AS table_comment
+          FROM user_tab_comments
+         WHERE table_type IN ('TABLE', 'VIEW')
+           AND table_name NOT LIKE 'BIN$%'
+           AND ${scopeCond('table_name', prefixes, '          ')}) t,
+       user_col_comments cc,
+       -- PK: 컬럼별 순서
+       (SELECT cc2.table_name, cc2.column_name, cc2.position AS pk_pos, c.constraint_name AS pk_name
+          FROM user_constraints c, user_cons_columns cc2
+         WHERE c.constraint_type = 'P' AND cc2.constraint_name = c.constraint_name) pk,
+       -- UK: 이름(순서), …
+       (SELECT cc2.table_name, cc2.column_name,
+               LISTAGG(c.constraint_name || '(' || cc2.position || ')', ', ') WITHIN GROUP (ORDER BY c.constraint_name) AS uks
+          FROM user_constraints c, user_cons_columns cc2
+         WHERE c.constraint_type = 'U' AND cc2.constraint_name = c.constraint_name
+         GROUP BY cc2.table_name, cc2.column_name) uk,
+       -- FK: 이름(순서)=참조테이블.참조컬럼 [삭제규칙], …
+       (SELECT cc2.table_name, cc2.column_name,
+               LISTAGG(c.constraint_name || '(' || cc2.position || ')=' || NVL(rc.table_name, '?') || '.' || NVL(rcc.column_name, '?')
+                       || CASE WHEN c.delete_rule <> 'NO ACTION' THEN ' ' || c.delete_rule END, ', ')
+                 WITHIN GROUP (ORDER BY c.constraint_name) AS fks
+          FROM user_constraints c, user_cons_columns cc2, user_constraints rc, user_cons_columns rcc
+         WHERE c.constraint_type = 'R' AND cc2.constraint_name = c.constraint_name
+           AND rc.owner(+) = c.r_owner AND rc.constraint_name(+) = c.r_constraint_name
+           AND rcc.owner(+) = c.r_owner AND rcc.constraint_name(+) = c.r_constraint_name AND rcc.position(+) = cc2.position
+         GROUP BY cc2.table_name, cc2.column_name) fk,
+       -- 인덱스: 이름(순서[ DESC][ U]), …   (U = 유니크 인덱스)
+       (SELECT ic.table_name, ic.column_name,
+               LISTAGG(ic.index_name || '(' || ic.column_position || CASE WHEN ic.descend = 'DESC' THEN ' DESC' END
+                       || CASE WHEN i.uniqueness = 'UNIQUE' THEN ' U' END || ')', ', ') WITHIN GROUP (ORDER BY ic.index_name) AS idxs
+          FROM user_ind_columns ic, user_indexes i
+         WHERE i.index_name = ic.index_name
+         GROUP BY ic.table_name, ic.column_name) ix,
+       -- 수집 정보 + 전체 행 수 (일부만 복사됐는지 확인용, 모든 행에 같은 값)
+       (SELECT 'schema=' || USER
+               || ';db=' || SYS_CONTEXT('USERENV', 'DB_NAME')
+               || ';at=' || TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
+               || ';prefix=' || pl.prefixes
+               || ';rows=' || n.cnt AS meta
+          FROM (SELECT LISTAGG(prefix, ',') WITHIN GROUP (ORDER BY prefix) AS prefixes
+                  FROM ${prefixView(prefixes, '                      ')}) pl,
+               (SELECT COUNT(*) AS cnt
+                  FROM user_tab_columns x, user_tab_comments y
+                 WHERE y.table_name = x.table_name
+                   AND y.table_type IN ('TABLE', 'VIEW')
+                   AND y.table_name NOT LIKE 'BIN$%'
+                   AND ${scopeCond('y.table_name', prefixes, '                  ')}) n) m
+ WHERE t.table_name = tc.table_name
+   AND cc.table_name(+) = tc.table_name AND cc.column_name(+) = tc.column_name
+   AND pk.table_name(+) = tc.table_name AND pk.column_name(+) = tc.column_name
+   AND uk.table_name(+) = tc.table_name AND uk.column_name(+) = tc.column_name
+   AND fk.table_name(+) = tc.table_name AND fk.column_name(+) = tc.column_name
+   AND ix.table_name(+) = tc.table_name AND ix.column_name(+) = tc.column_name
  ORDER BY tc.table_name, tc.column_id;
 `;
 }
