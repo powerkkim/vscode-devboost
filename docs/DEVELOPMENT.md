@@ -30,12 +30,13 @@ vscode-devboost/
 │     └─ dbSchema/          DB 스키마 가져오기 · 테이블 정의서
 │        ├─ index.ts        명령 등록
 │        ├─ schema/         vscode 의존 없음
-│        │  ├─ collectSql.ts      수집 SQL (본 쿼리·기본값 쿼리, 접두어)
+│        │  ├─ collectSql.ts      수집 SQL (컬럼 1행 한 방 쿼리, 접두어)
 │        │  ├─ csv.ts             탭/CSV 읽기, Excel 용 CSV 쓰기
 │        │  ├─ importer.ts        수집 결과 → 스키마 조각 (헤더·행 수 검증·타입 정리)
 │        │  ├─ merge.ts           저장 파일로 합치기 (접두어 테이블만 교체)
-│        │  ├─ tableDoc.ts        테이블 정의서 CSV (목차 + 정의서)
-│        │  └─ types.ts           저장 규격 (devboost-schema)
+│        │  ├─ tableDoc.ts        테이블 정의서 (Excel: 목차 + 테이블별 시트 / CSV)
+│        │  ├─ types.ts           저장 규격 (devboost-schema)
+│        │  └─ xlsx.ts            작은 .xlsx 작성기 (라이브러리 없이, zlib)
 │        ├─ schemaStore.ts  .devboost/schema/*.json 읽기·쓰기
 │        └─ ui/schemaPanel.ts   화면 (Webview)
 │        ├─ index.ts        명령·CodeLens 등록

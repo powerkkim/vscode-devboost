@@ -9,7 +9,7 @@
 | **Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
 | **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
-| **DB 스키마** — 스키마 가져오기, 테이블 정의서(CSV) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
+| **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -51,13 +51,13 @@ DB 에 직접 접속하지 않습니다. 화면이 알려 주는 쿼리를 실�
 
 1. 명령 팔레트(`Ctrl+Shift+P`) → `DB 스키마: 스키마 가져오기 · 테이블 정의서`
 2. **범위**: 테이블 접두어 (`TB_`, 여러 개는 쉼표, 비우면 전체)와 환경(개발/운영 …)
-3. **본 쿼리** `▶ 워크시트에서 실행` → 결과 그리드 전체를 헤더와 함께 복사 → `클립보드에서 가져오기`
-4. **기본값 쿼리**도 같은 방법 (Oracle 이 기본값을 LONG 으로 저장해 따로 받음. 나중에 해도 됨)
-5. **저장** → `.devboost/schema/<스키마>@<환경>.json`
-6. **가져온 데이터**에서 테이블을 고르고 `테이블 정의서로 추출 (CSV)` → 목차 CSV + 정의서 CSV
+3. **수집 쿼리** `▶ 워크시트에서 실행` → 결과 그리드 전체를 헤더와 함께 복사 → `클립보드에서 가져오기` (쿼리 하나에 기본값·PK·FK·인덱스까지 다 나옴)
+4. **저장** → `.devboost/schema/<스키마>@<환경>.json`
+5. **가져온 데이터**에서 테이블을 고르고 `테이블 정의서로 추출 (Excel)` → 저장 창에 파일 이름 입력 → 목차 시트 + 테이블마다 시트 (목차의 테이블명을 누르면 그 시트로)
 
 - 결과가 많아 그리드가 일부 행만 복사하면 저장하지 않고 알려 줍니다 (끝까지 내려 다시 복사하거나 CSV 로 내보내 `파일에서 가져오기`)
-- 규격과 수집 쿼리: [docs/SPEC-db-schema-v7-2026-10-26.md](docs/SPEC-db-schema-v7-2026-10-26.md)
+- 회사·인터넷에서 쓰던 컬럼 명세 쿼리 결과(한글 별칭: 테이블명, 컬럼명, 데이터유형, 기본값 …)도 가져올 수 있습니다
+- 규격과 수집 쿼리: [docs/SPEC-db-schema-v8-2026-10-26.md](docs/SPEC-db-schema-v8-2026-10-26.md)
 
 ## 설치
 

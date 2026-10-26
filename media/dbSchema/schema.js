@@ -60,12 +60,9 @@
     if (!m) return h('div', { class: 'muted small' }, '아직 가져오지 않음');
     if (m.kind === 'json') return h('div', { class: 'ok' }, '✔ 저장 규격(JSON) 파일');
     const s = m.summary;
-    const cnt = (k, label, got) => {
-      const exp = s && s.counts[k];
-      const bad = exp !== undefined && exp !== got;
-      return h('span', { class: bad ? 'bad' : '' }, `${label} ${fmt(got)}${exp !== undefined && bad ? ` / ${fmt(exp)}` : ''}`);
-    };
     const errors = (m.problems || []).some((p) => p.level === 'error');
+    const exp = s && s.rows !== undefined ? s.rows : undefined;
+    const bad = exp !== undefined && exp !== m.rows;
     return h(
       'div',
       {},
@@ -75,26 +72,17 @@
         errors ? '✖ ' : '✔ ',
         s && s.schema ? `${s.schema} · ` : '',
         s ? `접두어 ${s.prefixes.length ? s.prefixes.join(', ') : '전체'} · ` : '',
-        cnt('TABLE', '테이블', m.received.TABLE || 0),
-        ' · ',
-        cnt('COLUMN', '컬럼', m.received.COLUMN || 0),
-        ' · ',
-        cnt('CONS', '제약', m.received.CONS || 0),
-        ' · ',
-        cnt('INDEX', '인덱스', m.received.INDEX || 0),
-        m.codes ? ` · 공통코드 ${fmt(m.codes)}` : ''
+        `테이블 ${fmt(m.tables)} · `,
+        h('span', { class: bad ? 'bad' : '' }, `컬럼 ${fmt(m.rows)}${bad ? ` / ${fmt(exp)}` : ''}`),
+        ` · 제약 ${fmt(m.constraints)} · 인덱스 ${fmt(m.indexes)} · 기본값 ${fmt(m.defaults)}`
       ),
       problems(m.problems)
     );
   }
 
-  function defaultStatus(d, main) {
-    const exp = main && main.summary ? main.summary.counts.DEFAULT : undefined;
-    if (!d) {
-      return h('div', { class: 'muted small' }, exp !== undefined ? `아직 가져오지 않음 (기본값 ${fmt(exp)}개 예정 — 나중에 가져와도 됨)` : '아직 가져오지 않음 (나중에 가져와도 됨)');
-    }
-    const bad = exp !== undefined && exp !== d.defaults;
-    return h('div', {}, h('div', { class: bad ? 'bad-line' : 'ok' }, bad ? '⚠ ' : '✔ ', `기본값 ${fmt(d.defaults)}개${bad ? ` / ${fmt(exp)}` : ''}`), problems(d.problems));
+  function codeStatus(c) {
+    if (!c) return null;
+    return h('div', {}, h('div', { class: 'ok' }, `✔ 공통코드 ${fmt(c.codes)}개`), problems(c.problems));
   }
 
   /** 입력칸의 지금 값 (저장 지연과 관계없이 버튼에 실어 보냄) */
@@ -104,14 +92,14 @@
     return { prefixes: p ? p.value.split(/[,\s]+/) : undefined, label: l ? l.value : undefined };
   }
 
-  function queryButtons(which, s) {
+  function queryButtons(s) {
     const o = s.oracle;
     return h(
       'div',
       { class: 'btns' },
-      h('button', { class: 'primary', onclick: () => post({ type: 'send', which, run: true, ...currentInputs() }), title: o.target ? `보낼 곳: ${o.target}` : '접속에서 Open SQL Worksheet 로 연 워크시트가 있으면 그곳으로, 없으면 새 워크시트' }, '▶ 워크시트에서 실행'),
-      h('button', { onclick: () => post({ type: 'send', which, run: false, ...currentInputs() }) }, '워크시트에 넣기'),
-      h('button', { onclick: () => post({ type: 'copySql', which, ...currentInputs() }), title: 'DBeaver 등 다른 도구에서 실행할 때' }, '쿼리 복사'),
+      h('button', { class: 'primary', onclick: () => post({ type: 'send', run: true, ...currentInputs() }), title: o.target ? `보낼 곳: ${o.target}` : '접속에서 Open SQL Worksheet 로 연 워크시트가 있으면 그곳으로, 없으면 새 워크시트' }, '▶ 워크시트에서 실행'),
+      h('button', { onclick: () => post({ type: 'send', run: false, ...currentInputs() }) }, '워크시트에 넣기'),
+      h('button', { onclick: () => post({ type: 'copySql', ...currentInputs() }), title: 'DBeaver 등 다른 도구에서 실행할 때' }, '쿼리 복사'),
       h('span', { class: 'sep' }),
       h('button', { class: 'accent', onclick: () => post({ type: 'importClipboard' }), title: '결과 그리드 전체(헤더 포함)를 복사한 뒤 누르세요' }, '📋 클립보드에서 가져오기')
     );
@@ -121,7 +109,7 @@
     const st = s.staged;
     const m = st.main;
     const mainOk = m && !(m.problems || []).some((p) => p.level === 'error');
-    const canSave = mainOk || ((st.defaults || st.codes) && s.current);
+    const canSave = mainOk || (st.codes && s.current);
     const prefixInput = h('input', {
       type: 'text', class: 'prefix', value: s.ui.prefixes.join(', '), placeholder: '비우면 전체 (예: TB_, TC_)', spellcheck: 'false',
       oninput: (e) => {
@@ -157,12 +145,11 @@
         ),
         h('div', { class: 'muted small' }, s.ui.prefixes.length ? `${s.ui.prefixes.join(', ')} 로 시작하는 테이블만 가져옵니다. 저장할 때 이 접두어 테이블만 교체하고 나머지는 그대로 둡니다.` : '모든 테이블을 가져옵니다.')
       ),
-      h('div', { class: 'step' }, stepHead('2', '본 쿼리', mainOk, '테이블·컬럼·PK/FK·인덱스'), queryButtons('main', s), mainStatus(m)),
-      h('div', { class: 'step' }, stepHead('3', '기본값 쿼리', !!st.defaults, 'Oracle 이 기본값을 LONG 으로 저장해 따로 받습니다'), queryButtons('default', s), defaultStatus(st.defaults, m)),
+      h('div', { class: 'step' }, stepHead('2', '수집 쿼리', mainOk, '컬럼마다 한 행: 테이블·컬럼·기본값·PK/UK/FK·인덱스를 한 번에'), queryButtons(s), mainStatus(m), codeStatus(st.codes)),
       h(
         'div',
         { class: 'step' },
-        stepHead('4', '저장', false),
+        stepHead('3', '저장', false),
         h(
           'div',
           { class: 'btns' },
@@ -170,7 +157,7 @@
           h('span', { class: 'muted small' }, target),
           h('span', { class: 'sep' }),
           h('button', { class: 'link', onclick: () => post({ type: 'importFile' }), title: '행이 많아 CSV 로 내보냈을 때' }, '파일에서 가져오기'),
-          m || st.defaults || st.codes ? h('button', { class: 'link', onclick: () => post({ type: 'clearStaged' }) }, '가져온 결과 비우기') : null
+          m || st.codes ? h('button', { class: 'link', onclick: () => post({ type: 'clearStaged' }) }, '가져온 결과 비우기') : null
         )
       )
     );
@@ -300,18 +287,15 @@
         h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: includeViews, onchange: (e) => ((includeViews = e.target.checked), render()) }), '뷰 포함'),
         h('span', { class: 'muted small' }, `${fmt(picked.length)}개 선택`),
         h('span', { class: 'sep' }),
-        h('button', { class: 'primary', disabled: picked.length === 0, onclick: () => post({ type: 'exportDoc', tables: picked.map((t) => t.name) }) }, '테이블 정의서로 추출 (CSV)')
+        h('button', { class: 'primary', disabled: picked.length === 0, onclick: () => post({ type: 'exportDoc', tables: picked.map((t) => t.name) }) }, '테이블 정의서로 추출 (Excel)')
       ),
       exp
         ? h(
             'div',
             { class: 'exported' },
             `✔ 테이블 ${exp.tables}개 정의서 저장됨 · `,
-            h('a', { href: '#', onclick: (e) => (e.preventDefault(), post({ type: 'openPath', path: exp.detail, external: true })) }, '정의서 열기'),
-            ' · ',
-            h('a', { href: '#', onclick: (e) => (e.preventDefault(), post({ type: 'openPath', path: exp.index, external: true })) }, '목차 열기'),
-            ' · ',
-            h('a', { href: '#', onclick: (e) => (e.preventDefault(), post({ type: 'openPath', path: exp.detail })) }, '폴더 열기')
+            exp.files.map((f) => [h('a', { href: '#', title: f.path, onclick: (e) => (e.preventDefault(), post({ type: 'openPath', path: f.path, external: true })) }, `${f.label} 열기`), ' · ']),
+            h('a', { href: '#', onclick: (e) => (e.preventDefault(), post({ type: 'openPath', path: exp.files[0].path })) }, '폴더 열기')
           )
         : null,
       h(
