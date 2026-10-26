@@ -4,12 +4,17 @@ import { sqlFromAnnotationArgs } from './mybatisParser';
 import { extractTables } from './sqlTables';
 import { SqlStatement } from './mybatisParser';
 import { joinMapping, matchPaths, pathSegments } from './pathMatch';
+import { applyProxy, ViteProxy } from '../analyzer/viteProbe';
 import type { AtlasEdge, AtlasGraph, AtlasNode } from '../analyzer/types';
 
 export interface AttachOptions {
   /** 컨트롤러에서 몇 단계 아래까지 따라갈지 (기본 6) */
   maxDepth?: number;
   useCache?: boolean;
+  /** 프론트 개발 서버의 프록시 규칙 (Vite server.proxy). 있으면 rewrite 된 경로로도 매칭한다 */
+  proxies?: ViteProxy[];
+  /** 백엔드의 context-path ('/plm' 등). 매핑 경로 앞에 붙여 비교한다 */
+  contextPath?: string;
 }
 
 interface Endpoint {
@@ -234,13 +239,26 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
   for (const api of graph.nodes.filter((n) => n.kind === 'api-call')) {
     apiTotal++;
     const method = String(api.meta.method ?? 'GET').toUpperCase();
-    const segs = pathSegments(String(api.meta.url ?? ''));
+    const rawUrl = String(api.meta.url ?? '');
+    // 개발 서버 프록시를 거치면 서버에는 rewrite 된 경로로 도착한다 → 그 경로를 먼저, 원래 경로를 다음으로 본다
+    const proxied = opts.proxies?.length ? applyProxy(rawUrl, opts.proxies) : null;
+    if (proxied) api.meta.proxied = `${proxied.target}${proxied.path}`;
+    const candidates = proxied ? [proxied.path, rawUrl] : [rawUrl];
+    const ctx = (opts.contextPath ?? '').replace(/\/$/, '');
     const exact: Endpoint[] = [], suffix: Endpoint[] = []; // suffix 에는 loose 도 포함 (둘 다 '추정')
-    for (const ep of endpoints) {
-      if (ep.httpMethod !== 'ANY' && ep.httpMethod !== method) continue;
-      const k = matchPaths(segs, ep.segs);
-      if (k === 'exact') exact.push(ep);
-      else if (k === 'suffix' || k === 'loose') suffix.push(ep);
+    for (const cand of candidates) {
+      const segs = pathSegments(cand);
+      // context-path 가 있으면 프론트 경로에서 그만큼 떼고 비교 (없는 경우도 같이 시도)
+      const segList = ctx ? [pathSegments(cand.startsWith(ctx + '/') ? cand.slice(ctx.length) : cand), segs] : [segs];
+      for (const ep of endpoints) {
+        if (ep.httpMethod !== 'ANY' && method !== 'ANY' && ep.httpMethod !== method) continue;
+        for (const sg of segList) {
+          const k = matchPaths(sg, ep.segs);
+          if (k === 'exact') { if (!exact.includes(ep)) exact.push(ep); break; }
+          if (k === 'suffix' || k === 'loose') { if (!suffix.includes(ep)) suffix.push(ep); }
+        }
+      }
+      if (exact.length) break; // 프록시 경로로 정확히 맞으면 원래 경로는 보지 않는다
     }
     // Spring 은 고정 문자열 경로가 {변수} 경로보다 우선한다 → 고정 세그먼트가 가장 많은 후보만 남긴다
     const literals = (ep: Endpoint) => ep.segs.filter((x) => x !== '{}').length;
@@ -255,7 +273,7 @@ export function attachBackend(graph: AtlasGraph, workspaceRoot: string, opts: At
     if (exact.length) {
       // 래퍼(api.post 등)로 부른 호출도 서버 엔드포인트와 정확히 맞으면 실제 HTTP 호출로 확인된 것 → 확실로 올린다
       api.meta.confirmedBy = 'backend';
-      api.warnings = api.warnings?.filter((w) => !w.startsWith('커스텀 래퍼'));
+      api.warnings = api.warnings?.filter((w) => !w.startsWith('커스텀 래퍼') && !w.startsWith('끝점을 코드로 확인하지 못해'));
       if (!api.warnings?.length) delete api.warnings;
       for (const e of edges.values()) {
         if (e.to === api.id && e.type === 'calls') e.certainty = 'sure';

@@ -14,6 +14,8 @@ export interface AtlasEdge {
   type: string;
   certainty: 'sure' | 'guess';
   label?: string;
+  via?: string[];
+  indirect?: boolean;
 }
 export interface AtlasGraph {
   version: number;
@@ -21,4 +23,5 @@ export interface AtlasGraph {
   analyzer: string;
   nodes: AtlasNode[];
   edges: AtlasEdge[];
+  meta?: Record<string, any>;
 }

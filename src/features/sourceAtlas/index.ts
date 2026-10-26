@@ -33,6 +33,8 @@ export const sourceAtlas: Feature = {
           maxUp: cfg.get<number>('maxUpDepth', 3),
           backend: cfg.get<boolean>('backend.enabled', true),
           backendDepth: cfg.get<number>('backend.maxDepth', 6),
+          vite: cfg.get<boolean>('vite.enabled', true) ? {} : false,
+          contextPath: cfg.get<string>('backend.contextPath', '') || undefined,
           aliases: cfg.get<Record<string, string>>('aliases', {}),
           fresh: true,
         });

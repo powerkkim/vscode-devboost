@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Resolver } from './resolver';
 import { buildAtlasGraph } from './graphBuilder';
+import type { FlowEngine } from './flow/engine';
 import type { AtlasEdge, AtlasGraph, AtlasNode } from './types';
 
 /**
@@ -105,6 +106,7 @@ export interface AncestorOptions {
   maxUp?: number;
   aliases?: Record<string, string>;
   useCache?: boolean;
+  engine?: FlowEngine;
 }
 
 /** graph 에 상위 컴포넌트·라우트를 추가하고 요약 문자열을 돌려준다 */
@@ -133,7 +135,7 @@ export function attachAncestors(graph: AtlasGraph, rootAbs: string, opts: Ancest
     const ex = nodes.get(id);
     if (ex) return ex;
     // 깊이 0 으로 분석하면 그 파일 자신의 props/emits 등 메타만 얻는다 (자식은 펼치지 않음)
-    const g = buildAtlasGraph(abs, { workspaceRoot: root, maxDepth: 0, aliases: opts.aliases });
+    const g = buildAtlasGraph(abs, { workspaceRoot: root, maxDepth: 0, aliases: opts.aliases, engine: opts.engine });
     const n = g.nodes.find((x) => x.id === g.root)!;
     n.meta.relation = 'ancestor';
     delete n.meta.truncated;
