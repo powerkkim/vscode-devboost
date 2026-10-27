@@ -3,6 +3,11 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
+  // 알림은 다시 그리기(render)와 상관없이 남아 있도록 app 밖에 둔다 (실행 중 표시가 끝까지 보이게)
+  const noticeBar = document.createElement('div');
+  noticeBar.id = 'notice';
+  noticeBar.className = 'notice';
+  document.body.append(noticeBar);
   let state = null;
   let paramSig = '';
   const timers = {};
@@ -62,13 +67,30 @@
     return out.join('');
   }
 
-  function notice(text, kind) {
+  /** busy: 끝날 때까지 남아 있고 since 부터 경과 초를 센다 (실행 중 표시) */
+  function notice(text, kind, since) {
     const bar = document.getElementById('notice');
     if (!bar) return;
-    bar.textContent = text;
-    bar.className = `notice ${kind || 'info'} show`;
     clearTimeout(timers.__notice);
-    timers.__notice = setTimeout(() => (bar.className = 'notice'), 4000);
+    clearInterval(timers.__noticeTick);
+    bar.className = `notice ${kind || 'info'} show`;
+    if (kind !== 'busy') {
+      bar.textContent = text;
+      timers.__notice = setTimeout(() => (bar.className = 'notice'), kind === 'warn' ? 12000 : 5000);
+      return;
+    }
+    const spin = document.createElement('span');
+    spin.className = 'spin';
+    const sec = document.createElement('span');
+    sec.className = 'elapsed';
+    bar.replaceChildren(spin, document.createTextNode(text), sec);
+    const start = typeof since === 'number' ? since : Date.now();
+    const tick = () => {
+      const s = Math.max(0, Math.floor((Date.now() - start) / 1000));
+      sec.textContent = s < 60 ? ` ${s}초` : ` ${Math.floor(s / 60)}분 ${String(s % 60).padStart(2, '0')}초`;
+    };
+    tick();
+    timers.__noticeTick = setInterval(tick, 1000);
   }
 
   // ── 파라미터
@@ -295,8 +317,7 @@
             h('div', { id: 'binds' })
           )
         )
-      ),
-      h('div', { id: 'notice', class: 'notice' })
+      )
     );
   }
 
@@ -310,7 +331,7 @@
       app.innerHTML = '';
       app.append(h('div', { class: 'empty' }, m.message));
     } else if (m.type === 'notice') {
-      notice(m.text, m.kind);
+      notice(m.text, m.kind, m.since);
     }
   });
 
