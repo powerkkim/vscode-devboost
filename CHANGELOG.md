@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+- **케이스 변환** (새 기능, 명령 팔레트 `케이스 변환:`): 이름 표기법 변환과 자주 쓰는 코드 변환
+  - 케이스 변환: 선택한 이름(없으면 커서 아래 이름)을 camelCase · PascalCase · snake_case · SCREAMING_SNAKE_CASE · kebab-case · dot.case 로 변환. 변환 결과를 미리 보며 고르고, 여러 곳을 선택하면 한 번에 바뀜. `userID` → `user_id` 처럼 약어도 단어로 취급
+  - SQL·컬럼 이름 → Java 필드: mapper XML 쿼리의 SELECT 목록(별칭·함수·`<if>` 등 동적 태그·CDATA·같은 파일의 `<include>` 처리), INSERT 컬럼, `CREATE TABLE`(주석·`COMMENT ON COLUMN` 포함), 컬럼 이름 목록, 테이블 이름을 `private 타입 이름;` 으로 변환. 가져온 DB 스키마가 있으면 실제 타입·설명을 쓰고 `SELECT *` 도 펼침, 없으면 이름으로 타입 추정
+  - Java 필드 → TypeScript 인터페이스: 클래스·record·필드 몇 줄 지원, 제네릭·배열·Map·Optional·날짜 변환. 필드 표기(`name` / `name | null` / `name?`)·날짜·Object 타입은 설정으로 선택
+  - Java 필드 → MyBatis SQL: SELECT 컬럼, INSERT, UPDATE, resultMap
+  - 설정 `devBoost.caseConverter.*` 추가 (결과 내보내기 방식, 날짜 타입, 컬럼 대소문자 등)
+
 ## 0.11.0 - 2026-10-28
 - **Search Everywhere 속도**: 입력하는 동안 결과가 늦게 나오던 문제 수정
   - 새 글자를 치면 이전 텍스트 검색(rg)을 바로 멈춤. 예전에는 쓸모없어진 검색이 끝까지 돌며 다음 검색을 늦췄음
