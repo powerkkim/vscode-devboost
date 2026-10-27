@@ -286,6 +286,17 @@ body {
   white-space: nowrap;
 }
 
+.row.more {
+  color: var(--vscode-textLink-foreground);
+  font-size: 12px;
+  padding-left: 36px;
+}
+
+.row.note {
+  color: var(--se-muted);
+  cursor: default;
+}
+
 .row.selected {
   background: var(--se-select-bg);
   color: var(--se-select-fg);

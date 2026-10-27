@@ -100,3 +100,13 @@ test('파일 목록을 직접 넘기기 (최근 본/변경 파일 범위)', { sk
   const list = ['src/main/resources/case.txt', 'src/main/java/com/demo/DemoApplication.java'].map((p) => path.join(root, p));
   assert.equal(files(await run({ roots: list })).length, 2);
 });
+
+test('listFiles: 개수 제한 없이 .gitignore 반영, 숨김 파일 포함, .git·제외 폴더 빼기', { skip }, async () => {
+  require('fs').writeFileSync(path.join(root, '.env'), 'A=1\n');
+  const all = (await rg.listFiles(RG, [root], ['**/target/**'])).map((f) => rel(root, f));
+  assert.ok(all.includes('src/main/java/com/demo/DemoApplication.java'));
+  assert.ok(all.includes('.env'), '숨김 파일');
+  assert.ok(!all.some((p) => p.startsWith('.git/')), '.git 폴더');
+  assert.ok(!all.some((p) => p.startsWith('target/')), '제외 설정');
+  assert.ok(!all.some((p) => p.startsWith('ignored/')), '.gitignore');
+});

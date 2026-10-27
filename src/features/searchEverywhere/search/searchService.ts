@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
-import { findRipgrep, runRipgrep, splitGlobs, RgMatch } from './ripgrep';
+import { findRipgrep, runRipgrep, listFiles, splitGlobs, RgMatch } from './ripgrep';
 import { GlobMatcher } from './glob';
 import {
   SearchOptions,
@@ -51,12 +51,25 @@ export interface SearchTiming {
   note?: string;
 }
 
+/** 종류별 개수: 화면에 보인 수 / 전체 수. 잘렸으면 화면이 "더 보기"를 붙인다 */
+export interface GroupCount {
+  kind: ResultKind;
+  shown: number;
+  total: number;
+  /** 전체 수가 상한에 걸려 실제로는 더 많을 수 있음 (텍스트 2,000건 등) */
+  capped?: boolean;
+}
+
 export interface SearchResult {
   items: SearchItem[];
   timings: SearchTiming[];
   /** 확장(Node) 쪽에서 검색에 걸린 전체 시간 */
   totalMs: number;
+  groups: GroupCount[];
 }
+
+/** 하위 검색이 전체 개수를 알려 주는 통로 */
+type CountSink = (total: number, capped?: boolean) => void;
 
 const CLASS_KINDS = new Set<vscode.SymbolKind>([
   vscode.SymbolKind.Class,
@@ -66,6 +79,11 @@ const CLASS_KINDS = new Set<vscode.SymbolKind>([
 ]);
 
 const MAX_TEXT_FILE_SIZE = 1024 * 1024; // 1MB 넘는 파일은 텍스트 검색에서 제외
+/**
+ * 텍스트 검색에서 정렬 전에 모으는 최대 매치 수. 이만큼 모은 뒤 우선순위(열린 파일 → src → …)로 정렬해 보여 준다.
+ * 흔한 단어도 이 정도는 금방 모인다(수십 ms). 끝까지 다 모으면 큰 프로젝트에서 1초 가까이 걸린다.
+ */
+const TEXT_COLLECT_MAX = 2000;
 const SYMBOL_CACHE_MS = 5000; // 같은 검색어의 심볼 결과는 5초간 재사용 (탭 전환 시 재요청 방지)
 
 function config() {
@@ -161,23 +179,40 @@ export class SearchService implements vscode.Disposable {
     tab: TabId,
     query: string,
     isStale: () => boolean = () => false,
-    onPartial?: (items: SearchItem[]) => void
+    onPartial?: (items: SearchItem[]) => void,
+    limit?: number
   ): Promise<SearchItem[]> {
-    return (await this.searchTimed(tab, query, isStale, onPartial && ((r) => onPartial(r.items)))).items;
+    return (await this.searchTimed(tab, query, isStale, onPartial && ((r) => onPartial(r.items)), limit)).items;
   }
 
   /**
    * search()와 같지만 단계별 소요 시간을 함께 돌려준다 (속도 측정).
    * onPartial: 언어 서버를 기다리는 탭에서, 먼저 나온 결과(클래스 색인·파일·텍스트)를 미리 받는다.
+   * limit: 한 탭에서 보여 줄 개수 ("더 보기"로 늘어남). 기본은 maxResults 설정
    */
   async searchTimed(
     tab: TabId,
     query: string,
     isStale: () => boolean = () => false,
-    onPartial?: (r: SearchResult) => void
+    onPartial?: (r: SearchResult) => void,
+    limit?: number
   ): Promise<SearchResult> {
     const start = performance.now();
     const timings: SearchTiming[] = [];
+    const max = Math.max(1, limit ?? this.max);
+    /** 종류별 전체 개수 */
+    const totals = new Map<ResultKind, { total: number; capped?: boolean }>();
+    const sink = (kind: ResultKind): CountSink => (total, capped) => totals.set(kind, { total, capped });
+    const groupsOf = (items: SearchItem[]): GroupCount[] => {
+      const shown = new Map<ResultKind, number>();
+      items.forEach((i) => shown.set(i.kind, (shown.get(i.kind) ?? 0) + 1));
+      const kinds = [...new Set([...items.map((i) => i.kind), ...totals.keys()])];
+      return kinds.map((kind) => {
+        const t = totals.get(kind);
+        const n = shown.get(kind) ?? 0;
+        return { kind, shown: n, total: Math.max(t?.total ?? n, n), capped: t?.capped };
+      });
+    };
 
     /** 한 단계를 실행하고 걸린 시간을 기록 */
     const measure = async <T extends unknown[] | undefined>(
@@ -196,7 +231,7 @@ export class SearchService implements vscode.Disposable {
     const classNote = () => this.lastClassNote;
     const partial = (items: SearchItem[]) => {
       if (onPartial && !isStale()) {
-        onPartial({ items, timings: [...timings], totalMs: Math.round(performance.now() - start) });
+        onPartial({ items, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(items) });
       }
     };
     /** 라이브러리까지 보는 범위인가 (jar·JDK 클래스는 언어 서버만 안다) */
@@ -205,40 +240,48 @@ export class SearchService implements vscode.Disposable {
     let items: SearchItem[];
     switch (tab) {
       case 'classes': {
-        const indexed = await measure('클래스', () => this.searchClassesIndexed(query, this.max), classNote);
+        let indexedTotal = 0;
+        const indexed = await measure('클래스', () => this.searchClassesIndexed(query, max, (t) => (indexedTotal = t)), classNote);
         if (indexed === undefined) {
           // rg 가 없으면 예전처럼 언어 서버
           const symbols = await measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
-          items = toSymbolItems(symbols.filter(isClass), 'classes').slice(0, this.max);
+          const all = toSymbolItems(symbols.filter(isClass), 'classes');
+          totals.set('classes', { total: all.length });
+          items = all.slice(0, max);
         } else if (withLibs && query) {
+          totals.set('classes', { total: indexedTotal });
           partial(indexed);
           const symbols = await measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
-          items = [...indexed, ...toSymbolItems(symbols.filter((s) => isClass(s) && !this.coveredByIndex(s)), 'classes')].slice(0, this.max);
+          const libs = toSymbolItems(symbols.filter((s) => isClass(s) && !this.coveredByIndex(s)), 'classes');
+          totals.set('classes', { total: indexedTotal + libs.length });
+          items = [...indexed, ...libs].slice(0, max);
         } else {
+          totals.set('classes', { total: indexedTotal });
           items = indexed;
         }
         break;
       }
       case 'symbols': {
         // IntelliJ 심볼 탭처럼 클래스도 포함. 색인의 클래스를 먼저 보여 주고 언어 서버 결과로 바꾼다
-        const indexed = await measure('클래스', () => this.searchClassesIndexed(query, this.max), classNote);
-        if (indexed?.length) partial(indexed);
+        const indexed = await measure('클래스', () => this.searchClassesIndexed(query, max), classNote);
+        if (indexed?.length) partial(indexed.map((x) => ({ ...x, kind: 'symbols' as const })));
         const symbols = await measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
         const fromLs = toSymbolItems(symbols, 'symbols');
         // 언어 서버가 아직 준비 전이라 빠진 프로젝트 클래스는 색인으로 채운다
         const known = new Set(fromLs.map(itemKey));
         const extra = (indexed ?? []).filter((x) => !known.has(itemKey(x))).map((x) => ({ ...x, kind: 'symbols' as const }));
-        items = [...fromLs, ...extra].slice(0, this.max);
+        totals.set('symbols', { total: fromLs.length + extra.length });
+        items = [...fromLs, ...extra].slice(0, max);
         break;
       }
       case 'files':
-        items = await measure('파일', () => this.searchFiles(query));
+        items = await measure('파일', () => this.searchFiles(query, max, sink('files')));
         break;
       case 'actions':
         items = await measure('액션', () => this.searchActions(query));
         break;
       case 'text':
-        items = await measure('텍스트', () => this.searchText(query, this.max, isStale), textNote);
+        items = await measure('텍스트', () => this.searchText(query, max, isStale, sink('text')), textNote);
         break;
       case 'all': {
         // 클래스는 색인에서, 메서드·필드 같은 나머지 심볼만 언어 서버에서. 액션은 '모두'에서 제외 (잡음)
@@ -246,10 +289,10 @@ export class SearchService implements vscode.Disposable {
         const symbolsP = measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
         symbolsP.catch(() => undefined); // 아래에서 기다린다 (먼저 실패해도 처리되지 않은 거부로 남지 않게)
         const [indexed, files, text] = await Promise.all([
-          measure('클래스', () => this.searchClassesIndexed(query, per), classNote),
-          measure('파일', () => this.searchFiles(query)),
+          measure('클래스', () => this.searchClassesIndexed(query, per, sink('classes')), classNote),
+          measure('파일', () => this.searchFiles(query, per, sink('files'))),
           query.length >= 3
-            ? measure('텍스트', () => this.searchText(query, per, isStale), textNote)
+            ? measure('텍스트', () => this.searchText(query, per, isStale, sink('text')), textNote)
             : Promise.resolve([] as SearchItem[]),
         ]);
         const combine = (classes: SearchItem[], others: SearchItem[]) => [
@@ -263,14 +306,17 @@ export class SearchService implements vscode.Disposable {
         let classes: SearchItem[];
         if (indexed === undefined) {
           classes = toSymbolItems(symbols.filter(isClass), 'classes');
+          totals.set('classes', { total: classes.length });
         } else {
           const libs = withLibs ? toSymbolItems(symbols.filter((s) => isClass(s) && !this.coveredByIndex(s)), 'classes') : [];
           classes = [...indexed, ...libs];
+          totals.set('classes', { total: (totals.get('classes')?.total ?? indexed.length) + libs.length });
         }
         const others = toSymbolItems(
           symbols.filter((s) => !isClass(s)),
           'symbols'
         );
+        totals.set('symbols', { total: others.length });
         items = combine(classes, others);
         break;
       }
@@ -289,7 +335,7 @@ export class SearchService implements vscode.Disposable {
           ` → ${parts} | 전체 ${totalMs}ms`
       );
     }
-    return { items, timings, totalMs };
+    return { items, timings, totalMs, groups: groupsOf(items) };
   }
 
   /** 선택된 항목 열기/실행 */
@@ -436,22 +482,41 @@ export class SearchService implements vscode.Disposable {
 
   // ───────────────────────── 파일 ─────────────────────────
 
+  /**
+   * 워크스페이스 파일 목록 (처음 한 번 모으고 파일이 생기거나 지워질 때까지 재사용).
+   * rg --files 로 개수 제한 없이 모은다 (.gitignore 반영, 숨김 파일 포함 — 빠른 열기(Ctrl+P)와 같은 기준).
+   * rg 가 없으면 VS Code findFiles (최대 20,000개)
+   */
   private async getFiles(): Promise<vscode.Uri[]> {
     if (this.fileCache) {
       return this.fileCache;
     }
     if (!this.fileCachePromise) {
       const globs = excludeGlobs();
-      const exclude = globs.length === 1 ? globs[0] : `{${globs.join(',')}}`;
-      this.fileCachePromise = Promise.resolve(vscode.workspace.findFiles('**/*', exclude, 20000)).then((files) => {
-        this.fileCache = files;
-        return files;
-      });
+      const rg = this.getRipgrep();
+      const roots = this.fileRoots();
+      const viaFindFiles = () => {
+        const exclude = globs.length === 1 ? globs[0] : `{${globs.join(',')}}`;
+        return Promise.resolve(vscode.workspace.findFiles('**/*', exclude, 20000));
+      };
+      const p: Promise<vscode.Uri[]> = (rg && roots.length
+        ? listFiles(rg, roots, globs).then((paths) => paths.map((f) => vscode.Uri.file(f)))
+        : viaFindFiles()
+      )
+        .catch((e) => {
+          this.log.appendLine(`[경고] rg 파일 목록 실패, findFiles 로 대체: ${e}`);
+          return viaFindFiles();
+        })
+        .then((files) => {
+          if (this.fileCachePromise === p) this.fileCache = files;
+          return files;
+        });
+      this.fileCachePromise = p;
     }
     return this.fileCachePromise;
   }
 
-  private async searchFiles(query: string): Promise<SearchItem[]> {
+  private async searchFiles(query: string, limit: number = this.max, count?: CountSink): Promise<SearchItem[]> {
     const files = (await this.applyScope(await this.getFiles())).filter((u) => this.pathAccepts(u));
     const scored: { score: number; uri: vscode.Uri; order: number }[] = [];
 
@@ -464,8 +529,9 @@ export class SearchService implements vscode.Disposable {
       }
     });
     scored.sort((a, b) => b.score - a.score || a.order - b.order);
+    count?.(scored.length);
 
-    return scored.slice(0, this.max).map(({ uri }) => ({
+    return scored.slice(0, limit).map(({ uri }) => ({
       kind: 'files' as const,
       label: path.basename(uri.fsPath),
       description: vscode.workspace.asRelativePath(path.dirname(uri.fsPath)),
@@ -599,7 +665,7 @@ export class SearchService implements vscode.Disposable {
    * 프로젝트 클래스를 색인에서 찾는다. 범위·포함/제외 경로는 다른 탭과 같은 규칙.
    * rg 를 못 쓰면 undefined (→ 언어 서버로 대체)
    */
-  private async searchClassesIndexed(query: string, limit: number): Promise<SearchItem[] | undefined> {
+  private async searchClassesIndexed(query: string, limit: number, count?: CountSink): Promise<SearchItem[] | undefined> {
     const idx = this.getClassIndex();
     if (!idx) {
       return undefined;
@@ -638,11 +704,20 @@ export class SearchService implements vscode.Disposable {
     );
     const changed = (await this.getChanged()).set;
     const out: SearchItem[] = [];
+    // 범위 판정은 파일 단위라 파일별로 한 번만 계산 (전체 개수를 세려고 모든 후보를 확인한다)
+    const fileOk = new Map<string, boolean>();
+    let total = 0;
     for (const { e } of cands) {
-      if (out.length >= limit) break;
+      let ok = fileOk.get(e.file);
+      if (ok === undefined) {
+        const u = vscode.Uri.file(e.file);
+        ok = !this.isExcluded(u) && this.pathAccepts(u) && scopeAccepts(this.options.scope, this.facts(u, changed));
+        fileOk.set(e.file, ok);
+      }
+      if (!ok) continue;
+      total++;
+      if (out.length >= limit) continue;
       const uri = vscode.Uri.file(e.file);
-      if (this.isExcluded(uri) || !this.pathAccepts(uri)) continue;
-      if (!scopeAccepts(this.options.scope, this.facts(uri, changed))) continue;
       out.push({
         kind: 'classes',
         label: e.name,
@@ -654,6 +729,7 @@ export class SearchService implements vscode.Disposable {
         selectName: true,
       });
     }
+    count?.(total);
     return out;
   }
 
@@ -695,14 +771,19 @@ export class SearchService implements vscode.Disposable {
 
   // ───────────────────────── 텍스트 ─────────────────────────
 
-  private async searchText(query: string, limit: number, isStale: () => boolean = () => false): Promise<SearchItem[]> {
+  private async searchText(
+    query: string,
+    limit: number,
+    isStale: () => boolean = () => false,
+    count?: CountSink
+  ): Promise<SearchItem[]> {
     if (query.length < 2) {
       return [];
     }
     const rg = this.getRipgrep();
     if (rg) {
       try {
-        const r = await this.searchTextRipgrep(rg, query, limit, isStale);
+        const r = await this.searchTextRipgrep(rg, query, limit, isStale, count);
         this.lastTextEngine = 'rg';
         return r;
       } catch (e) {
@@ -711,7 +792,7 @@ export class SearchService implements vscode.Disposable {
       }
     }
     this.lastTextEngine = 'scan';
-    return this.searchTextScan(query, limit, isStale);
+    return this.searchTextScan(query, limit, isStale, count);
   }
 
   private getRipgrep(): string | undefined {
@@ -729,7 +810,8 @@ export class SearchService implements vscode.Disposable {
     rgPath: string,
     query: string,
     limit: number,
-    isStale: () => boolean
+    isStale: () => boolean,
+    count?: CountSink
   ): Promise<SearchItem[]> {
     const roots = (vscode.workspace.workspaceFolders ?? [])
       .filter((f) => f.uri.scheme === 'file')
@@ -784,7 +866,9 @@ export class SearchService implements vscode.Disposable {
       }
     }
 
-    // 우선순위 정렬을 위해 limit보다 넉넉히 모은 뒤 자른다 (결과에서 거를 게 있으면 더 넉넉히)
+    // 우선순위 정렬을 위해 넉넉히(TEXT_COLLECT_MAX) 모은 뒤 정렬해서 자른다.
+    // 먼저 찾은 몇 개만 받으면 폴더 순서상 뒤에 있는 src 의 매치가 정렬 대상에도 못 들어간다
+    const collect = Math.max(TEXT_COLLECT_MAX, limit);
     const matches = await runRipgrep(rgPath, {
       query,
       roots: searchRoots,
@@ -793,19 +877,30 @@ export class SearchService implements vscode.Disposable {
       caseSensitive: text.caseSensitive,
       wholeWord: text.wholeWord,
       regex: text.regex,
-      limit: postFilters.length ? 1000 : Math.min(limit * 3, 300),
+      limit: collect,
       isStale,
     });
 
     const openDocs = new Set(vscode.workspace.textDocuments.map((d) => d.uri.toString()));
+    // 경로 필터·우선순위는 파일 단위라 파일마다 한 번만 계산한다 (매치는 최대 TEXT_COLLECT_MAX 개)
+    const perFile = new Map<string, { uri: vscode.Uri; ok: boolean; prio: number }>();
+    const fileInfo = (file: string) => {
+      let f = perFile.get(file);
+      if (!f) {
+        const uri = vscode.Uri.file(file);
+        const rel = postFilters.length ? vscode.workspace.asRelativePath(uri, false) : '';
+        const ok = postFilters.every((pf) => pf.matches(rel));
+        f = { uri, ok, prio: ok ? this.textPriority(uri, openDocs) : 0 };
+        perFile.set(file, f);
+      }
+      return f;
+    };
     const withUri = matches
-      .map((m) => ({ m, uri: vscode.Uri.file(m.file) }))
-      .filter(({ uri }) => {
-        if (!postFilters.length) return true;
-        const rel = vscode.workspace.asRelativePath(uri, false);
-        return postFilters.every((pf) => pf.matches(rel));
-      });
-    withUri.sort((a, b) => this.textPriority(a.uri, openDocs) - this.textPriority(b.uri, openDocs));
+      .map((m) => ({ m, f: fileInfo(m.file) }))
+      .filter(({ f }) => f.ok)
+      .map(({ m, f }) => ({ m, uri: f.uri, prio: f.prio }));
+    withUri.sort((a, b) => a.prio - b.prio); // 안정 정렬: 같은 우선순위는 rg 가 찾은 순서
+    count?.(withUri.length, matches.length >= collect);
     return withUri.slice(0, limit).map(({ m, uri }) => toTextItem(m, uri, query));
   }
 
@@ -821,7 +916,7 @@ export class SearchService implements vscode.Disposable {
   }
 
   /** ripgrep을 못 쓸 때의 예비 방식: 파일을 직접 읽어서 찾는다 (느림) */
-  private async searchTextScan(query: string, limit: number, isStale: () => boolean): Promise<SearchItem[]> {
+  private async searchTextScan(query: string, limit: number, isStale: () => boolean, count?: CountSink): Promise<SearchItem[]> {
     const re = buildTextRegExp(query, this.options.text);
     if (!re) {
       return [];
@@ -888,6 +983,7 @@ export class SearchService implements vscode.Disposable {
         // 읽을 수 없는 파일은 무시
       }
     }
+    count?.(results.length, results.length >= limit);
     return results;
   }
 }

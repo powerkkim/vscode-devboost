@@ -193,6 +193,28 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
   });
 }
 
+/** rg --files 인자 (테스트에서 확인할 수 있도록 분리) */
+export function buildListArgs(roots: string[], excludeGlobs: string[]): string[] {
+  // --hidden: .env, .github 같은 숨김 파일도 (빠른 열기와 같게). .git 폴더 안은 뺀다
+  const args = ['--files', '--no-config', '--hidden', '--iglob', '!**/.git/**'];
+  for (const g of excludeGlobs) args.push('--iglob', `!${g}`);
+  args.push('--', ...roots);
+  return args;
+}
+
+/** 워크스페이스 파일 목록 (개수 제한 없음, .gitignore 반영). 절대 경로 */
+export function listFiles(rgPath: string, roots: string[], excludeGlobs: string[]): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(rgPath, buildListArgs(roots, excludeGlobs), { stdio: ['ignore', 'pipe', 'ignore'] });
+    const chunks: string[] = [];
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (c: string) => chunks.push(c));
+    child.on('error', reject);
+    // 종료 코드 2(일부 폴더 읽기 실패)여도 받은 목록은 쓴다
+    child.on('close', () => resolve(chunks.join('').split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean)));
+  });
+}
+
 /**
  * VS Code 스타일 glob 설정값을 rg용 glob 목록으로 바꾼다.
  * "**\/{node_modules,.git}/**" 같은 중괄호 패턴은 rg도 그대로 이해한다.

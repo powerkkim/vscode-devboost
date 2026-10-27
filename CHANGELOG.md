@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 - 2026-10-28
+- **Search Everywhere 결과 개수·더 보기**: 찾는 항목이 목록 밖으로 밀려 안 보이던 문제 수정
+  - 텍스트: 먼저 찾은 150건만 받아 정렬하던 것을 2,000건까지 받아 정렬. 폴더 순서상 뒤에 있는 `src` 의 매치도 위로 올라옴. 2,000건을 넘으면 화면에 알림
+  - 탭마다 `보인 개수 / 전체 개수` 표시, 끝의 `더 보기`(Enter)로 다음 묶음을 이어서 보여 줌. 모두 탭은 종류별 머리글에 개수, `더 보기`는 그 탭으로 이동 (QuickPick 화면도 같음)
+  - 파일 목록: 20,000개 제한 없이 rg 로 모음 (.gitignore 반영, `.env` 같은 숨김 파일 포함)
 - **케이스 변환** (새 기능, 명령 팔레트 `케이스 변환:`): 이름 표기법 변환과 자주 쓰는 코드 변환
   - 케이스 변환: 선택한 이름(없으면 커서 아래 이름)을 camelCase · PascalCase · snake_case · SCREAMING_SNAKE_CASE · kebab-case · dot.case 로 변환. 변환 결과를 미리 보며 고르고, 여러 곳을 선택하면 한 번에 바뀜. `userID` → `user_id` 처럼 약어도 단어로 취급
   - SQL·컬럼 이름 → Java 필드: mapper XML 쿼리의 SELECT 목록(별칭·함수·`<if>` 등 동적 태그·CDATA·같은 파일의 `<include>` 처리), INSERT 컬럼, `CREATE TABLE`(주석·`COMMENT ON COLUMN` 포함), 컬럼 이름 목록, 테이블 이름을 `private 타입 이름;` 으로 변환. 가져온 DB 스키마가 있으면 실제 타입·설명을 쓰고 `SELECT *` 도 펼침, 없으면 이름으로 타입 추정

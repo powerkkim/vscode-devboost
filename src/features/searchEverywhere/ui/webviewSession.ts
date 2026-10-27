@@ -12,7 +12,7 @@ import { SearchOptions, SCOPES, isScopeId } from '../search/scope';
 /** Webview → 확장 메시지 */
 export type FromWebview =
   | { type: 'ready' }
-  | { type: 'search'; runId: number; tab: TabId; query: string; options?: Partial<SearchOptions> }
+  | { type: 'search'; runId: number; tab: TabId; query: string; options?: Partial<SearchOptions>; limit?: number }
   | { type: 'toggleNonProject'; value: boolean }
   | { type: 'setOptions'; options: Partial<SearchOptions> }
   | { type: 'currentFolder' }
@@ -73,6 +73,7 @@ export class WebviewSession {
       fileMasks: vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<string[]>('fileMasks', []),
       recentIncludes: this.service.recentIncludes(),
       timing: showTiming(),
+      maxResults: vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<number>('maxResults', 50),
       openMs,
     });
   }
@@ -121,8 +122,8 @@ export class WebviewSession {
           // 언어 서버를 기다리는 동안 먼저 나온 결과를 보낸다 (partial). 같은 runId 로 최종 결과가 뒤따른다
           const r = await this.service.searchTimed(m.tab, m.query, isStale, (p) => {
             if (isStale()) return;
-            this.post({ type: 'results', runId: m.runId, seq: this.remember(p.items), query: m.query, rows: p.items.map(toRow), timings: p.timings, totalMs: p.totalMs, partial: true });
-          });
+            this.post({ type: 'results', runId: m.runId, seq: this.remember(p.items), query: m.query, rows: p.items.map(toRow), groups: p.groups, timings: p.timings, totalMs: p.totalMs, partial: true });
+          }, m.limit);
           if (this.latestRunId !== m.runId) {
             return; // 더 최신 검색이 있음
           }
@@ -132,6 +133,7 @@ export class WebviewSession {
             seq: this.remember(r.items),
             query: m.query,
             rows: r.items.map(toRow),
+            groups: r.groups,
             timings: r.timings,
             totalMs: r.totalMs,
           });

@@ -47,8 +47,13 @@
   const $timing = document.getElementById('timing');
 
   let tab = 'all';
-  let rows = [];
-  let selected = 0;
+  let rows = []; // 확장이 보낸 결과 (open 할 때 이 번호를 보낸다)
+  let groups = []; // 종류별 개수 [{kind, shown, total, capped}]
+  let view = []; // 화면에 그린 줄: { idx } = 결과 줄, { more: kind, ... } = "더 보기" 줄
+  let selected = 0; // view 의 번호
+  let limit; // "더 보기"로 늘린 표시 개수 (검색어·탭·옵션이 바뀌면 초기화)
+  let maxResults = 50;
+  let pendingSelect; // "더 보기" 후 고를 결과 번호
   let runId = 0;
   let shownRunId = 0;
   let shownSeq; // 지금 화면에 그린 결과 묶음 번호 (열 때 같이 보냄)
@@ -195,20 +200,49 @@
   }
 
   // ───────── 검색 ─────────
-  function search(immediate) {
+  function search(immediate, keepLimit) {
     clearTimeout(debounce);
+    if (!keepLimit) limit = undefined;
     const run = () => {
       runId++;
       sentAt[runId] = performance.now();
       $results.classList.add('busy');
-      vscode.postMessage({ type: 'search', runId, tab, query: $query.value, options: readOptions() });
+      vscode.postMessage({ type: 'search', runId, tab, query: $query.value, options: readOptions(), limit });
     };
     immediate ? run() : (debounce = setTimeout(run, 120));
   }
 
   // ───────── 결과 그리기 ─────────
+  const fmt = (n) => n.toLocaleString('ko-KR');
+  function countText(g) {
+    return g.capped ? `${fmt(g.total)}건 이상` : `${fmt(g.total)}개`;
+  }
+
+  /** 결과 줄 사이에 "더 보기" 줄을 끼워 화면 목록(view)을 만든다 */
+  function buildView() {
+    view = [];
+    const byKind = new Map(groups.map((g) => [g.kind, g]));
+    const moreRow = (g) => {
+      if (!g) return;
+      if (tab === 'all') {
+        // 모두 탭: 그 종류의 탭으로 이동
+        if (g.total > g.shown || g.capped) view.push({ more: g.kind, text: `${KIND_LABEL[g.kind] || g.kind} 더 보기 — ${countText(g)} 중 ${fmt(g.shown)}개 표시 (Enter: ${KIND_LABEL[g.kind] || g.kind} 탭)` });
+      } else if (g.total > g.shown) {
+        view.push({ more: g.kind, text: `더 보기 — ${countText(g)} 중 ${fmt(g.shown)}개 표시 (Enter: ${fmt(Math.min(maxResults, g.total - g.shown))}개 더)` });
+      } else if (g.capped) {
+        view.push({ note: true, text: `결과가 ${countText(g)}이라 일부만 모았습니다. 포함 경로·파일 타입으로 좁혀 보세요` });
+      }
+    };
+    rows.forEach((r, i) => {
+      view.push({ idx: i });
+      const next = rows[i + 1];
+      if (!next || next.kind !== r.kind) moreRow(byKind.get(r.kind));
+    });
+  }
+
   function renderResults(query) {
     $results.innerHTML = '';
+    buildView();
     if (rows.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty';
@@ -219,12 +253,31 @@
     }
 
     let lastKind;
-    rows.forEach((r, i) => {
-      // '모두' 탭에서는 종류가 바뀔 때 구분 머리글
+    const byKind = new Map(groups.map((g) => [g.kind, g]));
+    view.forEach((v, i) => {
+      if (v.more || v.note) {
+        const row = document.createElement('div');
+        row.className = 'row more' + (v.note ? ' note' : '') + (i === selected ? ' selected' : '');
+        row.dataset.index = String(i);
+        row.textContent = v.text;
+        if (v.more) {
+          row.addEventListener('mousemove', () => select(i, false));
+          row.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            select(i, false);
+          });
+          row.addEventListener('click', () => open(i));
+        }
+        $results.appendChild(row);
+        return;
+      }
+      const r = rows[v.idx];
+      // '모두' 탭에서는 종류가 바뀔 때 구분 머리글 (보인 개수 / 전체 개수)
       if (tab === 'all' && r.kind !== lastKind) {
         const h = document.createElement('div');
         h.className = 'group';
-        h.textContent = KIND_LABEL[r.kind] || r.kind;
+        const g = byKind.get(r.kind);
+        h.textContent = (KIND_LABEL[r.kind] || r.kind) + (g && (g.total > g.shown || g.capped) ? `  ${fmt(g.shown)} / ${countText(g)}` : '');
         $results.appendChild(h);
         lastKind = r.kind;
       }
@@ -324,8 +377,18 @@
   }
 
   function select(i, scroll = true) {
-    if (rows.length === 0) return;
-    selected = Math.max(0, Math.min(rows.length - 1, i));
+    if (view.length === 0) return;
+    const dir = i >= selected ? 1 : -1;
+    selected = Math.max(0, Math.min(view.length - 1, i));
+    // 안내 줄(note)은 건너뛴다
+    while (view[selected] && view[selected].note) {
+      const n = selected + dir;
+      if (n < 0 || n >= view.length) {
+        selected -= dir;
+        break;
+      }
+      selected = n;
+    }
     $results.querySelectorAll('.row').forEach((el) => {
       el.classList.toggle('selected', Number(el.dataset.index) === selected);
     });
@@ -337,13 +400,27 @@
   }
 
   function updateFooter() {
-    const r = rows[selected];
+    const v = view[selected];
+    const r = v && v.idx !== undefined ? rows[v.idx] : undefined;
     $footer.textContent = r ? r.footer || '' : '';
   }
 
   function open(i) {
-    if (!rows[i]) return;
-    vscode.postMessage({ type: 'open', runId: shownRunId, seq: shownSeq, index: i });
+    const v = view[i];
+    if (!v) return;
+    if (v.more) {
+      if (tab === 'all') {
+        setTab(v.more); // 그 종류의 탭에서 전체를 본다
+      } else {
+        const g = groups.find((x) => x.kind === v.more);
+        limit = (g ? g.shown : rows.length) + maxResults;
+        pendingSelect = g ? g.shown : rows.length; // 더 불러온 첫 줄로 이동
+        search(true, true);
+      }
+      return;
+    }
+    if (v.note || !rows[v.idx]) return;
+    vscode.postMessage({ type: 'open', runId: shownRunId, seq: shownSeq, index: v.idx });
   }
 
   function pageSize() {
@@ -441,6 +518,7 @@
     if (m.type === 'init') {
       showTiming = !!m.timing;
       openMs = m.openMs;
+      if (m.maxResults) maxResults = m.maxResults;
       if (m.scopes) {
         $scope.innerHTML = '';
         for (const sc of m.scopes) {
@@ -496,19 +574,33 @@
       if (m.runId !== runId) return; // 오래된 결과 무시
       // 같은 검색의 먼저 온 결과(partial)를 보고 있었으면 고른 줄과 스크롤을 유지한다
       const sameRun = shownRunId === m.runId;
-      const prev = sameRun ? rows[selected] : undefined;
-      const scroll = sameRun ? $results.scrollTop : 0;
+      const pv = sameRun ? view[selected] : undefined;
+      const prev = pv && pv.idx !== undefined ? rows[pv.idx] : undefined;
+      const scroll = sameRun || pendingSelect !== undefined ? $results.scrollTop : 0;
       shownRunId = m.runId;
       shownSeq = m.seq;
       if (!m.partial) $results.classList.remove('busy');
       rows = m.rows || [];
+      groups = m.groups || [];
       selected = 0;
+      renderResults(m.query); // view 를 새로 만든다
+      let want = -1;
       if (prev) {
         const i = rows.findIndex((r) => r.label === prev.label && r.right === prev.right && r.kind === prev.kind);
-        if (i >= 0) selected = i;
+        if (i >= 0) want = i;
+      } else if (pendingSelect !== undefined && !m.partial) {
+        want = Math.min(pendingSelect, rows.length - 1);
+        pendingSelect = undefined;
       }
-      renderResults(m.query);
+      if (want >= 0) {
+        const vi = view.findIndex((v) => v.idx === want);
+        if (vi >= 0) select(vi, false);
+      }
       $results.scrollTop = scroll;
+      if (want >= 0) {
+        const el = $results.querySelector('.row.selected');
+        el && el.scrollIntoView({ block: 'nearest' });
+      }
       if (!m.partial) renderTiming(m);
     }
   });
