@@ -139,6 +139,8 @@ export async function analyzeSourceAsync(
     onProgress?.({ index: i + 1, total: list.length, label: list[i].label });
     // 진행 메시지가 웹뷰로 실제로 나가도록 잠깐 양보 (setImmediate 만으로는 IPC 전송이 밀릴 수 있어 짧은 타이머)
     await new Promise((r) => setTimeout(r, 15));
+    // 기다리는 동안 새 분석이 시작됐거나 창이 닫혔으면, 무거운 단계를 돌리지 않고 끝낸다
+    if (isCancelled?.()) return null;
     list[i].run();
   }
   return isCancelled?.() ? null : { graph: out.graph!, notes: out.notes };

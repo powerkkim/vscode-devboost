@@ -601,6 +601,10 @@ test('W1. 깊이 필터: 중심에서 선(방향 무시) N단계 안의 노드�
   assert.strictEqual(d2s.dist.get('tbl'), -1);
   assert.ok(!ids(d2s).includes('far'), '서버 흐름은 위(컴포넌트)로는 퍼지지 않음');
   assert.deepStrictEqual(ids(neighborhood(nodes, edges, 'nope', 2, false)), [], '없는 중심');
+  // 종류를 숨겨도 거리는 전체 그래프로: 자식(ch) 컴포넌트를 숨겨도 그 너머 API 는 깊이 2 안
+  const hid = neighborhood(nodes, edges, 'c', 2, true, { hiddenKinds: new Set(['component']), alwaysShow: new Set(['c']) });
+  assert.deepStrictEqual(ids(hid), ['api', 'api2', 'c', 'ctl', 'sql', 'svc', 'tbl'], '숨긴 종류는 빠지지만 경로는 끊기지 않음');
+  assert.ok(!hid.hiddenNeighbors.has('api'), '숨긴 종류(ch)는 숨은 이웃 수에 안 셈');
 });
 
 test('W2. 비동기 분석: 단계별 진행 알림, 동기 분석과 같은 결과, 취소하면 null', async () => {
@@ -620,4 +624,11 @@ test('W2. 비동기 분석: 단계별 진행 알림, 동기 분석과 같은 결
   let cancel = false;
   const c = await analyzeSourceAsync(file, { workspaceRoot: F, vite: false }, (s) => { if (s.index === 2) cancel = true; }, () => cancel);
   assert.strictEqual(c, null, '새 분석이 시작되면 이전 분석은 버림');
+  // 대기 중에 취소되면 그 단계는 실행하지 않는다 (진행 알림 직후 취소 → 2단계 run 없음)
+  let ran = 0;
+  const { analyzeSourceAsync: run2 } = require('../../out/features/sourceAtlas/pipeline.js');
+  let flag = false;
+  const r2 = await run2(file, { workspaceRoot: F, vite: false }, (s) => { ran = s.index; if (s.index === 2) flag = true; }, () => flag);
+  assert.strictEqual(r2, null);
+  assert.strictEqual(ran, 2, '2단계 알림 뒤 대기 중 취소 → 더 진행하지 않음');
 });

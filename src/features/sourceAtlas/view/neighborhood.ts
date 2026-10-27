@@ -5,6 +5,13 @@ import type { AtlasEdge, AtlasNode } from '../analyzer/types';
 /** API 뒤의 서버 쪽 종류 (깊이 필터에서 "서버 흐름 함께" 를 켜면 깊이와 상관없이 따라감) */
 export const SERVER_KINDS = new Set(['controller', 'service', 'mapper', 'table']);
 
+export interface NeighborhoodOptions {
+  /** 표시하지 않을 종류 (거리 계산에는 쓰고, 결과·숨은 이웃 수에서는 뺀다) */
+  hiddenKinds?: Set<string>;
+  /** 종류가 숨겨져도 항상 표시할 노드 (루트·중심) */
+  alwaysShow?: Set<string>;
+}
+
 export interface Neighborhood {
   /** 표시할 노드 id → 중심에서의 거리 (서버 흐름으로 붙은 것은 -1) */
   dist: Map<string, number>;
@@ -23,6 +30,7 @@ export function neighborhood(
   center: string,
   depth: number,
   withServer: boolean,
+  opts: NeighborhoodOptions = {},
 ): Neighborhood {
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const adj = new Map<string, string[]>();
@@ -65,9 +73,12 @@ export function neighborhood(
       }
     }
   }
+  // 거리는 종류 필터와 상관없이 전체 그래프로 쟀다 (composable 등을 숨겨도 그 너머가 끊기지 않게). 표시에서만 뺀다
+  const shown = (id: string) => !opts.hiddenKinds?.has(kindOf.get(id) ?? '') || !!opts.alwaysShow?.has(id);
+  for (const id of [...dist.keys()]) if (!shown(id)) dist.delete(id);
   const hiddenNeighbors = new Map<string, number>();
   for (const id of dist.keys()) {
-    const hiddenCount = new Set((adj.get(id) ?? []).filter((nb) => !dist.has(nb))).size;
+    const hiddenCount = new Set((adj.get(id) ?? []).filter((nb) => !dist.has(nb) && shown(nb))).size;
     if (hiddenCount) hiddenNeighbors.set(id, hiddenCount);
   }
   return { dist, hiddenNeighbors };

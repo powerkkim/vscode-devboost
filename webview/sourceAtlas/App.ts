@@ -48,6 +48,10 @@ export default defineComponent({
     const loadStarted = ref(0);
     const now = ref(Date.now());
     let ticker: ReturnType<typeof setInterval> | undefined;
+    let loadRun: unknown;
+    /** VueFlow 를 다시 만들 때마다 올리는 번호 (노드 목록 문자열을 key 로 쓰지 않기 위해) */
+    let flowKey = 0;
+    let lastIds = '';
     const stopTicker = () => {
       if (ticker) clearInterval(ticker);
       ticker = undefined;
@@ -79,8 +83,11 @@ export default defineComponent({
           loading.value = false;
           stopTicker();
         } else if (m.type === 'loading') {
-          if (!loading.value || !ticker) {
+          // 새 분석(run 이 바뀜)이면 경과 시간을 처음부터
+          if (!loading.value || !ticker || m.run !== loadRun) {
+            loadRun = m.run;
             loadStarted.value = Date.now() - (m.elapsedMs ?? 0);
+            now.value = Date.now();
             stopTicker();
             ticker = setInterval(() => (now.value = Date.now()), 200);
           }
@@ -100,8 +107,9 @@ export default defineComponent({
     };
     /** 노드를 고른다. 깊이 필터 밖에 있으면 그 노드를 중심으로 다시 보여 준다 */
     const select = (id: string) => {
+      if (!graph.value?.nodes.some((n) => n.id === id)) return;
       selectedId.value = id;
-      if (!visible.value.nodes.some((n) => n.id === id)) focusId.value = id;
+      if (depth.value !== 'all' && !visible.value.nodes.some((n) => n.id === id)) focusId.value = id;
     };
 
     const kinds = computed(() => {
@@ -110,30 +118,40 @@ export default defineComponent({
       const order = ['route', 'component', 'composable', 'store', 'api-call', 'controller', 'service', 'mapper', 'table', 'external'];
       return [...c.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
     });
-    /** 종류 체크박스로 거른 것 (깊이 필터 전) */
+    /** 종류 체크박스로 거른 것 (깊이 필터 전). 루트는 항상 보인다 */
     const byKind = computed(() => {
       const g = graph.value;
       if (!g) return { nodes: [] as AtlasNode[], edges: [] as AtlasGraph['edges'] };
-      const keep = new Set([g.root, focusId.value]);
-      const nodes = g.nodes.filter((n) => keep.has(n.id) || !hidden.value.has(n.kind));
+      const nodes = g.nodes.filter((n) => n.id === g.root || !hidden.value.has(n.kind));
       const ids = new Set(nodes.map((n) => n.id));
       return { nodes, edges: g.edges.filter((e) => ids.has(e.from) && ids.has(e.to)) };
     });
-    /** 깊이 필터까지 적용한 것 (화면에 그리는 것) */
+    /** 깊이 필터까지 적용한 것 (화면에 그리는 것). 거리는 종류 필터와 상관없이 전체 그래프로 잰다 */
     const visible = computed(() => {
-      const { nodes, edges } = byKind.value;
       const g = graph.value;
-      if (!g || depth.value === 'all') return { nodes, edges, hiddenNeighbors: new Map<string, number>(), dist: new Map<string, number>() };
-      const center = focusId.value && nodes.some((n) => n.id === focusId.value) ? focusId.value : g.root;
-      const nb = neighborhood(nodes, edges, center, depth.value, withServer.value);
-      const keepNodes = nodes.filter((n) => nb.dist.has(n.id));
+      if (!g || depth.value === 'all') {
+        return { ...byKind.value, hiddenNeighbors: new Map<string, number>(), dist: new Map<string, number>() };
+      }
+      const center = focusId.value && g.nodes.some((n) => n.id === focusId.value) ? focusId.value : g.root;
+      const nb = neighborhood(g.nodes, g.edges, center, depth.value, withServer.value, {
+        hiddenKinds: hidden.value, alwaysShow: new Set([g.root, center]),
+      });
       return {
-        nodes: keepNodes,
-        edges: edges.filter((e) => nb.dist.has(e.from) && nb.dist.has(e.to)),
+        nodes: g.nodes.filter((n) => nb.dist.has(n.id)),
+        edges: g.edges.filter((e) => nb.dist.has(e.from) && nb.dist.has(e.to)),
         hiddenNeighbors: nb.hiddenNeighbors,
         dist: nb.dist,
       };
     });
+    /** 보이는 노드 집합이 바뀌었을 때만 VueFlow 를 새로 만든다 (fitView 다시) */
+    const flowKeyOf = (nodes: AtlasNode[]) => {
+      const ids = nodes.map((n) => n.id).join('\u0001');
+      if (ids !== lastIds) {
+        lastIds = ids;
+        flowKey++;
+      }
+      return flowKey;
+    };
     const focusNode = computed(() => graph.value?.nodes.find((n) => n.id === focusId.value) ?? null);
     const flow = computed(() => {
       const { nodes, edges } = visible.value;
@@ -226,7 +244,7 @@ export default defineComponent({
         h('div', { class: 'd-actions' }, [
           n.file ? h('button', { onClick: () => open(n) }, '파일 열기') : null,
           focusId.value !== n.id
-            ? h('button', { class: 'secondary', title: '이 노드를 중심으로 주변 몇 단계만 보기', onClick: () => { focusId.value = n.id; if (depth.value === 'all') setDepth(2); } }, '여기를 중심으로')
+            ? h('button', { class: 'secondary', title: '이 노드를 중심으로 주변 몇 단계만 보기', onClick: () => { focusId.value = n.id; if (depth.value === 'all') depth.value = 2; } }, '여기를 중심으로')
             : null,
         ]),
         depth.value !== 'all' && visible.value.hiddenNeighbors.get(n.id)
@@ -306,7 +324,7 @@ export default defineComponent({
           h('section', { class: ['canvas', { busy: loading.value }] }, [
             loading.value ? h('div', { class: 'loading' }, [
               h('div', { class: 'bar' }, [
-                h('div', { class: 'fill', style: { width: step.value.total ? `${Math.round((Math.max(step.value.index - 1, 0) / step.value.total) * 100)}%` : '0%' } }),
+                h('div', { class: 'fill', style: { width: step.value.total ? `${Math.round((Math.max(step.value.index - 0.5, 0) / step.value.total) * 100)}%` : '0%' } }),
                 h('div', { class: 'shimmer' }),
               ]),
               h('div', { class: 'loading-box' }, [
@@ -321,7 +339,7 @@ export default defineComponent({
             error.value ? h('div', { class: 'msg err' }, error.value)
               : !g ? (loading.value ? null : h('div', { class: 'msg' }, '분석 결과 없음'))
               : h(VueFlow, {
-                  key: JSON.stringify(visible.value.nodes.map((n) => n.id)),
+                  key: flowKeyOf(visible.value.nodes),
                   nodes: flow.value.nodes, edges: flow.value.edges,
                   fitViewOnInit: true, minZoom: 0.2, maxZoom: 1.6,
                   nodesDraggable: true, nodesConnectable: false, elementsSelectable: true,

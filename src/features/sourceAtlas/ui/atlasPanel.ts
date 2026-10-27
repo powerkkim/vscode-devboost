@@ -109,13 +109,13 @@ export class AtlasPanel {
     const post = (m: unknown) => void this.panel.webview.postMessage(m);
     const run = ++this.runId;
     const isStale = () => run !== this.runId || this.disposed;
-    const cfg = vscode.workspace.getConfiguration('devBoost.sourceAtlas');
-    const started = Date.now();
-    const file = path.relative(this.workspaceRoot, this.rootFile).split(path.sep).join('/');
-    post({ type: 'loading', file, step: { index: 0, total: 0, label: '분석 준비 중' } });
-    // 상태 표시줄에도 진행 표시 (웹뷰 안의 진행 막대와 함께)
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Source Atlas 분석 중' }, async () => {
-      try {
+    try {
+      const cfg = vscode.workspace.getConfiguration('devBoost.sourceAtlas');
+      const started = Date.now();
+      const file = path.relative(this.workspaceRoot, this.rootFile).split(path.sep).join('/');
+      post({ type: 'loading', run, file, step: { index: 0, total: 0, label: '분석 준비 중' } });
+      // 상태 표시줄에도 진행 표시 (웹뷰 안의 진행 막대와 함께)
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Source Atlas 분석 중' }, async () => {
         const result = await analyzeSourceAsync(this.rootFile, {
           workspaceRoot: this.workspaceRoot,
           maxDepth: cfg.get<number>('maxDepth', 3),
@@ -127,18 +127,21 @@ export class AtlasPanel {
           aliases: cfg.get<Record<string, string>>('aliases', {}),
           fresh: this.fresh,
         }, (step) => {
-          if (!isStale()) post({ type: 'loading', file, step, elapsedMs: Date.now() - started });
+          if (!isStale()) post({ type: 'loading', run, file, step, elapsedMs: Date.now() - started });
         }, isStale);
         if (!result || isStale()) return;
         const { graph, notes } = result;
         this.fresh = false;
         this.panel.title = `Atlas: ${path.basename(this.rootFile)}`;
         const stats = [`노드 ${graph.nodes.length} · 엣지 ${graph.edges.length} · ${Date.now() - started}ms`, ...notes].join('  |  ');
-        post({ type: 'graph', graph, stats });
-      } catch (e) {
-        if (!isStale()) post({ type: 'error', message: `분석 실패: ${(e as Error).message}` });
-      }
-    });
+        post({ type: 'graph', run, graph, stats });
+      });
+    } catch (e) {
+      if (!isStale()) post({ type: 'error', message: `분석 실패: ${(e as Error).message}` });
+    } finally {
+      // 창을 닫는 동안 돌던 분석이 색인 캐시를 다시 채웠을 수 있다 → 한 번 더 비운다
+      if (this.disposed) clearAtlasCaches();
+    }
   }
 
   private html(): string {
