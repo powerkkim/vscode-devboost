@@ -16,7 +16,7 @@ export type FromWebview =
   | { type: 'toggleNonProject'; value: boolean }
   | { type: 'setOptions'; options: Partial<SearchOptions> }
   | { type: 'currentFolder' }
-  | { type: 'open'; runId: number; index: number }
+  | { type: 'open'; runId: number; index: number; seq?: number }
   | { type: 'close' };
 
 /** 확장 → Webview 로 보내는 결과 한 줄 (Uri 같은 객체는 못 보내므로 문자열로 변환) */
@@ -41,7 +41,9 @@ export interface SessionHost {
 
 export class WebviewSession {
   private latestRunId = 0;
-  private latestItems: SearchItem[] = [];
+  /** 보낸 결과 묶음 번호 → 항목. 먼저 보낸 결과(partial)를 보고 Enter 를 눌러도 화면의 그 줄이 열리도록 */
+  private sent = new Map<number, SearchItem[]>();
+  private seq = 0;
   private pendingInit: { tab: TabId; query: string } = { tab: 'all', query: '' };
   private openStartedAt = performance.now();
   private ready = false;
@@ -73,6 +75,13 @@ export class WebviewSession {
       timing: showTiming(),
       openMs,
     });
+  }
+
+  /** 보낼 결과 묶음을 기억하고 번호를 돌려준다 (최근 몇 개만 유지) */
+  private remember(items: SearchItem[]): number {
+    this.sent.set(++this.seq, items);
+    this.sent.delete(this.seq - 4);
+    return this.seq;
   }
 
   post(msg: unknown) {
@@ -108,14 +117,19 @@ export class WebviewSession {
           this.applyOptions(m.options);
         }
         try {
-          const r = await this.service.searchTimed(m.tab, m.query, () => this.latestRunId !== m.runId);
+          const isStale = () => this.latestRunId !== m.runId;
+          // 언어 서버를 기다리는 동안 먼저 나온 결과를 보낸다 (partial). 같은 runId 로 최종 결과가 뒤따른다
+          const r = await this.service.searchTimed(m.tab, m.query, isStale, (p) => {
+            if (isStale()) return;
+            this.post({ type: 'results', runId: m.runId, seq: this.remember(p.items), query: m.query, rows: p.items.map(toRow), timings: p.timings, totalMs: p.totalMs, partial: true });
+          });
           if (this.latestRunId !== m.runId) {
             return; // 더 최신 검색이 있음
           }
-          this.latestItems = r.items;
           this.post({
             type: 'results',
             runId: m.runId,
+            seq: this.remember(r.items),
             query: m.query,
             rows: r.items.map(toRow),
             timings: r.timings,
@@ -128,7 +142,7 @@ export class WebviewSession {
       }
 
       case 'open': {
-        const item = m.runId === this.latestRunId ? this.latestItems[m.index] : undefined;
+        const item = m.runId === this.latestRunId ? this.sent.get(m.seq ?? this.seq)?.[m.index] : undefined;
         const column = this.host.targetColumn();
         // 결과를 실제로 열었을 때의 포함 경로만 최근 목록에 남긴다 (입력 중간값 제외)
         this.service.rememberInclude(this.service.options.paths.include);

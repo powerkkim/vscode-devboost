@@ -80,7 +80,10 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
 
     qp.busy = true;
     try {
-      const results = await service.search(tab, text, () => myRun !== runId);
+      // 언어 서버를 기다리는 동안 먼저 나온 결과를 보여 준다 (busy 표시는 유지)
+      const results = await service.search(tab, text, () => myRun !== runId, (partial) => {
+        if (myRun === runId) qp.items = toPickItems(tab, partial);
+      });
       if (myRun !== runId) {
         return; // 더 최신 검색이 시작됨
       }

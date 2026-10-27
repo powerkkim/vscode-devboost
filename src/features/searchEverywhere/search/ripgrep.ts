@@ -116,6 +116,9 @@ export function parseJsonLine(line: string): RgMatch[] {
   return [{ file, line: d.line_number - 1, column, length, text }];
 }
 
+/** 새 검색이 시작됐는지 확인하는 간격 */
+const STALE_CHECK_MS = 25;
+
 /** rg 실행. limit 개 모이거나 isStale()이면 프로세스를 끊고 그때까지 결과를 돌려준다 */
 export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
   return new Promise((resolve, reject) => {
@@ -124,12 +127,16 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
     let buffer = '';
     let done = false;
     let stderr = '';
+    // 새 검색이 시작됐는지 주기적으로 확인한다. 결과가 안 나오는 검색어(드문 단어)는 출력이 없어서
+    // 출력 때만 확인하면 쓸모없어진 rg 가 끝까지 돌며 다음 검색과 디스크·CPU 를 나눠 쓴다.
+    const staleTimer = o.isStale ? setInterval(() => o.isStale!() && finish(), STALE_CHECK_MS) : undefined;
 
     const finish = () => {
       if (done) {
         return;
       }
       done = true;
+      if (staleTimer) clearInterval(staleTimer);
       if (!child.killed) {
         child.kill();
       }
@@ -163,6 +170,7 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
     child.on('error', (e) => {
       if (!done) {
         done = true;
+        if (staleTimer) clearInterval(staleTimer);
         reject(e);
       }
     });
@@ -176,6 +184,7 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
       // rg 종료 코드: 0=매치 있음, 1=매치 없음, 2=오류(일부 파일 읽기 실패 포함)
       if (code === 2 && results.length === 0 && stderr.includes('regex')) {
         done = true;
+        if (staleTimer) clearInterval(staleTimer);
         reject(new Error(stderr.trim()));
         return;
       }

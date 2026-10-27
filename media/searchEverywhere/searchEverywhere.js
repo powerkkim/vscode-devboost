@@ -51,6 +51,7 @@
   let selected = 0;
   let runId = 0;
   let shownRunId = 0;
+  let shownSeq; // 지금 화면에 그린 결과 묶음 번호 (열 때 같이 보냄)
   let debounce;
   // 범위·텍스트 옵션 (확장에서 init으로 받고, 바꾸면 search 메시지에 실어 보낸다)
   let options = {
@@ -342,7 +343,7 @@
 
   function open(i) {
     if (!rows[i]) return;
-    vscode.postMessage({ type: 'open', runId: shownRunId, index: i });
+    vscode.postMessage({ type: 'open', runId: shownRunId, seq: shownSeq, index: i });
   }
 
   function pageSize() {
@@ -493,13 +494,22 @@
       $query.select();
     } else if (m.type === 'results') {
       if (m.runId !== runId) return; // 오래된 결과 무시
+      // 같은 검색의 먼저 온 결과(partial)를 보고 있었으면 고른 줄과 스크롤을 유지한다
+      const sameRun = shownRunId === m.runId;
+      const prev = sameRun ? rows[selected] : undefined;
+      const scroll = sameRun ? $results.scrollTop : 0;
       shownRunId = m.runId;
-      $results.classList.remove('busy');
+      shownSeq = m.seq;
+      if (!m.partial) $results.classList.remove('busy');
       rows = m.rows || [];
       selected = 0;
+      if (prev) {
+        const i = rows.findIndex((r) => r.label === prev.label && r.right === prev.right && r.kind === prev.kind);
+        if (i >= 0) selected = i;
+      }
       renderResults(m.query);
-      $results.scrollTop = 0;
-      renderTiming(m);
+      $results.scrollTop = scroll;
+      if (!m.partial) renderTiming(m);
     }
   });
 
