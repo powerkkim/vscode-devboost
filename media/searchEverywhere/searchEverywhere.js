@@ -202,7 +202,10 @@
   // ───────── 검색 ─────────
   function search(immediate, keepLimit) {
     clearTimeout(debounce);
-    if (!keepLimit) limit = undefined;
+    if (!keepLimit) {
+      limit = undefined;
+      pendingSelect = undefined; // "더 보기" 결과를 기다리던 중 다른 검색을 시작하면 버린다
+    }
     const run = () => {
       runId++;
       sentAt[runId] = performance.now();
@@ -585,12 +588,13 @@
       selected = 0;
       renderResults(m.query); // view 를 새로 만든다
       let want = -1;
-      if (prev) {
+      if (pendingSelect !== undefined) {
+        // "더 보기": 새로 불러온 첫 줄로 (먼저 온 partial 에도, 최종 결과에도 같은 자리)
+        want = Math.min(pendingSelect, rows.length - 1);
+        if (!m.partial) pendingSelect = undefined;
+      } else if (prev) {
         const i = rows.findIndex((r) => r.label === prev.label && r.right === prev.right && r.kind === prev.kind);
         if (i >= 0) want = i;
-      } else if (pendingSelect !== undefined && !m.partial) {
-        want = Math.min(pendingSelect, rows.length - 1);
-        pendingSelect = undefined;
       }
       if (want >= 0) {
         const vi = view.findIndex((v) => v.idx === want);

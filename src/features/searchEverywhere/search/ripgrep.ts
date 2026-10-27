@@ -56,6 +56,9 @@ export function findRipgrep(appRoot: string): string | undefined {
   return undefined;
 }
 
+/** 한 파일에서 가져오는 최대 매치 수 */
+export const RG_MAX_PER_FILE = 20;
+
 /** rg 명령 인자 구성 (테스트에서 확인할 수 있도록 분리) */
 export function buildArgs(o: RgOptions): string[] {
   const args = [
@@ -66,7 +69,7 @@ export function buildArgs(o: RgOptions): string[] {
     '--max-columns',
     '400',
     '--max-count',
-    '20', // 한 파일에서 너무 많이 나오지 않게
+    String(RG_MAX_PER_FILE), // 한 파일에서 너무 많이 나오지 않게
   ];
   args.push(o.caseSensitive ? '--case-sensitive' : '--ignore-case');
   if (!o.regex) {
@@ -202,16 +205,46 @@ export function buildListArgs(roots: string[], excludeGlobs: string[]): string[]
   return args;
 }
 
-/** 워크스페이스 파일 목록 (개수 제한 없음, .gitignore 반영). 절대 경로 */
-export function listFiles(rgPath: string, roots: string[], excludeGlobs: string[]): Promise<string[]> {
+/** 파일 목록 상한. 홈 폴더·드라이브 전체를 열었을 때 수백만 개를 메모리에 올리지 않도록 */
+export const LIST_FILES_MAX = 200000;
+
+/** 워크스페이스 파일 목록 (.gitignore 반영, 최대 LIST_FILES_MAX 개). 절대 경로 */
+export function listFiles(rgPath: string, roots: string[], excludeGlobs: string[], max = LIST_FILES_MAX): Promise<string[]> {
   return new Promise((resolve, reject) => {
-    const child = spawn(rgPath, buildListArgs(roots, excludeGlobs), { stdio: ['ignore', 'pipe', 'ignore'] });
-    const chunks: string[] = [];
+    const child = spawn(rgPath, buildListArgs(roots, excludeGlobs), { stdio: ['ignore', 'pipe', 'pipe'] });
+    const files: string[] = [];
+    let rest = '';
+    let stderr = '';
+    let done = false;
     child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (c: string) => chunks.push(c));
-    child.on('error', reject);
-    // 종료 코드 2(일부 폴더 읽기 실패)여도 받은 목록은 쓴다
-    child.on('close', () => resolve(chunks.join('').split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean)));
+    child.stdout.on('data', (c: string) => {
+      if (done) return;
+      const lines = (rest + c).split('\n');
+      rest = lines.pop() ?? '';
+      for (const l of lines) if (l) files.push(l.replace(/\r$/, ''));
+      if (files.length >= max) {
+        done = true;
+        files.length = max;
+        child.kill();
+        resolve(files);
+      }
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (c: string) => (stderr += c));
+    child.on('error', (e) => {
+      if (!done) {
+        done = true;
+        reject(e);
+      }
+    });
+    child.on('close', (code) => {
+      if (done) return;
+      done = true;
+      if (rest) files.push(rest.replace(/\r$/, ''));
+      // 종료 코드 2 는 일부 폴더 읽기 실패 — 받은 목록이 있으면 쓰고, 하나도 없으면 실패로 (→ findFiles 로 대체)
+      if (code === 2 && files.length === 0) reject(new Error(stderr.trim() || 'rg --files 실패'));
+      else resolve(files);
+    });
   });
 }
 

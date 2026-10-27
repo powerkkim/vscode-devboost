@@ -48,9 +48,12 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   let runId = 0; // 오래된 검색 결과가 늦게 도착해도 무시하기 위한 토큰
   let debounce: NodeJS.Timeout | undefined;
   let limit: number | undefined; // "더 보기"로 늘린 표시 개수 (검색어·탭이 바뀌면 초기화)
-  let lastGroups: GroupCount[] = [];
+  let lastGroups: GroupCount[] = []; // 지금 화면에 그린 결과의 개수 (partial 포함)
+  let keepAfterMore: SearchItem | undefined; // "더 보기"를 누르기 직전에 보던 결과
 
   qp.matchOnDescription = false;
+  // 우리가 정한 순서(점수·우선순위, 종류별 "더 보기" 위치)를 VS Code 가 라벨 일치도로 다시 섞지 않게
+  (qp as { sortByLabel?: boolean }).sortByLabel = false;
   qp.matchOnDetail = false;
   qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ a/ t/';
   const updateButtons = () => {
@@ -85,9 +88,12 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     qp.busy = true;
     try {
       // 언어 서버를 기다리는 동안 먼저 나온 결과를 보여 준다 (busy 표시는 유지)
-      const keep = qp.activeItems[0]?.data;
+      const keep = keepAfterMore;
+      keepAfterMore = undefined;
       const r = await service.searchTimed(tab, text, () => myRun !== runId, (partial) => {
-        if (myRun === runId) qp.items = toPickItems(tab, partial.items, partial.groups);
+        if (myRun !== runId) return;
+        lastGroups = partial.groups;
+        qp.items = toPickItems(tab, partial.items, partial.groups);
       }, limit);
       if (myRun !== runId) {
         return; // 더 최신 검색이 시작됨
@@ -144,7 +150,10 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
         updateTitle();
       } else {
         const g = lastGroups.find((x) => x.kind === picked.more);
-        limit = (g?.shown ?? 0) + vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<number>('maxResults', 50);
+        const shown = g?.shown ?? qp.items.filter((i) => i.data).length;
+        limit = shown + vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<number>('maxResults', 50);
+        // 더 불러온 뒤 이어서 볼 수 있게 마지막 결과 위치를 기억
+        keepAfterMore = [...qp.items].reverse().find((i) => i.data)?.data;
       }
       void run();
       return;
