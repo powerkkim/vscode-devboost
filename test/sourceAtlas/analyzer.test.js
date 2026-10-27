@@ -576,3 +576,59 @@ test('R5. 다이아몬드 호출 그래프(폭 4 × 깊이 7)에서 메모로 �
   assert.deepStrictEqual(page.meta.apiCalls.map((r) => r.url).sort(), ['/api/deep/a', '/api/deep/b', '/api/deep/c', '/api/deep/d']);
   assert.strictEqual(page.meta.apiCalls[0].via.length, 7, '경유 체인은 첫 경로 하나를 보존');
 });
+
+// ───────────── 화면: 깊이 필터 · 분석 진행 표시 ─────────────
+test('W1. 깊이 필터: 중심에서 선(방향 무시) N단계 안의 노드만, 깊이 밖 이웃 수, 서버 흐름 함께', () => {
+  const { neighborhood } = require('../../out/features/sourceAtlas/view/neighborhood.js');
+  // 조부모 → 부모 → [중심] → 자식 → API → Controller → Service → SQL → 테이블,  중심 → 형제API
+  const N = (id, kind) => ({ id, kind, label: id, meta: {} });
+  const nodes = [N('gp', 'component'), N('p', 'component'), N('c', 'component'), N('ch', 'component'), N('api', 'api-call'),
+    N('ctl', 'controller'), N('svc', 'service'), N('sql', 'mapper'), N('tbl', 'table'), N('api2', 'api-call'), N('far', 'component')];
+  const E = (from, to, type = 'uses') => ({ from, to, type, certainty: 'sure' });
+  const edges = [E('gp', 'p'), E('p', 'c'), E('c', 'ch'), E('ch', 'api', 'calls'), E('api', 'ctl', 'handles'), E('ctl', 'svc', 'calls'),
+    E('svc', 'sql', 'calls'), E('sql', 'tbl', 'reads'), E('c', 'api2', 'calls'), E('far', 'gp')];
+  const ids = (r) => [...r.dist.keys()].sort();
+  const d1 = neighborhood(nodes, edges, 'c', 1, false);
+  assert.deepStrictEqual(ids(d1), ['api2', 'c', 'ch', 'p']);
+  const d2 = neighborhood(nodes, edges, 'c', 2, false);
+  assert.deepStrictEqual(ids(d2), ['api', 'api2', 'c', 'ch', 'gp', 'p'], '조부모-부모-중심-자식-API (사용자 예시)');
+  assert.strictEqual(d2.dist.get('gp'), 2);
+  assert.strictEqual(d2.hiddenNeighbors.get('gp'), 1, 'gp 위에 far 가 숨어 있음');
+  assert.strictEqual(d2.hiddenNeighbors.get('api'), 1, 'api 뒤에 controller 가 숨어 있음');
+  assert.ok(!d2.hiddenNeighbors.has('c'));
+  const d2s = neighborhood(nodes, edges, 'c', 2, true);
+  assert.deepStrictEqual(ids(d2s), ['api', 'api2', 'c', 'ch', 'ctl', 'gp', 'p', 'sql', 'svc', 'tbl'], '서버 흐름은 깊이와 상관없이');
+  assert.strictEqual(d2s.dist.get('tbl'), -1);
+  assert.ok(!ids(d2s).includes('far'), '서버 흐름은 위(컴포넌트)로는 퍼지지 않음');
+  assert.deepStrictEqual(ids(neighborhood(nodes, edges, 'nope', 2, false)), [], '없는 중심');
+  // 종류를 숨겨도 거리는 전체 그래프로: 자식(ch) 컴포넌트를 숨겨도 그 너머 API 는 깊이 2 안
+  const hid = neighborhood(nodes, edges, 'c', 2, true, { hiddenKinds: new Set(['component']), alwaysShow: new Set(['c']) });
+  assert.deepStrictEqual(ids(hid), ['api', 'api2', 'c', 'ctl', 'sql', 'svc', 'tbl'], '숨긴 종류는 빠지지만 경로는 끊기지 않음');
+  assert.ok(!hid.hiddenNeighbors.has('api'), '숨긴 종류(ch)는 숨은 이웃 수에 안 셈');
+});
+
+test('W2. 비동기 분석: 단계별 진행 알림, 동기 분석과 같은 결과, 취소하면 null', async () => {
+  const { analyzeSource, analyzeSourceAsync } = require('../../out/features/sourceAtlas/pipeline.js');
+  const F = path.join(FIX, 'fullstack');
+  const file = path.join(F, 'frontend/src/views/OrderPage.vue');
+  const steps = [];
+  const r = await analyzeSourceAsync(file, { workspaceRoot: F, vite: false, fresh: true }, (s) => steps.push(s));
+  assert.deepStrictEqual(steps.map((s) => `${s.index}/${s.total}`), ['1/5', '2/5', '3/5', '4/5', '5/5']);
+  assert.ok(steps.every((s) => s.label.endsWith('중')));
+  const sync = analyzeSource(file, { workspaceRoot: F, vite: false });
+  assert.deepStrictEqual(r.graph.nodes.map((n) => n.id).sort(), sync.graph.nodes.map((n) => n.id).sort());
+  assert.deepStrictEqual(r.notes, sync.notes);
+  const noBackend = [];
+  await analyzeSourceAsync(file, { workspaceRoot: F, vite: false, backend: false }, (s) => noBackend.push(s.label));
+  assert.ok(!noBackend.some((l) => l.includes('백엔드')), '백엔드 끄면 그 단계 없음');
+  let cancel = false;
+  const c = await analyzeSourceAsync(file, { workspaceRoot: F, vite: false }, (s) => { if (s.index === 2) cancel = true; }, () => cancel);
+  assert.strictEqual(c, null, '새 분석이 시작되면 이전 분석은 버림');
+  // 대기 중에 취소되면 그 단계는 실행하지 않는다 (진행 알림 직후 취소 → 2단계 run 없음)
+  let ran = 0;
+  const { analyzeSourceAsync: run2 } = require('../../out/features/sourceAtlas/pipeline.js');
+  let flag = false;
+  const r2 = await run2(file, { workspaceRoot: F, vite: false }, (s) => { ran = s.index; if (s.index === 2) flag = true; }, () => flag);
+  assert.strictEqual(r2, null);
+  assert.strictEqual(ran, 2, '2단계 알림 뒤 대기 중 취소 → 더 진행하지 않음');
+});

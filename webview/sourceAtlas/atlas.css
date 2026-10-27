@@ -63,3 +63,33 @@ aside { width: 300px; border-left: 1px solid var(--line); overflow: auto; backgr
 .via { font-size: 11.5px; margin: 2px 0 4px 2px; color: var(--dim); word-break: break-all; }
 .api-group { margin: 6px 0; } .api-fn { font-weight: 600; font-size: 12px; margin-bottom: 2px; } .api-group ul { margin-bottom: 4px; }
 .vue-flow__edge.indirect .vue-flow__edge-text { opacity: .6; }
+
+/* ── 깊이 필터 도구 막대 */
+.toolbar { display: flex; align-items: center; gap: 10px; padding: 4px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; font-size: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { background: transparent; color: var(--fg); border-radius: 0; padding: 2px 10px; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.seg button.on { background: var(--accent); color: #fff; }
+.toolbar .focus b { font-weight: 600; } .toolbar .chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+button.secondary:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+button:disabled { opacity: .6; cursor: default; }
+.d-actions { display: flex; gap: 6px; margin: 4px 0 6px; }
+.card.focus { box-shadow: 0 0 0 2px #e5c07b, 0 1px 4px #0005; }
+.card .more { margin-left: auto; padding: 0 6px; font-size: 10.5px; line-height: 16px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--fg); }
+.card .more:hover { background: var(--accent); color: #fff; }
+
+/* ── 분석 중 표시 */
+.canvas.busy .vue-flow { opacity: .35; filter: grayscale(.4); transition: opacity .2s; pointer-events: none; }
+.loading { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; pointer-events: none; }
+.loading .bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: color-mix(in srgb, var(--accent) 18%, transparent); overflow: hidden; }
+.loading .fill { position: absolute; top: 0; bottom: 0; left: 0; background: var(--accent); transition: width .3s ease; }
+.loading .shimmer { position: absolute; top: 0; bottom: 0; width: 30%; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: atlas-shimmer 1.2s linear infinite; opacity: .8; }
+@keyframes atlas-shimmer { from { left: -30%; } to { left: 100%; } }
+.loading-box { display: flex; gap: 14px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; box-shadow: 0 4px 18px #0006; max-width: 80%; }
+.loading-title { font-weight: 600; margin-bottom: 2px; }
+.loading-box .dim { white-space: normal; word-break: break-all; font-size: 12px; }
+.spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: atlas-spin .8s linear infinite; flex: none; }
+@keyframes atlas-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner, .loading .shimmer { animation: none; } }
