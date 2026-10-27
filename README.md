@@ -10,6 +10,7 @@
 | **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
+| **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -29,10 +30,25 @@
   - `src/main/java/com/demo/module/order` → 그 폴더 아래만 · `./src` → 워크스페이스 바로 아래 · `**/dto/**, *Test.java` → 패턴
   - `현재 폴더` 버튼: 지금 보는 파일의 폴더를 포함에 넣기
 - **액션 탭**: 명령 팔레트 / 설정 / 단축키 설정을 검색어가 채워진 상태로 엽니다
+- **결과 개수와 더 보기**: 탭마다 `maxResults`(기본 50)개씩 보여 주고, 더 있으면 끝에 `더 보기 — 123개 중 50개 표시`. 모두 탭은 종류별 머리글에 개수가 나오고 `더 보기`는 그 탭으로 이동
+- 텍스트 검색은 최대 2,000건까지 모은 뒤 열린 파일 → `src` → 기타 → 라이브러리 순으로 정렬해 보여 줍니다. 2,000건을 넘으면 알려 주니 포함 경로·파일 타입으로 좁혀 보세요
 - 에디터에서 단어를 선택한 채로 열면 그 단어로 바로 검색
 - 텍스트 검색은 VS Code 내장 ripgrep 사용 (`.gitignore` 반영)
 - 클래스 탭: 프로젝트 클래스(Java·Kotlin·TS/JS 등)는 자체 색인으로 바로 찾습니다. 언어 플러그인이 준비되기 전에도 나옵니다
 - jar·JDK 안의 클래스(범위 *프로젝트 및 라이브러리*)와 심볼 탭(메서드·필드)은 언어 플러그인이 필요합니다 (Java라면 *Extension Pack for Java*). 언어 플러그인 결과는 먼저 나온 결과 뒤에 이어서 채워집니다
+
+### 케이스 변환
+
+| 명령 | 하는 일 |
+|---|---|
+| `케이스 변환 (camel · snake · kebab …)` | 선택한 이름(없으면 커서 아래 이름)을 camelCase · PascalCase · snake_case · SCREAMING_SNAKE_CASE · kebab-case · dot.case 로 바꿈. 여러 곳을 선택하면 한 번에 변환 |
+| `SQL·컬럼 이름 → Java 필드` | mapper XML 쿼리의 SELECT 목록 · INSERT 컬럼 · `CREATE TABLE` · 컬럼 이름 목록 · 테이블 이름을 `private 타입 이름;` 으로 바꿈 |
+| `Java 필드 → TypeScript 인터페이스` | 클래스·record·필드 몇 줄을 `export interface` 로 바꿈 (`List<X>` → `X[]`, 날짜 → `string` 등) |
+| `Java 필드 → MyBatis SQL` | SELECT 컬럼 · INSERT · UPDATE · resultMap 생성 |
+
+- 입력: 선택 영역 → (mapper XML 이면) 커서 위치 쿼리 → (`.sql`·`.java` 이면) 현재 파일 → 클립보드 순서. 같은 파일의 `<include refid>` 는 풀어서 반영
+- 타입: `DB 스키마`로 스키마를 가져와 두었다면 실제 컬럼 타입·설명을 쓰고(`SELECT *`·테이블 이름만 넣어도 컬럼을 펼침), 없으면 컬럼 이름으로 추정
+- 결과는 새 문서로 열림. 클립보드·선택 영역 아래 삽입으로 바꾸려면 설정 `devBoost.caseConverter.output`
 
 ### 설정
 

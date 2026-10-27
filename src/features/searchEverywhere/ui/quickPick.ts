@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SearchService, SearchItem, TabId } from '../search/searchService';
+import { SearchService, SearchItem, TabId, GroupCount } from '../search/searchService';
 
 /**
  * Search Everywhere 를 VS Code 기본 QuickPick 목록으로 여는 방식 (설정 ui = "quickPick").
@@ -19,6 +19,8 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
 /** QuickPick 항목에 우리 검색 결과를 같이 들고 다니기 위한 확장 타입 */
 interface PickItem extends vscode.QuickPickItem {
   data?: SearchItem;
+  /** "더 보기" 항목: 그 종류를 더 보여 준다 */
+  more?: SearchItem['kind'];
 }
 
 class TabButton implements vscode.QuickInputButton {
@@ -45,8 +47,13 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   let currentTab: TabId = initialTab;
   let runId = 0; // 오래된 검색 결과가 늦게 도착해도 무시하기 위한 토큰
   let debounce: NodeJS.Timeout | undefined;
+  let limit: number | undefined; // "더 보기"로 늘린 표시 개수 (검색어·탭이 바뀌면 초기화)
+  let lastGroups: GroupCount[] = []; // 지금 화면에 그린 결과의 개수 (partial 포함)
+  let keepAfterMore: SearchItem | undefined; // "더 보기"를 누르기 직전에 보던 결과
 
   qp.matchOnDescription = false;
+  // 우리가 정한 순서(점수·우선순위, 종류별 "더 보기" 위치)를 VS Code 가 라벨 일치도로 다시 섞지 않게
+  (qp as { sortByLabel?: boolean }).sortByLabel = false;
   qp.matchOnDetail = false;
   qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ a/ t/';
   const updateButtons = () => {
@@ -81,13 +88,23 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     qp.busy = true;
     try {
       // 언어 서버를 기다리는 동안 먼저 나온 결과를 보여 준다 (busy 표시는 유지)
-      const results = await service.search(tab, text, () => myRun !== runId, (partial) => {
-        if (myRun === runId) qp.items = toPickItems(tab, partial);
-      });
+      const keep = keepAfterMore;
+      keepAfterMore = undefined;
+      const r = await service.searchTimed(tab, text, () => myRun !== runId, (partial) => {
+        if (myRun !== runId) return;
+        lastGroups = partial.groups;
+        qp.items = toPickItems(tab, partial.items, partial.groups);
+      }, limit);
       if (myRun !== runId) {
         return; // 더 최신 검색이 시작됨
       }
-      qp.items = toPickItems(tab, results);
+      lastGroups = r.groups;
+      qp.items = toPickItems(tab, r.items, r.groups);
+      // "더 보기" 뒤에는 보던 항목 근처에 머문다
+      if (keep && limit) {
+        const same = qp.items.find((i) => i.data && i.data.uri?.toString() === keep.uri?.toString() && i.data.label === keep.label);
+        if (same) qp.activeItems = [same];
+      }
     } catch (e) {
       console.error('[SearchEverywhere]', e);
     } finally {
@@ -104,15 +121,20 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     debounce = setTimeout(run, 120);
   };
 
-  qp.onDidChangeValue(schedule);
+  qp.onDidChangeValue(() => {
+    limit = undefined;
+    schedule();
+  });
 
   qp.onDidTriggerButton((b) => {
     if (b instanceof TabButton) {
       currentTab = b.tab;
+      limit = undefined;
       updateTitle();
       run();
     } else if (b instanceof NonProjectToggle) {
       service.includeNonProject = !service.includeNonProject;
+      limit = undefined;
       updateButtons();
       updateTitle();
       run();
@@ -121,6 +143,21 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
 
   qp.onDidAccept(async () => {
     const picked = qp.selectedItems[0];
+    if (picked?.more) {
+      if (currentTab === 'all' && !/^[cfsat]\//.test(qp.value)) {
+        currentTab = picked.more; // 모두 탭: 그 종류의 탭으로
+        limit = undefined;
+        updateTitle();
+      } else {
+        const g = lastGroups.find((x) => x.kind === picked.more);
+        const shown = g?.shown ?? qp.items.filter((i) => i.data).length;
+        limit = shown + vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<number>('maxResults', 50);
+        // 더 불러온 뒤 이어서 볼 수 있게 마지막 결과 위치를 기억
+        keepAfterMore = [...qp.items].reverse().find((i) => i.data)?.data;
+      }
+      void run();
+      return;
+    }
     if (!picked?.data) {
       return;
     }
@@ -142,11 +179,23 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
 }
 
 /** 검색 결과를 QuickPick 항목으로 변환. '모두' 탭은 종류별 구분선을 넣는다. */
-function toPickItems(tab: TabId, results: SearchItem[]): PickItem[] {
+function toPickItems(tab: TabId, results: SearchItem[], groups: GroupCount[] = []): PickItem[] {
   const items: PickItem[] = [];
   let lastKind: string | undefined;
+  const fmt = (n: number) => n.toLocaleString('ko-KR');
+  const moreItem = (kind: SearchItem['kind']) => {
+    const g = groups.find((x) => x.kind === kind);
+    if (!g || !(g.total > g.shown || (g.capped && tab === 'all'))) return;
+    const total = g.capped ? `${fmt(g.total)}건 이상` : `${fmt(g.total)}개`;
+    items.push({
+      label: tab === 'all' ? `$(ellipsis) ${kindLabel(kind)} 더 보기` : '$(ellipsis) 더 보기',
+      description: `${total} 중 ${fmt(g.shown)}개 표시`,
+      alwaysShow: true,
+      more: kind,
+    });
+  };
 
-  for (const r of results) {
+  results.forEach((r, i) => {
     if (tab === 'all' && r.kind !== lastKind) {
       items.push({ label: kindLabel(r.kind), kind: vscode.QuickPickItemKind.Separator });
       lastKind = r.kind;
@@ -160,7 +209,8 @@ function toPickItems(tab: TabId, results: SearchItem[]): PickItem[] {
       alwaysShow: true,
       data: r,
     });
-  }
+    if (results[i + 1]?.kind !== r.kind) moreItem(r.kind);
+  });
   return items;
 }
 
