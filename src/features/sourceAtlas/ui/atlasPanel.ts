@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { analyzeSource, clearAtlasCaches } from '../pipeline';
+import { analyzeSourceAsync, clearAtlasCaches } from '../pipeline';
 
 /**
  * Atlas 화면(Webview). 한 번에 하나만 띄우고, 다시 열면 같은 패널에서 새 파일을 분석한다.
@@ -17,6 +17,8 @@ export class AtlasPanel {
   private readonly disposables: vscode.Disposable[] = [];
   /** 다음 분석에서 색인 캐시를 버릴지 (새 파일을 열었거나 '다시 분석' 일 때) */
   private fresh = true;
+  /** 분석 실행 번호: 새 분석이 시작되면 이전 분석 결과는 버린다 */
+  private runId = 0;
 
   static show(context: vscode.ExtensionContext, rootFile: string, workspaceRoot: string) {
     if (AtlasPanel.current) {
@@ -24,7 +26,7 @@ export class AtlasPanel {
       AtlasPanel.current.workspaceRoot = workspaceRoot;
       AtlasPanel.current.fresh = true;
       AtlasPanel.current.panel.reveal(undefined, true);
-      AtlasPanel.current.analyze();
+      void AtlasPanel.current.analyze();
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -58,7 +60,7 @@ export class AtlasPanel {
   private onMessage(m: { type: string; file?: string; line?: number; col?: number }) {
     switch (m.type) {
       case 'ready':
-        this.analyze();
+        void this.analyze();
         break;
       case 'refresh': {
         // 지금 열려 있는 .vue 파일이 있으면 그 파일로, 없으면 마지막 분석 대상으로 다시 분석
@@ -71,7 +73,7 @@ export class AtlasPanel {
           }
         }
         this.fresh = true;
-        this.analyze();
+        void this.analyze();
         break;
       }
       case 'open':
@@ -103,30 +105,40 @@ export class AtlasPanel {
     }
   }
 
-  private analyze() {
+  private async analyze() {
     const post = (m: unknown) => void this.panel.webview.postMessage(m);
-    post({ type: 'loading' });
+    const run = ++this.runId;
+    const isStale = () => run !== this.runId || this.disposed;
     const cfg = vscode.workspace.getConfiguration('devBoost.sourceAtlas');
     const started = Date.now();
-    try {
-      const { graph, notes } = analyzeSource(this.rootFile, {
-        workspaceRoot: this.workspaceRoot,
-        maxDepth: cfg.get<number>('maxDepth', 3),
-        maxUp: cfg.get<number>('maxUpDepth', 3),
-        backend: cfg.get<boolean>('backend.enabled', true),
-        backendDepth: cfg.get<number>('backend.maxDepth', 6),
-        vite: cfg.get<boolean>('vite.enabled', true) ? {} : false,
-        contextPath: cfg.get<string>('backend.contextPath', '') || undefined,
-        aliases: cfg.get<Record<string, string>>('aliases', {}),
-        fresh: this.fresh,
-      });
-      this.fresh = false;
-      this.panel.title = `Atlas: ${path.basename(this.rootFile)}`;
-      const stats = [`노드 ${graph.nodes.length} · 엣지 ${graph.edges.length} · ${Date.now() - started}ms`, ...notes].join('  |  ');
-      post({ type: 'graph', graph, stats });
-    } catch (e) {
-      post({ type: 'error', message: `분석 실패: ${(e as Error).message}` });
-    }
+    const file = path.relative(this.workspaceRoot, this.rootFile).split(path.sep).join('/');
+    post({ type: 'loading', file, step: { index: 0, total: 0, label: '분석 준비 중' } });
+    // 상태 표시줄에도 진행 표시 (웹뷰 안의 진행 막대와 함께)
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Source Atlas 분석 중' }, async () => {
+      try {
+        const result = await analyzeSourceAsync(this.rootFile, {
+          workspaceRoot: this.workspaceRoot,
+          maxDepth: cfg.get<number>('maxDepth', 3),
+          maxUp: cfg.get<number>('maxUpDepth', 3),
+          backend: cfg.get<boolean>('backend.enabled', true),
+          backendDepth: cfg.get<number>('backend.maxDepth', 6),
+          vite: cfg.get<boolean>('vite.enabled', true) ? {} : false,
+          contextPath: cfg.get<string>('backend.contextPath', '') || undefined,
+          aliases: cfg.get<Record<string, string>>('aliases', {}),
+          fresh: this.fresh,
+        }, (step) => {
+          if (!isStale()) post({ type: 'loading', file, step, elapsedMs: Date.now() - started });
+        }, isStale);
+        if (!result || isStale()) return;
+        const { graph, notes } = result;
+        this.fresh = false;
+        this.panel.title = `Atlas: ${path.basename(this.rootFile)}`;
+        const stats = [`노드 ${graph.nodes.length} · 엣지 ${graph.edges.length} · ${Date.now() - started}ms`, ...notes].join('  |  ');
+        post({ type: 'graph', graph, stats });
+      } catch (e) {
+        if (!isStale()) post({ type: 'error', message: `분석 실패: ${(e as Error).message}` });
+      }
+    });
   }
 
   private html(): string {
@@ -145,7 +157,10 @@ export class AtlasPanel {
 <body><div id="app"></div><script nonce="${nonce}" src="${js}"></script></body></html>`;
   }
 
+  private disposed = false;
+
   private dispose() {
+    this.disposed = true;
     AtlasPanel.current = undefined;
     clearAtlasCaches(); // 창을 닫으면 색인도 놓는다 (다시 열면 새로 만든다)
     this.disposables.forEach((d) => d.dispose());

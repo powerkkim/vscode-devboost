@@ -1,13 +1,32 @@
-import { computed, defineComponent, h, onMounted, ref } from 'vue';
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { VueFlow, MarkerType } from '@vue-flow/core';
 import { Controls } from '@vue-flow/controls';
 import { Background } from '@vue-flow/background';
 import NodeCard, { KIND_LABEL } from './NodeCard';
 import { layout } from './layout';
+import { neighborhood } from '../../src/features/sourceAtlas/view/neighborhood';
 import type { AtlasGraph, AtlasNode } from './types';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void };
 const vscode = acquireVsCodeApi();
+
+/** 노드가 이 수를 넘으면 처음부터 깊이 2 로 보여 준다 */
+const AUTO_DEPTH_NODES = 60;
+const DEPTHS = [1, 2, 3, 4, 5];
+
+let state: { depth?: number | 'all'; withServer?: boolean } = {};
+try {
+  state = JSON.parse(localStorage.getItem('devboost.atlas.view') ?? '{}');
+} catch {
+  state = {};
+}
+const saveState = () => {
+  try {
+    localStorage.setItem('devboost.atlas.view', JSON.stringify(state));
+  } catch {
+    /* 저장 못 해도 동작에는 지장 없음 */
+  }
+};
 
 const EDGE_COLOR: Record<string, string> = {
   uses: 'var(--edge-uses)', imports: 'var(--edge-uses)', calls: 'var(--edge-calls)', handles: 'var(--edge-calls)',
@@ -23,6 +42,24 @@ export default defineComponent({
     const selectedId = ref<string | null>(null);
     const hidden = ref<Set<string>>(new Set(['external']));
     const stats = ref('');
+    // ── 분석 진행 표시
+    const step = ref<{ index: number; total: number; label: string }>({ index: 0, total: 0, label: '분석 준비 중' });
+    const loadingFile = ref('');
+    const loadStarted = ref(0);
+    const now = ref(Date.now());
+    let ticker: ReturnType<typeof setInterval> | undefined;
+    const stopTicker = () => {
+      if (ticker) clearInterval(ticker);
+      ticker = undefined;
+    };
+    // ── 깊이 필터: 중심 노드에서 몇 단계까지 보일지
+    const focusId = ref<string | null>(null);
+    const depth = ref<number | 'all'>('all');
+    const withServer = ref<boolean>(state.withServer ?? false);
+    watch(withServer, (v) => {
+      state.withServer = v;
+      saveState();
+    });
 
     onMounted(() => {
       window.addEventListener('message', (ev) => {
@@ -32,16 +69,40 @@ export default defineComponent({
           stats.value = m.stats ?? '';
           error.value = '';
           loading.value = false;
+          stopTicker();
           selectedId.value = m.graph.root;
+          focusId.value = m.graph.root;
+          // 큰 그래프는 처음부터 주변만 (사용자가 고른 깊이가 있으면 그것)
+          depth.value = state.depth ?? (m.graph.nodes.length > AUTO_DEPTH_NODES ? 2 : 'all');
         } else if (m.type === 'error') {
           error.value = m.message;
           loading.value = false;
+          stopTicker();
         } else if (m.type === 'loading') {
+          if (!loading.value || !ticker) {
+            loadStarted.value = Date.now() - (m.elapsedMs ?? 0);
+            stopTicker();
+            ticker = setInterval(() => (now.value = Date.now()), 200);
+          }
           loading.value = true;
+          if (m.step) step.value = m.step;
+          if (m.file) loadingFile.value = m.file;
         }
       });
       vscode.postMessage({ type: 'ready' });
     });
+    onBeforeUnmount(stopTicker);
+    const elapsed = computed(() => Math.max(0, (now.value - loadStarted.value) / 1000).toFixed(1));
+    const setDepth = (d: number | 'all') => {
+      depth.value = d;
+      state.depth = d;
+      saveState();
+    };
+    /** 노드를 고른다. 깊이 필터 밖에 있으면 그 노드를 중심으로 다시 보여 준다 */
+    const select = (id: string) => {
+      selectedId.value = id;
+      if (!visible.value.nodes.some((n) => n.id === id)) focusId.value = id;
+    };
 
     const kinds = computed(() => {
       const c = new Map<string, number>();
@@ -49,18 +110,43 @@ export default defineComponent({
       const order = ['route', 'component', 'composable', 'store', 'api-call', 'controller', 'service', 'mapper', 'table', 'external'];
       return [...c.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
     });
-    const visible = computed(() => {
+    /** 종류 체크박스로 거른 것 (깊이 필터 전) */
+    const byKind = computed(() => {
       const g = graph.value;
       if (!g) return { nodes: [] as AtlasNode[], edges: [] as AtlasGraph['edges'] };
-      const nodes = g.nodes.filter((n) => n.id === g.root || !hidden.value.has(n.kind));
+      const keep = new Set([g.root, focusId.value]);
+      const nodes = g.nodes.filter((n) => keep.has(n.id) || !hidden.value.has(n.kind));
       const ids = new Set(nodes.map((n) => n.id));
       return { nodes, edges: g.edges.filter((e) => ids.has(e.from) && ids.has(e.to)) };
     });
+    /** 깊이 필터까지 적용한 것 (화면에 그리는 것) */
+    const visible = computed(() => {
+      const { nodes, edges } = byKind.value;
+      const g = graph.value;
+      if (!g || depth.value === 'all') return { nodes, edges, hiddenNeighbors: new Map<string, number>(), dist: new Map<string, number>() };
+      const center = focusId.value && nodes.some((n) => n.id === focusId.value) ? focusId.value : g.root;
+      const nb = neighborhood(nodes, edges, center, depth.value, withServer.value);
+      const keepNodes = nodes.filter((n) => nb.dist.has(n.id));
+      return {
+        nodes: keepNodes,
+        edges: edges.filter((e) => nb.dist.has(e.from) && nb.dist.has(e.to)),
+        hiddenNeighbors: nb.hiddenNeighbors,
+        dist: nb.dist,
+      };
+    });
+    const focusNode = computed(() => graph.value?.nodes.find((n) => n.id === focusId.value) ?? null);
     const flow = computed(() => {
       const { nodes, edges } = visible.value;
       const pos = layout(nodes, edges);
       return {
-        nodes: nodes.map((n) => ({ id: n.id, type: 'card', position: pos.get(n.id)!, data: { node: n, isRoot: n.id === graph.value!.root } })),
+        nodes: nodes.map((n) => ({
+          id: n.id, type: 'card', position: pos.get(n.id)!,
+          data: {
+            node: n, isRoot: n.id === graph.value!.root,
+            isFocus: depth.value !== 'all' && n.id === focusId.value,
+            more: visible.value.hiddenNeighbors.get(n.id) ?? 0,
+          },
+        })),
         edges: edges.map((e, i) => ({
           id: `e${i}`, source: e.from, target: e.to,
           label: e.label && e.type !== 'uses' ? e.label : e.type === 'writes' ? '쓰기' : e.type === 'reads' ? '읽기' : undefined,
@@ -104,7 +190,7 @@ export default defineComponent({
         ...[...byFn.entries()].map(([fn, rs]) => h('div', { class: 'api-group' }, [
           h('div', { class: 'api-fn' }, fn === '<setup>' ? '(setup)' : fn === '<module>' ? '(모듈)' : `${fn}()`),
           h('ul', rs.map((r) => h('li', [
-            h('a', { href: '#', class: 'sym', title: `${r.method} ${r.url}`, onClick: (ev: Event) => { ev.preventDefault(); selectedId.value = `api:${r.method} ${r.url}`; } }, `${r.method} ${r.url}`),
+            h('a', { href: '#', class: 'sym', title: `${r.method} ${r.url}`, onClick: (ev: Event) => { ev.preventDefault(); select(`api:${r.method} ${r.url}`); } }, `${r.method} ${r.url}`),
             r.certainty === 'guess' ? h('span', { class: 'warn' }, ' 추정') : null,
             r.via?.length ? viaChain(r.via) : null,
           ]))),
@@ -129,7 +215,7 @@ export default defineComponent({
       // 연결된 노드 목록: 클릭하면 그 노드를 선택
       const linkSec = (title: string, list: { id: string; text: string }[]) =>
         list.length
-          ? [h('h4', title), h('ul', list.map((x) => h('li', [h('a', { class: 'sym', href: '#', onClick: (ev: Event) => { ev.preventDefault(); selectedId.value = x.id; } }, x.text)])))]
+          ? [h('h4', title), h('ul', list.map((x) => h('li', [h('a', { class: 'sym', href: '#', onClick: (ev: Event) => { ev.preventDefault(); select(x.id); } }, x.text)])))]
           : [];
       const outgoing = graph.value!.edges.filter((e) => e.from === n.id);
       const incoming = graph.value!.edges.filter((e) => e.to === n.id);
@@ -137,7 +223,15 @@ export default defineComponent({
       return h('div', { class: 'detail' }, [
         h('div', { class: 'd-head' }, [h('span', { class: ['badge', `k-${n.kind}`] }, KIND_LABEL[n.kind] ?? n.kind), h('b', n.label)]),
         n.file ? h('div', { class: 'path' }, n.file) : null,
-        n.file ? h('button', { onClick: () => open(n) }, '파일 열기') : null,
+        h('div', { class: 'd-actions' }, [
+          n.file ? h('button', { onClick: () => open(n) }, '파일 열기') : null,
+          focusId.value !== n.id
+            ? h('button', { class: 'secondary', title: '이 노드를 중심으로 주변 몇 단계만 보기', onClick: () => { focusId.value = n.id; if (depth.value === 'all') setDepth(2); } }, '여기를 중심으로')
+            : null,
+        ]),
+        depth.value !== 'all' && visible.value.hiddenNeighbors.get(n.id)
+          ? h('div', { class: 'dim' }, `깊이 밖에 연결이 ${visible.value.hiddenNeighbors.get(n.id)}개 더 있습니다.`)
+          : null,
         m.style ? h('div', { class: 'dim' }, `${m.style} · ${m.lang}`) : null,
         ...(n.warnings?.length ? [h('h4', '경고'), h('ul', { class: 'warns' }, n.warnings.map((w) => h('li', w)))] : []),
         ...sec('props', m.props, 'props'), ...sec('emits', m.emits, 'emits'), ...sec('slots', m.slots, 'slots'),
@@ -186,12 +280,46 @@ export default defineComponent({
               h('input', { type: 'checkbox', checked: !hidden.value.has(k) || k === 'component', disabled: k === 'component', onChange: () => toggle(k) }),
               `${KIND_LABEL[k] ?? k} ${c}`,
             ])),
-          h('button', { onClick: () => vscode.postMessage({ type: 'refresh' }) }, '다시 분석'),
+          h('button', { disabled: loading.value, onClick: () => vscode.postMessage({ type: 'refresh' }) }, loading.value ? '분석 중…' : '다시 분석'),
         ]),
+        g ? h('div', { class: 'toolbar' }, [
+          h('span', { class: 'dim' }, '깊이'),
+          h('div', { class: 'seg' }, [
+            ...DEPTHS.map((d) => h('button', { class: { on: depth.value === d }, title: `중심에서 ${d}단계까지`, onClick: () => setDepth(d) }, String(d))),
+            h('button', { class: { on: depth.value === 'all' }, title: '전체 보기', onClick: () => setDepth('all') }, '전체'),
+          ]),
+          depth.value !== 'all' ? h('span', { class: 'focus' }, [
+            h('span', { class: 'dim' }, '중심 '),
+            h('b', { title: focusNode.value?.id }, focusNode.value?.label ?? '?'),
+            focusId.value !== g.root ? h('a', { href: '#', class: 'sym', title: '열어 둔 파일을 다시 중심으로', onClick: (ev: Event) => { ev.preventDefault(); focusId.value = g.root; } }, ' ↺ 처음 파일로') : null,
+          ]) : null,
+          depth.value !== 'all' ? h('label', { class: 'chk', title: '깊이 안에 들어온 API 의 Controller → Service → SQL → 테이블 흐름은 깊이와 상관없이 보기' }, [
+            h('input', { type: 'checkbox', checked: withServer.value, onChange: (ev: Event) => (withServer.value = (ev.target as HTMLInputElement).checked) }),
+            'API 뒤 서버 흐름 함께',
+          ]) : null,
+          h('span', { class: 'spacer' }),
+          h('span', { class: 'dim' }, depth.value === 'all'
+            ? `노드 ${byKind.value.nodes.length}개`
+            : `표시 ${visible.value.nodes.length} / ${byKind.value.nodes.length}개`),
+        ]) : null,
         h('main', [
-          h('section', { class: 'canvas' }, [
+          h('section', { class: ['canvas', { busy: loading.value }] }, [
+            loading.value ? h('div', { class: 'loading' }, [
+              h('div', { class: 'bar' }, [
+                h('div', { class: 'fill', style: { width: step.value.total ? `${Math.round((Math.max(step.value.index - 1, 0) / step.value.total) * 100)}%` : '0%' } }),
+                h('div', { class: 'shimmer' }),
+              ]),
+              h('div', { class: 'loading-box' }, [
+                h('div', { class: 'spinner' }),
+                h('div', [
+                  h('div', { class: 'loading-title' }, step.value.total ? `${step.value.index}/${step.value.total} · ${step.value.label}` : step.value.label),
+                  h('div', { class: 'dim' }, `${loadingFile.value}  ·  ${elapsed.value}초`),
+                  g ? h('div', { class: 'dim' }, '끝나면 화면이 새 결과로 바뀝니다.') : null,
+                ]),
+              ]),
+            ]) : null,
             error.value ? h('div', { class: 'msg err' }, error.value)
-              : loading.value && !g ? h('div', { class: 'msg' }, '분석 중…')
+              : !g ? (loading.value ? null : h('div', { class: 'msg' }, '분석 결과 없음'))
               : h(VueFlow, {
                   key: JSON.stringify(visible.value.nodes.map((n) => n.id)),
                   nodes: flow.value.nodes, edges: flow.value.edges,
@@ -201,11 +329,14 @@ export default defineComponent({
                   onNodeDoubleClick: ({ node }: any) => open(graph.value!.nodes.find((n) => n.id === node.id) ?? null),
                   onPaneClick: () => (selectedId.value = null),
                 }, {
-                  'node-card': (p: any) => h(NodeCard, { data: p.data, selected: p.id === selectedId.value }),
+                  'node-card': (p: any) => h(NodeCard, {
+                    data: p.data, selected: p.id === selectedId.value,
+                    onMore: () => { selectedId.value = p.id; focusId.value = p.id; },
+                  }),
                   default: () => [h(Background, { gap: 22 }), h(Controls, { showInteractive: false })],
                 }),
           ]),
-          h('aside', selected.value ? [detail(selected.value)] : [h('div', { class: 'dim pad' }, '노드를 클릭하면 상세가 보입니다.\n더블클릭하면 파일이 열립니다.')]),
+          h('aside', selected.value ? [detail(selected.value)] : [h('div', { class: 'dim pad' }, '노드를 클릭하면 상세가 보입니다.\n더블클릭하면 파일이 열립니다.\n카드의 "+N" 을 누르면 그 노드를 중심으로 다시 보여 줍니다.')]),
         ]),
         h('footer', { class: 'legend' }, [
           h('span', '── 확실'), h('span', '- - 추정'), h('span', { class: 'calls' }, '── API 호출/서버 호출'), h('span', { class: 'rd' }, '── 읽기'), h('span', { class: 'wr' }, '── 쓰기'), h('span', '·· 간접 호출(composable/store 경유)'), h('span', '↑ 상위'), h('span', '⚠ 경고'),

@@ -31,43 +31,117 @@ export function clearAtlasCaches() {
   clearViteProbeCache();
 }
 
-/** 열린 .vue 한 개 → 아래(자식·API·백엔드)와 위(부모·라우트)를 모두 분석한 AtlasGraph */
-export function analyzeSource(rootFile: string, opts: PipelineOptions): { graph: AtlasGraph; notes: string[] } {
-  if (opts.fresh) {
-    clearAtlasCaches();
-  }
-  const notes: string[] = [];
-  // Vite 설정을 프로젝트의 vite 로 실제로 읽어 alias·proxy 를 얻는다 (못 읽으면 정적 해석)
+/** 분석 단계 (화면에 진행 상황으로 보인다) */
+export interface AnalysisStep {
+  /** 1부터 */
+  index: number;
+  total: number;
+  label: string;
+}
+export type ProgressFn = (step: AnalysisStep) => void;
+
+interface Phase {
+  label: string;
+  run: () => void;
+}
+
+/** 분석을 단계로 나눈다. 동기/비동기 실행이 같은 단계를 쓴다 */
+function phases(rootFile: string, opts: PipelineOptions, out: { graph?: AtlasGraph; notes: string[] }): Phase[] {
   let vite: ViteInfo | null = null;
-  const probeResolver = new Resolver({ workspaceRoot: opts.workspaceRoot, aliases: opts.aliases });
-  const projectDir = probeResolver.findProjectDir(path.resolve(rootFile));
-  if (opts.vite !== false) {
-    vite = probeVite(projectDir, opts.vite ?? {});
-  }
-  const aliases: Record<string, string> = { ...(opts.aliases ?? {}) };
-  for (const a of vite?.aliases ?? []) {
-    if (a.regex || aliases[a.find]) continue;
-    let target = a.replacement;
-    if (!path.isAbsolute(target) || !fs.existsSync(target)) {
-      const inProject = path.join(projectDir, target.replace(/^\/+/, ''));
-      if (fs.existsSync(inProject)) target = inProject;
-    }
-    aliases[a.find] = target;
-  }
-  // 호출 전파 엔진은 한 번의 분석 동안 모듈 요약을 공유한다 (상위 컴포넌트 분석에서도 재사용)
-  const engine = new FlowEngine({ resolver: new Resolver({ workspaceRoot: opts.workspaceRoot, aliases }) });
-  const graph = buildAtlasGraph(rootFile, { workspaceRoot: opts.workspaceRoot, maxDepth: opts.maxDepth, aliases, engine });
-  const up = attachAncestors(graph, rootFile, { workspaceRoot: opts.workspaceRoot, maxUp: opts.maxUp, aliases, engine });
-  if (up) notes.push(up);
+  let projectDir = '';
+  let aliases: Record<string, string> = {};
+  let engine: FlowEngine;
+  const list: Phase[] = [
+    {
+      label: 'Vite 설정 읽는 중',
+      run: () => {
+        if (opts.fresh) clearAtlasCaches();
+        // Vite 설정을 프로젝트의 vite 로 실제로 읽어 alias·proxy 를 얻는다 (못 읽으면 정적 해석)
+        const probeResolver = new Resolver({ workspaceRoot: opts.workspaceRoot, aliases: opts.aliases });
+        projectDir = probeResolver.findProjectDir(path.resolve(rootFile));
+        if (opts.vite !== false) vite = probeVite(projectDir, opts.vite ?? {});
+        aliases = { ...(opts.aliases ?? {}) };
+        for (const a of vite?.aliases ?? []) {
+          if (a.regex || aliases[a.find]) continue;
+          let target = a.replacement;
+          if (!path.isAbsolute(target) || !fs.existsSync(target)) {
+            const inProject = path.join(projectDir, target.replace(/^\/+/, ''));
+            if (fs.existsSync(inProject)) target = inProject;
+          }
+          aliases[a.find] = target;
+        }
+      },
+    },
+    {
+      label: '컴포넌트·API 호출 분석 중',
+      run: () => {
+        // 호출 전파 엔진은 한 번의 분석 동안 모듈 요약을 공유한다 (상위 컴포넌트 분석에서도 재사용)
+        engine = new FlowEngine({ resolver: new Resolver({ workspaceRoot: opts.workspaceRoot, aliases }) });
+        out.graph = buildAtlasGraph(rootFile, { workspaceRoot: opts.workspaceRoot, maxDepth: opts.maxDepth, aliases, engine });
+      },
+    },
+    {
+      label: '상위 컴포넌트·라우트 찾는 중',
+      run: () => {
+        const up = attachAncestors(out.graph!, rootFile, { workspaceRoot: opts.workspaceRoot, maxUp: opts.maxUp, aliases, engine });
+        if (up) out.notes.push(up);
+      },
+    },
+  ];
   if (opts.backend !== false) {
-    const contextPath = opts.contextPath ?? findContextPath(opts.workspaceRoot);
-    const be = attachBackend(graph, opts.workspaceRoot, { maxDepth: opts.backendDepth, proxies: vite?.proxies, contextPath });
-    notes.push(be || '백엔드 소스 없음 → UI·API 호출까지만 분석');
-    if (be && contextPath) notes.push(`context-path ${contextPath}`);
+    list.push({
+      label: '백엔드(Controller·SQL) 색인·매칭 중',
+      run: () => {
+        const contextPath = opts.contextPath ?? findContextPath(opts.workspaceRoot);
+        const be = attachBackend(out.graph!, opts.workspaceRoot, { maxDepth: opts.backendDepth, proxies: vite?.proxies, contextPath });
+        out.notes.push(be || '백엔드 소스 없음 → UI·API 호출까지만 분석');
+        if (be && contextPath) out.notes.push(`context-path ${contextPath}`);
+      },
+    });
   }
-  if (vite) notes.push(`Vite 설정 읽음 (alias ${vite.aliases.length} · proxy ${vite.proxies.length})`);
-  graph.meta = { ...(graph.meta ?? {}), vite: vite ? { proxies: vite.proxies, base: vite.base } : undefined, projectDir: path.relative(opts.workspaceRoot, projectDir) || '.' };
-  return { graph, notes };
+  list.push({
+    label: '정리 중',
+    run: () => {
+      const v = vite as ViteInfo | null;
+      if (v) out.notes.push(`Vite 설정 읽음 (alias ${v.aliases.length} · proxy ${v.proxies.length})`);
+      out.graph!.meta = { ...(out.graph!.meta ?? {}), vite: v ? { proxies: v.proxies, base: v.base } : undefined, projectDir: path.relative(opts.workspaceRoot, projectDir) || '.' };
+    },
+  });
+  return list;
+}
+
+/** 열린 .vue 한 개 → 아래(자식·API·백엔드)와 위(부모·라우트)를 모두 분석한 AtlasGraph */
+export function analyzeSource(rootFile: string, opts: PipelineOptions, onProgress?: ProgressFn): { graph: AtlasGraph; notes: string[] } {
+  const out: { graph?: AtlasGraph; notes: string[] } = { notes: [] };
+  const list = phases(rootFile, opts, out);
+  list.forEach((ph, i) => {
+    onProgress?.({ index: i + 1, total: list.length, label: ph.label });
+    ph.run();
+  });
+  return { graph: out.graph!, notes: out.notes };
+}
+
+/**
+ * 같은 분석을 단계 사이마다 이벤트 루프에 양보하며 실행한다.
+ * 분석 자체는 동기 코드라, 양보하지 않으면 확장 호스트가 막혀 화면에 "분석 중" 메시지가 늦게 도착한다.
+ * isCancelled() 가 true 가 되면 남은 단계를 건너뛰고 null.
+ */
+export async function analyzeSourceAsync(
+  rootFile: string,
+  opts: PipelineOptions,
+  onProgress?: ProgressFn,
+  isCancelled?: () => boolean,
+): Promise<{ graph: AtlasGraph; notes: string[] } | null> {
+  const out: { graph?: AtlasGraph; notes: string[] } = { notes: [] };
+  const list = phases(rootFile, opts, out);
+  for (let i = 0; i < list.length; i++) {
+    if (isCancelled?.()) return null;
+    onProgress?.({ index: i + 1, total: list.length, label: list[i].label });
+    // 진행 메시지가 웹뷰로 실제로 나가도록 잠깐 양보 (setImmediate 만으로는 IPC 전송이 밀릴 수 있어 짧은 타이머)
+    await new Promise((r) => setTimeout(r, 15));
+    list[i].run();
+  }
+  return isCancelled?.() ? null : { graph: out.graph!, notes: out.notes };
 }
 
 /** application.yml / application.properties 에서 server.servlet.context-path 를 찾는다 (첫 번째 것) */
