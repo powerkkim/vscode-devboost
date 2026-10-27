@@ -7,7 +7,7 @@ docs/**
 node_modules/**
 **/*.map
 **/*.ts
-tsconfig.json
+tsconfig*.json
 .gitignore
 *.vsix
 release-notes.md

@@ -215,7 +215,7 @@ export class RunnerPanel {
     if (kind === 'explain') {
       const bindSql = this.deps.store.prepare(this.lastDoc, st, this.deps.index.resolver(), 'bind').result.sql;
       if (!bindSql.trim()) return this.notice('보낼 SQL 이 비어 있습니다.', 'warn');
-      this.notice(await this.deps.oracle.send(bindSql, { action: 'explain', insert }));
+      await this.deps.oracle.run(bindSql, { action: 'explain', insert }, (t, k, since) => this.notice(t, k, since));
       return;
     }
     const text = this.last.text;
@@ -229,7 +229,7 @@ export class RunnerPanel {
       if (ok !== '실행') return;
     }
     const action = kind === 'insert' ? 'none' : this.last.mode === 'bind' ? 'script' : 'statement';
-    this.notice(await this.deps.oracle.send(text, { action, insert }));
+    await this.deps.oracle.run(text, { action, insert }, (t, k, since) => this.notice(t, k, since));
   }
 
   private async reveal(file: string | undefined, line: number | undefined) {
@@ -248,8 +248,13 @@ export class RunnerPanel {
     }
   }
 
-  private notice(text: string, kind: 'info' | 'warn' = 'info') {
-    void this.panel.webview.postMessage({ type: 'notice', text, kind });
+  private notice(text: string, kind: 'info' | 'warn' | 'busy' = 'info', since?: number) {
+    // 실행이 끝나 알릴 때 화면이 이미 닫혔을 수 있다
+    try {
+      void this.panel.webview.postMessage({ type: 'notice', text, kind, since });
+    } catch {
+      /* 닫힌 화면 */
+    }
   }
 
   private html(): string {
