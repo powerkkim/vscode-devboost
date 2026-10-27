@@ -89,8 +89,12 @@ export class SchemaPanel {
       case 'send': {
         this.applyInputs(m);
         const sql = this.sql();
-        const msg = await this.deps.oracle.send(sql, { action: m.run ? 'statement' : 'none', insert: 'append' });
-        this.notice(m.run ? `${msg} 결과 그리드 전체를 헤더와 함께 복사한 뒤 [클립보드에서 가져오기]를 누르세요.` : msg);
+        await this.deps.oracle.run(
+          sql,
+          { action: m.run ? 'statement' : 'none', insert: 'append' },
+          (text, kind, since) => this.notice(text, kind, since),
+          '결과 그리드 전체를 헤더와 함께 복사한 뒤 [클립보드에서 가져오기]를 누르세요.'
+        );
         return;
       }
       case 'copySql':
@@ -366,8 +370,13 @@ export class SchemaPanel {
     });
   }
 
-  private notice(text: string, kind: 'info' | 'warn' = 'info') {
-    void this.panel.webview.postMessage({ type: 'notice', text, kind });
+  private notice(text: string, kind: 'info' | 'warn' | 'busy' = 'info', since?: number) {
+    // 실행이 끝나 알릴 때 화면이 이미 닫혔을 수 있다
+    try {
+      void this.panel.webview.postMessage({ type: 'notice', text, kind, since });
+    } catch {
+      /* 닫힌 화면 */
+    }
   }
 
   private html(): string {

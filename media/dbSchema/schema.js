@@ -38,12 +38,30 @@
   };
   const fmt = (n) => (n ?? 0).toLocaleString('ko-KR');
 
-  function notice(text, kind) {
+  /** busy: 끝날 때까지 남아 있고 since 부터 경과 초를 센다 (실행 중 표시) */
+  function notice(text, kind, since) {
     const bar = noticeBar;
-    bar.textContent = text;
-    bar.className = `notice ${kind || 'info'} show`;
+    if (!bar) return;
     clearTimeout(timers.notice);
-    timers.notice = setTimeout(() => (bar.className = 'notice'), kind === 'warn' ? 9000 : 5000);
+    clearInterval(timers.noticeTick);
+    bar.className = `notice ${kind || 'info'} show`;
+    if (kind !== 'busy') {
+      bar.textContent = text;
+      timers.notice = setTimeout(() => (bar.className = 'notice'), kind === 'warn' ? 12000 : 5000);
+      return;
+    }
+    const spin = document.createElement('span');
+    spin.className = 'spin';
+    const sec = document.createElement('span');
+    sec.className = 'elapsed';
+    bar.replaceChildren(spin, document.createTextNode(text), sec);
+    const start = typeof since === 'number' ? since : Date.now();
+    const tick = () => {
+      const s = Math.max(0, Math.floor((Date.now() - start) / 1000));
+      sec.textContent = s < 60 ? ` ${s}초` : ` ${Math.floor(s / 60)}분 ${String(s % 60).padStart(2, '0')}초`;
+    };
+    tick();
+    timers.noticeTick = setInterval(tick, 1000);
   }
 
   // ───────────────── 수집
@@ -340,7 +358,7 @@
       details[m.table] = m;
       render();
     } else if (m.type === 'notice') {
-      notice(m.text, m.kind);
+      notice(m.text, m.kind, m.since);
     }
   });
 
