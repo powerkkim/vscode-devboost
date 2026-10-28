@@ -7,12 +7,13 @@ import { SymbolThrottle } from '../search/symbolThrottle';
  * 코드 위에 바로 뜨지만 화면 구성은 VS Code 목록 그대로다.
  */
 
-/** 탭 정의: 모두 / 클래스 / 파일 / 심볼 / 액션 / 텍스트 */
+/** 탭 정의: 모두 / 클래스 / 파일 / 심볼 / Mapper / 액션 / 텍스트 */
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'all', label: '모두', icon: 'search' },
   { id: 'classes', label: '클래스', icon: 'symbol-class' },
   { id: 'files', label: '파일', icon: 'file' },
   { id: 'symbols', label: '심볼', icon: 'symbol-method' },
+  { id: 'mappers', label: 'Mapper', icon: 'database' },
   { id: 'actions', label: '액션', icon: 'zap' },
   { id: 'text', label: '텍스트', icon: 'whole-word' },
 ];
@@ -32,14 +33,14 @@ class TabButton implements vscode.QuickInputButton {
   ) {}
 }
 
-/** "비 프로젝트 항목 포함" 토글 버튼 */
+/** "라이브러리(jar) 포함" 토글 버튼 */
 class NonProjectToggle implements vscode.QuickInputButton {
   constructor(public readonly on: boolean) {}
   get iconPath() {
     return new vscode.ThemeIcon(this.on ? 'library' : 'root-folder');
   }
   get tooltip() {
-    return this.on ? '비 프로젝트 항목 포함: 켜짐 (.m2, JDK 포함)' : '비 프로젝트 항목 포함: 꺼짐 (프로젝트만)';
+    return this.on ? '라이브러리(jar) 포함: 켜짐' : '라이브러리(jar) 포함: 꺼짐 (프로젝트, 테스트 제외)';
   }
 }
 
@@ -54,9 +55,12 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   // 언어 서버: 1초 단위로 묻고 마지막 요청 응답만 합친다 (검색 결과는 기다리지 않음)
   const throttle = new SymbolThrottle<vscode.SymbolInformation[]>((q, key) => {
     // 1초를 기다리는 사이 범위가 바뀌었으면 묻지 않는다
-    if (service.symbolRequestKey(q) !== key) return Promise.reject(new Error('조건 변경'));
+    if (service.symbolRequestKey(q) !== key) {
+      service.logLine(`[언어서버] 요청 안 함 "${q}" (범위·필터가 바뀜)`);
+      return Promise.reject(new Error('조건 변경'));
+    }
     return service.requestSymbols(q);
-  }, 1000);
+  }, 1000, (q) => service.logLine(`[언어서버] 응답 버림 "${q}" (그사이 새 검색어로 요청함)`));
   let symbols: { key: string; list: vscode.SymbolInformation[]; time: number } | undefined;
   let latest: { run: number; tab: TabId; key: string; result: SearchResult } | undefined;
   const show = (tab: TabId, r: SearchResult) => {
@@ -86,7 +90,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     const tabs = TABS.map((t) => (t.id === currentTab ? `[${t.label}]` : t.label)).join('   ');
     const p = service.options.paths;
     const filter = p.include || p.exclude ? `   · 필터: ${p.include || '전체'}${p.exclude ? ' − ' + p.exclude : ''}` : '';
-    qp.title = (service.includeNonProject ? `${tabs}   · 비 프로젝트 포함` : tabs) + filter;
+    qp.title = (service.includeNonProject ? `${tabs}   · 라이브러리(jar) 포함` : tabs) + filter;
   };
   updateButtons();
 
@@ -95,11 +99,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     let text = qp.value;
 
     // 접두어로 탭 전환: "c/Foo" → 클래스 탭에서 Foo 검색
-    const prefix = /^([cfsat])\/(.*)$/.exec(text);
+    const prefix = /^([cfsmat])\/(.*)$/.exec(text);
     let tab = currentTab;
     if (prefix) {
       tab = (
-        { c: 'classes', f: 'files', s: 'symbols', a: 'actions', t: 'text' } as Record<string, TabId>
+        { c: 'classes', f: 'files', s: 'symbols', m: 'mappers', a: 'actions', t: 'text' } as Record<string, TabId>
       )[prefix[1]];
       text = prefix[2];
     }
@@ -120,10 +124,17 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
           shown = r.withSymbols(symbols.list);
         } else {
           throttle.want(key, text, (q, k, list) => {
-            if (service.symbolRequestKey(q) !== k) return; // 응답을 기다리는 사이 범위가 바뀜
+            if (service.symbolRequestKey(q) !== k) {
+              service.logLine(`[언어서버] 응답 버림 "${q}" (범위·필터가 바뀜)`);
+              return;
+            }
             symbols = { key: k, list, time: Date.now() };
             if (latest && latest.key === k && latest.run === runId && latest.result.withSymbols) {
-              show(latest.tab, latest.result.withSymbols(list));
+              const merged = latest.result.withSymbols(list);
+              service.logLine(`[언어서버] "${q}" → 화면에 ${addedCount(latest.result.items, merged.items)}건 추가`);
+              show(latest.tab, merged);
+            } else {
+              service.logLine(`[언어서버] "${q}" 화면에는 안 붙임 (검색어·탭이 바뀜, 5초 동안 재사용)`);
             }
           });
         }
@@ -209,6 +220,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
       clearTimeout(debounce);
     }
     runId++; // 진행 중이던 검색 무효화 (rg 는 25ms 안에 멈춤)
+    service.logLine('[검색] 창 닫힘 → 진행 중 검색 중단, 늦게 오는 언어 서버 응답은 버림');
     throttle.stop(); // 늦게 오는 언어 서버 응답은 버림
     latest = undefined;
     qp.dispose();
@@ -221,6 +233,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
 }
 
 /** 검색 결과를 QuickPick 항목으로 변환. '모두' 탭은 종류별 구분선을 넣는다. */
+const addedCount = (before: SearchItem[], after: SearchItem[]) => {
+  const had = new Set(before);
+  return after.filter((x) => !had.has(x)).length;
+};
+
 function toPickItems(tab: TabId, results: SearchItem[], groups: GroupCount[] = []): PickItem[] {
   const items: PickItem[] = [];
   let lastKind: string | undefined;
@@ -264,6 +281,8 @@ function kindLabel(kind: SearchItem['kind']): string {
       return '파일';
     case 'symbols':
       return '심볼';
+    case 'mappers':
+      return 'Mapper';
     case 'actions':
       return '액션';
     case 'text':

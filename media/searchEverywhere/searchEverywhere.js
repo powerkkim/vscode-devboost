@@ -8,11 +8,12 @@
     { id: 'classes', label: '클래스' },
     { id: 'files', label: '파일' },
     { id: 'symbols', label: '심볼' },
+    { id: 'mappers', label: 'Mapper' },
     { id: 'actions', label: '액션' },
     { id: 'text', label: '텍스트' },
   ];
-  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', actions: '액션', text: '텍스트' };
-  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', actions: '⚡', text: 'T' };
+  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', mappers: 'Mapper', actions: '액션', text: '텍스트' };
+  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', mappers: 'M', actions: '⚡', text: 'T' };
   // 심볼 종류별 배지 (IntelliJ: C=클래스, I=인터페이스, E=enum, m=메서드, f=필드, v=변수)
   const ICON_BADGE = {
     'symbol-class': ['C', 'class'],
@@ -24,6 +25,8 @@
     terminal: ['>', 'action'],
     gear: ['⚙', 'action'],
     keyboard: ['⌨', 'action'],
+    'file-code': ['X', 'class'],
+    database: ['q', 'method'],
   };
 
   const $tabs = document.getElementById('tabs');
@@ -476,7 +479,7 @@
           (filterOpen ? $incl : $query).focus();
         } else if (e.code === 'KeyN') {
           e.preventDefault();
-          $scope.value = $scope.value === 'projectAndLibs' ? 'project' : 'projectAndLibs';
+          $scope.value = $scope.value === 'projectAndLibs' ? 'production' : 'projectAndLibs';
           optionsChanged();
         } else if (tab === 'text' && e.code === 'KeyC') {
           e.preventDefault();

@@ -4,19 +4,19 @@
 
 export type ScopeId =
   | 'project' // 프로젝트 파일 (라이브러리·vendor 제외)
-  | 'projectAndLibs' // 프로젝트 및 라이브러리 (.m2, JDK, vendor 포함)
+  | 'projectAndLibs' // 프로젝트 + 라이브러리(jar) (.m2, JDK, vendor 포함)
   | 'production' // 프로젝트 프로덕션 파일 (테스트 제외)
   | 'test' // 프로젝트 테스트 파일
   | 'recentViewed' // 최근에 본 파일
   | 'recentChanged'; // 최근 변경된 파일 (Git 작업 트리 기준)
 
 export const SCOPES: { id: ScopeId; label: string }[] = [
-  { id: 'project', label: '프로젝트 파일' },
-  { id: 'projectAndLibs', label: '프로젝트 및 라이브러리' },
-  { id: 'production', label: '프로젝트 프로덕션 파일' },
-  { id: 'test', label: '프로젝트 테스트 파일' },
-  { id: 'recentViewed', label: '최근에 본 파일' },
-  { id: 'recentChanged', label: '최근 변경된 파일' },
+  { id: 'production', label: '프로젝트 (테스트 제외)' },
+  { id: 'project', label: '프로젝트 (테스트 포함)' },
+  { id: 'test', label: '테스트만' },
+  { id: 'projectAndLibs', label: '프로젝트 + 라이브러리(jar)' },
+  { id: 'recentViewed', label: '최근에 연 파일' },
+  { id: 'recentChanged', label: '커밋 안 한 파일 (Git)' },
 ];
 
 export interface TextOptions {
@@ -40,7 +40,7 @@ export interface SearchOptions {
 }
 
 export const DEFAULT_OPTIONS: SearchOptions = {
-  scope: 'project',
+  scope: 'production',
   text: { fileMask: '', caseSensitive: false, wholeWord: false, regex: false },
   paths: { include: '', exclude: '' },
 };

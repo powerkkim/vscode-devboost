@@ -75,9 +75,12 @@ export class WebviewSession {
   ) {
     this.throttle = new SymbolThrottle((q, key) => {
       // 1초를 기다리는 사이 범위·필터가 바뀌었으면 그 조건으로 묻지 않는다 (키와 실제 요청이 어긋나지 않게)
-      if (this.service.symbolRequestKey(q) !== key) return Promise.reject(new Error('조건 변경'));
+      if (this.service.symbolRequestKey(q) !== key) {
+        this.service.logLine(`[언어서버] 요청 안 함 "${q}" (범위·필터가 바뀜)`);
+        return Promise.reject(new Error('조건 변경'));
+      }
       return this.service.requestSymbols(q);
-    }, SYMBOL_INTERVAL_MS);
+    }, SYMBOL_INTERVAL_MS, (q) => this.service.logLine(`[언어서버] 응답 버림 "${q}" (그사이 새 검색어로 요청함)`));
   }
 
   /** 언어 서버 응답을 더 기다리지 않음: 화면의 "기다리는 중" 표시를 끈다 */
@@ -92,16 +95,20 @@ export class WebviewSession {
     // 응답을 기다리는 동안 범위·필터가 바뀌었으면 이 응답은 다른 조건의 것이라 버린다
     const l = this.latest;
     if (l && this.service.symbolRequestKey(l.query) !== key) {
+      this.service.logLine('[언어서버] 응답 버림 (범위·필터가 바뀜)');
       this.endLsWait(l.runId);
       return;
     }
     this.symbols = { key, list, time: Date.now() };
     if (!l || l.key !== key || l.runId !== this.latestRunId || !l.result.withSymbols) {
+      this.service.logLine('[언어서버] 응답을 화면에는 안 붙임 (검색어·탭이 바뀜, 5초 동안 재사용)');
       return; // 그사이 검색어·탭이 바뀜 → 다음 검색 때 캐시로 합쳐진다
     }
     if (this.lsWaitTimer) clearTimeout(this.lsWaitTimer);
     this.lsWaitTimer = undefined;
     const merged = l.result.withSymbols(list);
+    const had = new Set(l.result.items);
+    this.service.logLine(`[언어서버] "${l.query}" → 화면에 ${merged.items.filter((x) => !had.has(x)).length}건 추가`);
     this.post({
       type: 'results',
       runId: l.runId,
@@ -118,7 +125,8 @@ export class WebviewSession {
    * 창이 닫히거나 숨겨질 때: 진행 중인 검색(rg)은 25ms 안에 멈추고(isStale), 언어 서버 응답은 버린다.
    * (언어 서버 요청 자체는 VS Code 가 취소 수단을 주지 않아 서버 안에서 끝까지 돈다)
    */
-  cancel() {
+  cancel(reason?: string) {
+    if (reason) this.service.logLine(`[검색] ${reason} → 진행 중 검색 중단, 늦게 오는 언어 서버 응답은 버림`);
     this.gen++;
     this.cancelled = true;
     this.latest = undefined;
@@ -272,7 +280,7 @@ export class WebviewSession {
       }
 
       case 'close':
-        this.cancel();
+        this.cancel('창 닫힘');
         this.host.close();
         break;
     }
@@ -355,6 +363,7 @@ export function toRow(item: SearchItem): ResultRow {
   switch (item.kind) {
     case 'classes':
     case 'symbols':
+    case 'mappers':
       // description = 패키지/컨테이너, detail = 상대경로:줄
       return {
         ...base,

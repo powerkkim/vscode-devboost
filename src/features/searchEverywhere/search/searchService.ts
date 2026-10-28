@@ -20,8 +20,9 @@ import {
 } from './scope';
 import { RecentFiles, gitChangedFiles } from './recent';
 import { ClassIndex, ClassEntry } from './classIndex';
+import { MapperIndex } from './mapperIndex';
 
-export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'actions' | 'text';
+export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'mappers' | 'actions' | 'text';
 export type ResultKind = Exclude<TabId, 'all'>;
 
 export interface SearchItem {
@@ -124,7 +125,7 @@ function excludeGlobs(): string[] {
   return globSettings().exclude;
 }
 
-/** 라이브러리로 취급할 glob 목록 ("프로젝트 및 라이브러리" 범위에서만 보임). 예전 libraryGlobs도 합친다 */
+/** 라이브러리로 취급할 glob 목록 ("프로젝트 + 라이브러리(jar)" 범위에서만 보임). 예전 libraryGlobs도 합친다 */
 function libraryGlobs(): string[] {
   return globSettings().library;
 }
@@ -138,7 +139,7 @@ export class SearchService implements vscode.Disposable {
     return this.options.scope === 'projectAndLibs';
   }
   set includeNonProject(v: boolean) {
-    this.options = { ...this.options, scope: v ? 'projectAndLibs' : 'project' };
+    this.options = { ...this.options, scope: v ? 'projectAndLibs' : 'production' };
   }
 
   private readonly recent: RecentFiles;
@@ -151,6 +152,8 @@ export class SearchService implements vscode.Disposable {
   private symbolCache: { key: string; time: number; done: boolean; promise: Promise<vscode.SymbolInformation[]> } | undefined;
   /** rg 로 만든 프로젝트 클래스 색인. rg 를 못 찾으면 null → 언어 서버만 쓴다 */
   private classIndex: ClassIndex | null | undefined;
+  /** MyBatis mapper 색인 (Mapper 탭). rg 를 못 찾으면 null */
+  private mapperIndex: MapperIndex | null | undefined;
   // 설정 배열이 바뀔 때(globCache 를 비울 때)만 새로 만든다 — 배열 자체를 키로 비교
   private libraryMatcher: { key: string[]; matcher: GlobMatcher } | undefined;
   private excludeMatcher: { key: string[]; matcher: GlobMatcher } | undefined;
@@ -189,7 +192,10 @@ export class SearchService implements vscode.Disposable {
     watcher.onDidDelete((u) => {
       if (this.isExcluded(u)) return;
       invalidate();
-      if (u.scheme === 'file') this.classIndex?.removeFile(u.fsPath);
+      if (u.scheme === 'file') {
+        this.classIndex?.removeFile(u.fsPath);
+        this.mapperIndex?.removeFile(u.fsPath);
+      }
     });
     watcher.onDidChange((u) => this.indexFileChanged(u));
     this.disposables.push(watcher);
@@ -225,7 +231,23 @@ export class SearchService implements vscode.Disposable {
 
   /** 언어 서버 심볼 요청 (5초 캐시, 범위·제외·포함 경로 필터 적용). 화면 쪽 SymbolThrottle 이 부른다 */
   requestSymbols(query: string): Promise<vscode.SymbolInformation[]> {
-    return this.querySymbols(query);
+    const reuse = !!this.symbolCacheFor(query);
+    const t0 = performance.now();
+    this.logLine(`[언어서버] 요청 "${query}"${reuse ? ' (같은 요청이 5초 안에 있어 재사용)' : ''}`);
+    const p = this.querySymbols(query);
+    p.then(
+      (list) =>
+        this.logLine(
+          `[언어서버] 응답 "${query}" ${reuse ? '' : `${this.lastSymbolRawCount}건 → 범위 적용 `}${list.length}건 ${((performance.now() - t0) / 1000).toFixed(2)}초`
+        ),
+      (e) => this.logLine(`[언어서버] 실패 "${query}": ${e}`)
+    );
+    return p;
+  }
+
+  /** 출력 패널 DevBoost 채널에 시각과 함께 한 줄 */
+  logLine(msg: string) {
+    this.log.appendLine(`[${new Date().toLocaleTimeString()}] ${msg}`);
   }
 
   /**
@@ -284,7 +306,7 @@ export class SearchService implements vscode.Disposable {
     let withSymbols: ((symbols: vscode.SymbolInformation[]) => SearchItem[]) | undefined;
     switch (tab) {
       case 'classes': {
-        // 프로젝트 클래스는 색인으로 끝. 언어 서버는 jar·JDK 클래스가 필요한 "프로젝트 및 라이브러리" 범위에서만
+        // 프로젝트 클래스는 색인으로 끝. 언어 서버는 jar·JDK 클래스가 필요한 "프로젝트 + 라이브러리(jar)" 범위에서만
         // (rg 가 없으면 클래스도 언어 서버에서)
         let indexedTotal = 0;
         const indexed = await measure('클래스', () => this.searchIndexed('classes', query, max, (t) => (indexedTotal = t), isStale), classNote);
@@ -314,6 +336,9 @@ export class SearchService implements vscode.Disposable {
         }
         break;
       }
+      case 'mappers':
+        items = await measure('Mapper', () => this.searchMappers(query, max, sink('mappers'), isStale));
+        break;
       case 'files':
         items = await measure('파일', () => this.searchFiles(query, max, sink('files')));
         break;
@@ -698,12 +723,27 @@ export class SearchService implements vscode.Disposable {
       idx.ensure(roots, excludeGlobs()).catch(() => undefined);
     }
     void this.getFiles().catch(() => undefined);
+    // mapper 색인은 클래스 색인이 끝난 뒤 (디스크를 동시에 훑지 않게)
+    const mi = this.getMapperIndex();
+    if (idx && mi && roots.length) {
+      void idx.whenMembersDone().then(() => mi.ensure(this.fileRoots(), excludeGlobs()).catch(() => undefined));
+    }
+  }
+
+  private getMapperIndex(): MapperIndex | undefined {
+    if (this.mapperIndex === undefined) {
+      const rg = this.getRipgrep();
+      this.mapperIndex = rg ? new MapperIndex(rg) : null;
+      if (this.mapperIndex) this.mapperIndex.onLog = (m) => this.logLine(m);
+    }
+    return this.mapperIndex ?? undefined;
   }
 
   private getClassIndex(): ClassIndex | undefined {
     if (this.classIndex === undefined) {
       const rg = this.getRipgrep();
       this.classIndex = rg ? new ClassIndex(rg) : null;
+      if (this.classIndex) this.classIndex.onLog = (m) => this.logLine(m);
     }
     return this.classIndex ?? undefined;
   }
@@ -714,9 +754,10 @@ export class SearchService implements vscode.Disposable {
 
   /** 파일이 생기거나 저장되면 그 파일의 클래스만 다시 읽는다 */
   private indexFileChanged(uri: vscode.Uri) {
-    if (uri.scheme !== 'file' || !this.classIndex || this.isExcluded(uri)) return;
+    if (uri.scheme !== 'file' || this.isExcluded(uri)) return;
     // 모았다가 처리. .gitignore·숨김 폴더는 rg 가 루트에서 걸러 준다
-    this.classIndex.queueUpdate(uri.fsPath);
+    this.classIndex?.queueUpdate(uri.fsPath);
+    this.mapperIndex?.queueUpdate(uri.fsPath);
   }
 
   /**
@@ -825,6 +866,102 @@ export class SearchService implements vscode.Disposable {
         uri,
         range: new vscode.Range(e.line, 0, e.line, 0),
         selectName: true,
+      });
+    }
+    count?.(total);
+    if (cands.length && !total) {
+      // 이름은 맞는데 모두 빠짐: 왜 빠졌는지 첫 번째 것으로 기록 (경로·범위 판정 문제를 찾기 위해)
+      const u = vscode.Uri.file(cands[0].e.file);
+      const f = this.facts(u, changed);
+      this.logLine(
+        `[색인] "${query}" 이름이 맞는 ${cands.length}개가 모두 범위에서 빠짐. 예: ${cands[0].e.file} → ` +
+          `제외설정=${this.isExcluded(u)} 포함/제외경로=${!this.pathAccepts(u)} 프로젝트안=${f.inProject} 라이브러리=${f.isLibrary} 상대경로=${f.relPath} 범위=${this.options.scope}`
+      );
+    }
+    return out;
+  }
+
+  /**
+   * Mapper 탭: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스.
+   * mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 고르고, Java 는 @Mapper 이거나 XML namespace 와 같은 이름의 클래스.
+   * 검색어가 비어 있으면 mapper 파일 목록 (SQL id 제외)
+   */
+  private async searchMappers(query: string, limit: number, count?: CountSink, isStale: () => boolean = () => false): Promise<SearchItem[]> {
+    const mi = this.getMapperIndex();
+    const roots = this.fileRoots();
+    if (!mi || !roots.length) {
+      count?.(0);
+      return [];
+    }
+    const ci = this.getClassIndex();
+    try {
+      await Promise.all([mi.ensure(roots, excludeGlobs()), ci?.ensure(roots, excludeGlobs())]);
+    } catch (e) {
+      this.log.appendLine(`[경고] mapper 검색 실패: ${e}`);
+      return [];
+    }
+    if (isStale()) return [];
+
+    type Cand = { kind: 'xml' | 'statement' | 'java'; name: string; file: string; line: number; desc: string; statement?: string };
+    const cands: Cand[] = [];
+    for (const e of mi.entries()) {
+      if (e.kind === 'statement' && !query) continue;
+      const shortNs = e.namespace.slice(e.namespace.lastIndexOf('.') + 1);
+      cands.push({
+        kind: e.kind,
+        name: e.name,
+        file: e.file,
+        line: e.line,
+        desc: e.kind === 'statement' ? `${shortNs} · ${e.statement}` : e.namespace,
+        statement: e.statement,
+      });
+    }
+    if (ci) {
+      const ns = mi.namespaces();
+      for (const c of ci.classes()) {
+        if (mi.isAnnotated(c.file) || ns.has(c.pkg ? `${c.pkg}.${c.name}` : c.name)) {
+          cands.push({ kind: 'java', name: c.name, file: c.file, line: c.line, desc: c.pkg });
+        }
+      }
+    }
+
+    const order = { java: 0, xml: 1, statement: 2 };
+    const scored = cands
+      .map((c) => ({ c, score: query ? fuzzyScore(query, c.kind === 'xml' ? c.name.replace(/\.xml$/i, '') : c.name) : 0 }))
+      .filter((x) => x.score >= 0);
+    scored.sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.c.name.length - b.c.name.length ||
+        (a.c.name < b.c.name ? -1 : a.c.name > b.c.name ? 1 : 0) ||
+        order[a.c.kind] - order[b.c.kind] ||
+        (a.c.file < b.c.file ? -1 : a.c.file > b.c.file ? 1 : a.c.line - b.c.line)
+    );
+    const changed = (await this.getChanged()).set;
+    if (isStale()) return [];
+    const fileOk = this.classFileOkCache();
+    const out: SearchItem[] = [];
+    let total = 0;
+    for (const { c } of scored) {
+      let ok = fileOk.get(c.file);
+      if (ok === undefined) {
+        const u = vscode.Uri.file(c.file);
+        ok = !this.isExcluded(u) && this.pathAccepts(u) && scopeAccepts(this.options.scope, this.facts(u, changed));
+        fileOk.set(c.file, ok);
+      }
+      if (!ok) continue;
+      total++;
+      if (out.length >= limit) continue;
+      const uri = vscode.Uri.file(c.file);
+      out.push({
+        kind: 'mappers',
+        label: c.name,
+        description: c.desc || undefined,
+        detail: `${vscode.workspace.asRelativePath(uri)}:${c.line + 1}`,
+        icon: c.kind === 'java' ? 'symbol-interface' : c.kind === 'xml' ? 'file-code' : 'database',
+        uri,
+        range: new vscode.Range(c.line, 0, c.line, 0),
+        selectName: c.kind !== 'xml',
       });
     }
     count?.(total);
@@ -1197,7 +1334,7 @@ export function fuzzyScore(query: string, target: string): number {
 function loadDefaultOptions(): SearchOptions {
   const c = config();
   const s = c.get<string>('defaultScope');
-  const scope = isScopeId(s) ? s : c.get<boolean>('includeNonProject', false) ? 'projectAndLibs' : 'project';
+  const scope = isScopeId(s) ? s : c.get<boolean>('includeNonProject', false) ? 'projectAndLibs' : 'production';
   return { ...DEFAULT_OPTIONS, scope, text: { ...DEFAULT_OPTIONS.text }, paths: { ...DEFAULT_OPTIONS.paths } };
 }
 

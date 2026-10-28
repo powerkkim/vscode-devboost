@@ -18,24 +18,26 @@
 
 | 조작 | 키 |
 |---|---|
-| 탭 전환 (모두 / 클래스 / 파일 / 심볼 / 액션 / 텍스트) | `Tab` / `Shift+Tab` |
+| 탭 전환 (모두 / 클래스 / 파일 / 심볼 / Mapper / 액션 / 텍스트) | `Tab` / `Shift+Tab` |
 | 이동 · 열기 · 닫기 | `↑↓` `PageUp/Down` · `Enter` · `Esc` |
-| 범위: 프로젝트 ↔ 라이브러리 포함 | `Alt+N` (오른쪽 위 드롭다운) |
+| 범위: 테스트 제외 ↔ 라이브러리(jar) 포함 | `Alt+N` (오른쪽 위 드롭다운) |
 | 포함/제외 경로 필터 | `Alt+P` |
 | 텍스트 탭: 대소문자 · 단어 단위 · 정규식 | `Alt+C` · `Alt+W` · `Alt+X` |
 
-- **범위 드롭다운**: 프로젝트 파일 / 프로젝트 및 라이브러리 / 프로덕션 / 테스트 / 최근에 본 파일 / 최근 변경된 파일(Git)
+- **범위 드롭다운**: 프로젝트 (테스트 제외, 기본) / 프로젝트 (테스트 포함) / 테스트만 / 프로젝트 + 라이브러리(jar) / 최근에 연 파일 / 커밋 안 한 파일 (Git)
 - **파일 타입**(텍스트 탭): 쉼표로 여러 패턴, 대소문자 무시. 예) `*.java, *mapper*.xml, *.vue, *.ts`
 - **필터**: Ctrl+Shift+F 의 files to include / exclude 와 같은 형식
   - `src/main/java/com/demo/module/order` → 그 폴더 아래만 · `./src` → 워크스페이스 바로 아래 · `**/dto/**, *Test.java` → 패턴
   - `현재 폴더` 버튼: 지금 보는 파일의 폴더를 포함에 넣기
+- **Mapper 탭**: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스만. `<mapper namespace>` 가 있는 XML 만 골라 pom.xml·설정 XML 은 나오지 않습니다. SQL id 를 고르면 그 줄로 이동
 - **액션 탭**: 명령 팔레트 / 설정 / 단축키 설정을 검색어가 채워진 상태로 엽니다
 - **결과 개수와 더 보기**: 탭마다 `maxResults`(기본 50)개씩 보여 주고, 더 있으면 끝에 `더 보기 — 123개 중 50개 표시`. 모두 탭은 종류별 머리글에 개수가 나오고 `더 보기`는 그 탭으로 이동
 - 텍스트 검색은 최대 2,000건까지 모은 뒤 열린 파일 → `src` → 기타 → 라이브러리 순으로 정렬해 보여 줍니다. 2,000건을 넘으면 알려 주니 포함 경로·파일 타입으로 좁혀 보세요
 - 에디터에서 단어를 선택한 채로 열면 그 단어로 바로 검색
 - 텍스트 검색은 VS Code 내장 ripgrep 사용 (`.gitignore` 반영)
 - 클래스·심볼: 프로젝트의 클래스(Java·Kotlin·TS/JS 등)와 Java 메서드·필드는 자체 색인으로 바로 찾습니다. 언어 서버가 없거나 준비 중이어도 나옵니다
-- 언어 서버만 아는 것 — jar·JDK 안의 클래스(범위 *프로젝트 및 라이브러리*), TS·JS·Vue 메서드 — 은 기다리지 않고, 도착하면 목록에 이어서 붙습니다. 언어 서버에는 입력 중 1초에 한 번만 묻습니다
+- 언어 서버만 아는 것 — jar·JDK 안의 클래스(범위 *프로젝트 + 라이브러리(jar)*), TS·JS·Vue 메서드 — 은 기다리지 않고, 도착하면 목록에 이어서 붙습니다. 언어 서버에는 입력 중 1초에 한 번만 묻습니다
+- 동작 기록: 보기 → 출력 → 오른쪽 드롭다운 **DevBoost**. 검색별 시간, 언어 서버 요청·응답·버림, 색인 만들기·갱신이 찍힙니다
 
 ### 케이스 변환
 
@@ -56,7 +58,7 @@
 |---|---|
 | `devBoost.searchEverywhere.ui` | 화면 방식: `popup`(에디터 탭, 기본) / `panel`(Activity Bar 사이드바) / `window`(별도 창) / `quickPick`(VS Code 기본 목록) |
 | `devBoost.searchEverywhere.exclude` | 검색에서 **완전히 뺄** 경로 (모든 탭). 기본: `target`, `node_modules`, `build`, `.git`, 로그 등 |
-| `devBoost.searchEverywhere.library` | **라이브러리로 취급**할 경로 → *프로젝트 및 라이브러리* 범위에서만 보임. 기본: `vendor`, `*.min.js` |
+| `devBoost.searchEverywhere.library` | **라이브러리로 취급**할 경로 → *프로젝트 + 라이브러리(jar)* 범위에서만 보임. 기본: `vendor`, `*.min.js` |
 | `devBoost.searchEverywhere.defaultScope` | 창을 열 때 기본 범위 |
 | `devBoost.searchEverywhere.fileMasks` | 파일 타입 드롭다운 목록 |
 | `devBoost.searchEverywhere.doubleShift` | `Shift` 두 번으로 열기 |

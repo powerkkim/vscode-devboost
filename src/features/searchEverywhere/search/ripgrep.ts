@@ -126,7 +126,7 @@ const STALE_CHECK_MS = 25;
 export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
   return new Promise((resolve, reject) => {
     const results: RgMatch[] = [];
-    const child = spawn(rgPath, buildArgs(o), { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(rgPath, buildArgs(o), { stdio: ['ignore', 'pipe', 'pipe'], cwd: rgCwd(o.roots) });
     let buffer = '';
     let done = false;
     let stderr = '';
@@ -197,6 +197,35 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
 }
 
 /** rg --files 인자 (테스트에서 확인할 수 있도록 분리) */
+/**
+ * rg 를 실행할 폴더. rg 는 --iglob 을 "실행 폴더 기준 상대 경로"에 맞추고, 실행 폴더 밖의 경로는 절대 경로 전체에 맞춘다.
+ * 그래서 실행 폴더가 엉뚱한 곳이면 프로젝트의 상위 폴더 이름(예: C:\work\bin\demo 의 bin)이 제외 규칙에 걸려
+ * 프로젝트 전체가 빠진다. 검색 루트들의 공통 상위 폴더에서 실행한다 (드라이브가 다르면 undefined)
+ */
+export function rgCwd(roots: string[]): string | undefined {
+  if (!roots.length) return undefined;
+  const win = process.platform === 'win32';
+  const norm = (p: string) => (win ? p.toLowerCase() : p);
+  let base = path.resolve(roots[0]);
+  for (const r of roots.slice(1)) {
+    const abs = path.resolve(r);
+    while (true) {
+      const rel = path.relative(norm(base), norm(abs));
+      if (!rel.startsWith('..') && !path.isAbsolute(rel)) break;
+      const parent = path.dirname(base);
+      if (parent === base) return undefined;
+      base = parent;
+    }
+  }
+  // 루트로 파일을 직접 넘긴 경우(열린 파일만 검색 등)는 그 파일의 폴더에서
+  try {
+    if (!fs.statSync(base).isDirectory()) base = path.dirname(base);
+  } catch {
+    return undefined;
+  }
+  return base;
+}
+
 export function buildListArgs(roots: string[], excludeGlobs: string[]): string[] {
   // --hidden: .env, .github 같은 숨김 파일도 (빠른 열기와 같게). .git 폴더 안은 뺀다
   const args = ['--files', '--no-config', '--hidden', '--iglob', '!**/.git/**'];
@@ -211,7 +240,7 @@ export const LIST_FILES_MAX = 200000;
 /** 워크스페이스 파일 목록 (.gitignore 반영, 최대 LIST_FILES_MAX 개). 절대 경로 */
 export function listFiles(rgPath: string, roots: string[], excludeGlobs: string[], max = LIST_FILES_MAX): Promise<string[]> {
   return new Promise((resolve, reject) => {
-    const child = spawn(rgPath, buildListArgs(roots, excludeGlobs), { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(rgPath, buildListArgs(roots, excludeGlobs), { stdio: ['ignore', 'pipe', 'pipe'], cwd: rgCwd(roots) });
     const files: string[] = [];
     let rest = '';
     let stderr = '';

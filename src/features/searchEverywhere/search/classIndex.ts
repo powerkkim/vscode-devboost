@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { rgCwd } from './ripgrep';
 
 /**
  * 프로젝트 심볼 색인. 언어 서버 없이 rg 로 선언 줄만 모아 메모리에 둔다.
@@ -253,6 +254,8 @@ export class ClassIndex {
   lastBuildMs = 0;
   /** 메서드·필드 단계에 걸린 시간 */
   lastMembersMs = 0;
+  /** 기록용 (출력 패널) */
+  onLog: ((msg: string) => void) | undefined;
 
   static BATCH_MS = 300;
   /** 한 번에 바뀐 경로가 이보다 많으면 (git checkout 등) 전체를 다시 만든다 */
@@ -277,13 +280,14 @@ export class ClassIndex {
       const id = ++this.buildId;
       const started = Date.now();
       // 1단계: 클래스 선언만 (빠름) → 클래스 검색은 이것으로 바로 시작
-      const p: Promise<void> = runRg(this.rgPath, buildClassArgs(roots, excludeGlobs, undefined, 'classes')).then((out) => {
+      const p: Promise<void> = runRg(this.rgPath, buildClassArgs(roots, excludeGlobs, undefined, 'classes'), undefined, rgCwd(roots)).then((out) => {
         if (this.buildId !== id) return; // 그사이 설정이 또 바뀜
         this.byFile = parseClassOutput(out ?? '');
         for (const f of [...this.byFile.keys()]) if (this.deletedSince(f, started)) this.byFile.delete(f);
         this.all = undefined;
         this.ready = true;
         this.lastBuildMs = Date.now() - started;
+        this.onLog?.(`[색인] 클래스 ${this.byFile.size}개 파일 ${this.lastBuildMs}ms → 메서드·필드 이어서`);
         if (this.pending.size) this.schedule(); // 만드는 동안 바뀐 파일
         this.buildMembers(id);
       });
@@ -319,7 +323,7 @@ export class ClassIndex {
   private buildMembers(id: number) {
     this.touchedDuringMembers.clear();
     const started = Date.now();
-    runRg(this.rgPath, buildClassArgs(this.roots, this.excludes, undefined, 'all'))
+    runRg(this.rgPath, buildClassArgs(this.roots, this.excludes, undefined, 'all'), undefined, rgCwd(this.roots))
       .then((out) => {
         if (this.buildId !== id) return;
         for (const [f, list] of parseClassOutput(out ?? '')) {
@@ -328,8 +332,9 @@ export class ClassIndex {
         this.all = undefined;
         this.membersReady = true;
         this.lastMembersMs = Date.now() - started;
+        this.onLog?.(`[색인] 메서드·필드 포함 ${this.entries().length}개 ${this.lastMembersMs}ms`);
       })
-      .catch(() => undefined) // 실패하면 클래스만으로 계속 (다음 전체 색인 때 다시)
+      .catch((e) => this.onLog?.(`[경고] 메서드·필드 색인 실패 (클래스만으로 계속): ${e}`)) // 실패하면 클래스만으로 계속 (다음 전체 색인 때 다시)
       .finally(() => {
         if (this.buildId === id) this.resolveMembers?.();
       });
@@ -370,6 +375,7 @@ export class ClassIndex {
     this.pending.clear();
     const started = Date.now();
     if (paths.length > ClassIndex.MAX_BATCH) {
+      this.onLog?.(`[색인] 바뀐 경로 ${paths.length}개 → 전체 다시 만듦`);
       this.key = '';
       await this.ensure(this.roots, this.excludes).catch(() => undefined);
       return;
@@ -432,6 +438,7 @@ export class ClassIndex {
       this.touchedDuringMembers.add(f);
     }
     this.all = undefined;
+    this.onLog?.(`[색인] 갱신 ${paths.map((p) => path.basename(p)).join(', ')} ${Date.now() - started}ms`);
   }
 
   removeFile(file: string) {

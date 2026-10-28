@@ -24,7 +24,9 @@ export class SymbolThrottle<T> {
   /** fetch(query, key): key 는 요청을 만든 조건. 그사이 조건(범위 등)이 바뀌었으면 fetch 쪽에서 거부하면 된다 */
   constructor(
     private readonly fetch: (query: string, key: string) => Promise<T>,
-    private readonly intervalMs = 1000
+    private readonly intervalMs = 1000,
+    /** 응답이 왔지만 그사이 더 새 요청을 보냈거나 멈춰서 버릴 때 (기록용) */
+    private readonly onDiscard?: (query: string) => void
   ) {}
 
   /** 검색어가 바뀔 때마다 부른다. 바로 보내지 않고 다음 1초 시점에 마지막 값으로 보낸다 */
@@ -49,6 +51,7 @@ export class SymbolThrottle<T> {
     this.fetch(w.query, w.key).then(
       (r) => {
         if (id === this.seq) this.deliver?.(w.query, w.key, r);
+        else this.onDiscard?.(w.query);
       },
       () => {
         // 언어 서버 오류·조건 변경: 결과는 버리고 알리기만 (rg 결과는 이미 화면에 있음)
