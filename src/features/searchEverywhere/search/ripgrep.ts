@@ -38,22 +38,70 @@ export interface RgMatch {
   text: string;
 }
 
-/** VS Code 설치 폴더(appRoot)에서 rg 실행 파일을 찾는다. 못 찾으면 undefined */
+/**
+ * VS Code 설치 폴더(appRoot)에서 rg 실행 파일을 찾는다. 못 찾으면 undefined.
+ * VS Code 버전에 따라 위치가 다르다:
+ *  - 예전: node_modules(.asar.unpacked)/@vscode/ripgrep/bin/rg(.exe)
+ *  - 2026년 버전: node_modules.asar.unpacked/@vscode/ripgrep-universal/bin/<OS>-<CPU>/rg(.exe)
+ * 정해진 경로에 없으면 @vscode 아래 이름에 ripgrep 이 들어간 패키지의 bin 을 훑는다 (위치가 또 바뀌어도 찾게)
+ */
 export function findRipgrep(appRoot: string): string | undefined {
   const exe = process.platform === 'win32' ? 'rg.exe' : 'rg';
-  const candidates = [
-    ['node_modules', '@vscode', 'ripgrep', 'bin', exe],
-    ['node_modules.asar.unpacked', '@vscode', 'ripgrep', 'bin', exe],
-    ['node_modules', 'vscode-ripgrep', 'bin', exe],
-    ['node_modules.asar.unpacked', 'vscode-ripgrep', 'bin', exe],
-  ];
+  const plat = `${process.platform}-${process.arch}`;
+  const bases = ['node_modules.asar.unpacked', 'node_modules'];
+  const candidates: string[][] = [];
+  for (const b of bases) {
+    candidates.push(
+      [b, '@vscode', 'ripgrep', 'bin', exe],
+      [b, '@vscode', 'ripgrep-universal', 'bin', plat, exe],
+      [b, '@vscode', 'ripgrep-universal', 'bin', exe],
+      [b, 'vscode-ripgrep', 'bin', exe]
+    );
+  }
   for (const parts of candidates) {
     const p = path.join(appRoot, ...parts);
-    if (fs.existsSync(p)) {
-      return p;
+    if (isFile(p)) return p;
+  }
+  // 정해진 경로에 없으면: @vscode/*ripgrep*/bin 아래 (현재 OS·CPU 폴더 우선)
+  for (const b of bases) {
+    const scope = path.join(appRoot, b, '@vscode');
+    for (const pkg of readDir(scope).filter((n) => n.includes('ripgrep'))) {
+      const bin = path.join(scope, pkg, 'bin');
+      const subs = readDir(bin).sort((x, y) => Number(y === plat) - Number(x === plat));
+      for (const sub of subs) {
+        const p = path.join(bin, sub, exe);
+        if (isFile(p)) return p;
+      }
     }
   }
   return undefined;
+}
+
+/** 시스템 PATH 에서 rg 를 찾는다 (VS Code 안에서 못 찾았을 때) */
+export function findRipgrepOnPath(): string | undefined {
+  const exe = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  for (const dir of (process.env.PATH ?? process.env.Path ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const p = path.join(dir.replace(/^"|"$/g, ''), exe);
+    if (isFile(p)) return p;
+  }
+  return undefined;
+}
+
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function readDir(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
 }
 
 /** 한 파일에서 가져오는 최대 매치 수 */

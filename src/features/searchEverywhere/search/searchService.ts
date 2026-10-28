@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
-import { findRipgrep, runRipgrep, listFiles, splitGlobs, RgMatch, RG_MAX_PER_FILE } from './ripgrep';
+import { findRipgrep, findRipgrepOnPath, runRipgrep, listFiles, splitGlobs, RgMatch, RG_MAX_PER_FILE } from './ripgrep';
 import { GlobMatcher } from './glob';
 import {
   SearchOptions,
@@ -202,6 +202,12 @@ export class SearchService implements vscode.Disposable {
     // 제외 설정·워크스페이스 폴더가 바뀌면 파일 목록을 다시 모은다 (클래스 색인은 ensure 의 키로 알아서 다시 만든다)
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('devBoost.searchEverywhere.ripgrepPath') && this.rgPath === null) {
+          // rg 를 못 찾았던 상태에서 경로를 넣으면 다음 검색부터 색인을 쓴다
+          this.rgPath = undefined;
+          this.classIndex = undefined;
+          this.mapperIndex = undefined;
+        }
         if (e.affectsConfiguration('devBoost.searchEverywhere')) {
           globCache = undefined;
           invalidate();
@@ -1075,9 +1081,28 @@ export class SearchService implements vscode.Disposable {
 
   private getRipgrep(): string | undefined {
     if (this.rgPath === undefined) {
-      this.rgPath = findRipgrep(vscode.env.appRoot) ?? null;
-      if (!this.rgPath) {
-        console.warn('[DevBoost] VS Code 내장 ripgrep을 찾지 못했습니다. 느린 방식으로 텍스트 검색합니다.');
+      // 1) 설정에 직접 지정한 경로 2) VS Code 내장 3) 시스템 PATH
+      const custom = (config().get<string>('ripgrepPath') ?? '').trim();
+      let found: string | undefined;
+      let from = '';
+      if (custom) {
+        if (fs.existsSync(custom)) {
+          found = custom;
+          from = '설정 ripgrepPath';
+        } else {
+          this.logLine(`[경고] 설정 ripgrepPath 의 파일이 없음: ${custom} → VS Code 내장 rg 를 찾습니다`);
+        }
+      }
+      if (!found && (found = findRipgrep(vscode.env.appRoot))) from = 'VS Code 내장';
+      if (!found && (found = findRipgrepOnPath())) from = '시스템 PATH';
+      this.rgPath = found ?? null;
+      if (found) {
+        this.logLine(`[ripgrep] ${from}: ${found}`);
+      } else {
+        this.logLine(
+          `[경고] ripgrep(rg) 을 찾지 못함 (VS Code 설치 폴더: ${vscode.env.appRoot}). ` +
+            '클래스·메서드·Mapper 색인이 꺼지고 텍스트 검색이 느려집니다. 설정 devBoost.searchEverywhere.ripgrepPath 에 rg 경로를 넣으면 그것을 씁니다'
+        );
       }
     }
     return this.rgPath ?? undefined;

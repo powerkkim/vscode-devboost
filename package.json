@@ -284,6 +284,11 @@
             "default": false,
             "description": "사이드바 방식에서 항목을 열거나 Esc를 눌러도 사이드바를 닫지 않고 그대로 둠"
           },
+          "devBoost.searchEverywhere.ripgrepPath": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "ripgrep(`rg`) 실행 파일 경로. 비워 두면 VS Code 에 들어 있는 rg 를 찾아 쓰고, 없으면 시스템 PATH 의 rg 를 씁니다. 어느 rg 를 쓰는지는 출력 패널 *DevBoost* 에 찍힙니다."
+          },
           "devBoost.searchEverywhere.showTiming": {
             "type": "boolean",
             "default": true,

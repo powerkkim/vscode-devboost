@@ -11,6 +11,7 @@
 - **Mapper 탭** (새 탭, QuickPick 접두어 `m/`): MyBatis mapper XML 파일·SQL id(select·insert·update·delete·sql)와 Java mapper 인터페이스만 모아 검색. mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 골라 pom.xml·설정 XML 은 안 나옴. MyBatis DOCTYPE 만 있고 namespace 가 다음 줄에 있어도 인식. Java 는 `@Mapper`, XML namespace 와 같은 이름, 또는 이름이 `…Mapper` 인 인터페이스(@MapperScan)와 그 메서드. 같은 이름의 Java 메서드와 SQL id 는 나란히 나옴. 검색어가 비면 mapper 파일 목록
 - **검색 범위 이름·순서 정리**: *프로젝트 (테스트 제외)* 를 맨 위·기본값으로. *프로젝트 (테스트 포함)*, *테스트만*, *프로젝트 + 라이브러리(jar)*, *최근에 연 파일*, *커밋 안 한 파일 (Git)*. Alt+N 은 테스트 제외 ↔ 라이브러리 포함
 - **프로젝트의 상위 폴더 이름이 제외 설정과 같으면**(예: `C:\work\bin\demo` 의 `bin`) 색인·파일 목록·텍스트가 통째로 비던 문제 수정 (rg 를 프로젝트 폴더에서 실행)
+- **최신 VS Code 에서 ripgrep 을 못 찾던 문제** — VS Code 가 rg 를 `@vscode/ripgrep-universal/bin/<OS>-<CPU>/` 로 옮겨서, 클래스·메서드·Mapper 색인이 꺼지고 텍스트 검색이 느린 방식(파일 직접 읽기)으로 돌았음. 새 위치와 시스템 PATH 도 찾고, 설정 `devBoost.searchEverywhere.ripgrepPath` 로 직접 지정 가능. 어느 rg 를 쓰는지(못 찾으면 이유) 출력 패널에 기록
 - **출력 패널 DevBoost 로그 보강**: 언어 서버 요청·응답(건수·시간)·버림(검색어·범위가 바뀜)·화면에 붙인 건수, 색인 만들기·갱신 시간, 창을 닫아 검색을 멈춘 것, 이름은 맞는데 범위에서 모두 빠진 경우의 이유
 - 같은 점수의 결과(같은 이름의 파일, 같은 우선순위의 텍스트)가 매번 같은 순서로 나오게 정렬
 
