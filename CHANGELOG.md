@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **케이스 변환 — 단축키 롤업**: 커서 아래 이름(또는 선택)에서 `Alt+Shift+U` 를 누를 때마다 camelCase → PascalCase → snake_case → SCREAMING_SNAKE_CASE → kebab-case → camelCase 순으로 한 칸씩 바꿈. `Ctrl+Alt+Shift+U`(Mac `Cmd+Alt+Shift+U`)는 반대 방향. 바꾼 글을 선택 상태로 두어 같은 키를 계속 누르면 이어서 바뀌고, 여러 커서도 지원. `user` 처럼 케이스를 바꿔도 같은 글이 나오는 표기는 건너뜀. 우클릭 `케이스 변환` 메뉴는 그대로이고 `다음 케이스로 바꾸기` 항목이 추가됨
+
 ## 0.13.0 - 2026-10-29
 - **Search Everywhere: 언어 서버를 쓰지 않음** — Java 언어 서버가 프로젝트를 불러오거나 빌드하는 동안 결과가 한참 뒤에 나오던 문제
   - 모든 탭이 ripgrep 으로 만든 색인(클래스·메서드·필드·Mapper)·파일 목록·텍스트로 바로 확정. 이름 중간 글자로도 찾음 (`Application` → `CoinworkApplication`)

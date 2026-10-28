@@ -101,6 +101,16 @@
         "command": "devBoost.caseConverter.javaToMyBatis",
         "title": "Java 필드 → MyBatis SQL (SELECT·INSERT·UPDATE·resultMap)",
         "category": "케이스 변환"
+      },
+      {
+        "command": "devBoost.caseConverter.cycleNext",
+        "title": "다음 케이스로 바꾸기 (camel → Pascal → snake → SCREAMING → kebab)",
+        "category": "케이스 변환"
+      },
+      {
+        "command": "devBoost.caseConverter.cyclePrev",
+        "title": "이전 케이스로 바꾸기",
+        "category": "케이스 변환"
       }
     ],
     "viewsContainers": {
@@ -183,6 +193,14 @@
         {
           "command": "devBoost.caseConverter.javaToMyBatis",
           "when": "config.devBoost.caseConverter.enabled"
+        },
+        {
+          "command": "devBoost.caseConverter.cycleNext",
+          "when": "config.devBoost.caseConverter.enabled && editorTextFocus"
+        },
+        {
+          "command": "devBoost.caseConverter.cyclePrev",
+          "when": "config.devBoost.caseConverter.enabled && editorTextFocus"
         }
       ],
       "editor/context": [
@@ -200,6 +218,11 @@
           "command": "devBoost.caseConverter.convertCase",
           "when": "config.devBoost.caseConverter.enabled && editorHasSelection",
           "group": "devboost@1"
+        },
+        {
+          "command": "devBoost.caseConverter.cycleNext",
+          "when": "config.devBoost.caseConverter.enabled && editorTextFocus && !editorReadonly",
+          "group": "devboost@2"
         }
       ]
     },
@@ -221,6 +244,18 @@
         "key": "ctrl+alt+enter",
         "mac": "cmd+alt+enter",
         "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+      },
+      {
+        "command": "devBoost.caseConverter.cycleNext",
+        "key": "alt+shift+u",
+        "mac": "alt+shift+u",
+        "when": "editorTextFocus && !editorReadonly && config.devBoost.caseConverter.enabled"
+      },
+      {
+        "command": "devBoost.caseConverter.cyclePrev",
+        "key": "ctrl+alt+shift+u",
+        "mac": "cmd+alt+shift+u",
+        "when": "editorTextFocus && !editorReadonly && config.devBoost.caseConverter.enabled"
       }
     ],
     "configuration": [

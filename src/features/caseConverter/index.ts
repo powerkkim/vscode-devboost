@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Feature } from '../../core/feature';
 import { SchemaStore } from '../dbSchema/schemaStore';
-import { CASES, CaseKind, convertText } from './convert/words';
+import { CASES, CaseKind, convertText, cycleCase } from './convert/words';
 import {
   DateType,
   SchemaLookup,
@@ -126,16 +126,57 @@ async function loadLookup(store: SchemaStore): Promise<SchemaLookup | undefined>
 
 /* ------------------------------------------------------------------ 명령 */
 
+const NAME_AT_CURSOR = /[\p{L}\p{N}_$]+(?:-[\p{L}\p{N}_$]+)*/u;
+
+/** 선택 영역, 선택이 없으면 커서 아래 이름의 범위 (여러 커서 지원) */
+function nameTargets(editor: vscode.TextEditor): vscode.Range[] {
+  const doc = editor.document;
+  return editor.selections
+    .map((s) => (s.isEmpty ? doc.getWordRangeAtPosition(s.active, NAME_AT_CURSOR) : s))
+    .filter((r): r is vscode.Range => !!r && !r.isEmpty);
+}
+
+/**
+ * 단축키 롤업: 커서 아래 이름(또는 선택)을 camel → Pascal → snake → SCREAMING_SNAKE → kebab 순으로 한 칸씩 바꿈.
+ * 바꾼 글을 선택 상태로 두므로 같은 키를 계속 누르면 다음 표기로 이어진다.
+ */
+async function cycleCaseAtCursor(direction: 1 | -1) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return;
+  const doc = editor.document;
+  const targets = nameTargets(editor)
+    .map((r) => ({ range: r, next: cycleCase(doc.getText(r), direction) }))
+    .sort((a, b) => doc.offsetAt(a.range.start) - doc.offsetAt(b.range.start));
+  if (targets.length === 0) return;
+
+  // 문서는 편집하면 바로 바뀌므로, 위치(오프셋)는 편집 전에 구해 둔다
+  const spans = targets.map((t) => {
+    const start = doc.offsetAt(t.range.start);
+    return { start, oldLen: doc.offsetAt(t.range.end) - start, next: t.next };
+  });
+
+  const ok = await editor.edit((b) => {
+    for (const t of targets) b.replace(t.range, t.next);
+  });
+  if (!ok) return;
+
+  // 바꾼 뒤의 위치: 앞쪽에서 늘거나 줄어든 글자 수만큼 뒤쪽 범위가 밀린다
+  let shift = 0;
+  const selections: vscode.Selection[] = [];
+  for (const sp of spans) {
+    const start = sp.start + shift;
+    selections.push(new vscode.Selection(doc.positionAt(start), doc.positionAt(start + sp.next.length)));
+    shift += sp.next.length - sp.oldLen;
+  }
+  editor.selections = selections;
+}
+
 async function convertCase() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
   const doc = editor.document;
 
-  // 선택이 없으면 커서 아래 단어
-  const ranges = editor.selections.map((s) =>
-    s.isEmpty ? doc.getWordRangeAtPosition(s.active, /[\p{L}\p{N}_$]+(?:-[\p{L}\p{N}_$]+)*/u) : s
-  );
-  const targets = ranges.filter((r): r is vscode.Range => !!r && !r.isEmpty);
+  const targets = nameTargets(editor);
   if (targets.length === 0) {
     vscode.window.showInformationMessage('바꿀 이름을 선택하거나 이름 위에 커서를 두세요.');
     return;
@@ -255,6 +296,8 @@ export const caseConverter: Feature = {
     const store = new SchemaStore();
     return [
       vscode.commands.registerCommand('devBoost.caseConverter.convertCase', () => convertCase()),
+      vscode.commands.registerCommand('devBoost.caseConverter.cycleNext', () => cycleCaseAtCursor(1)),
+      vscode.commands.registerCommand('devBoost.caseConverter.cyclePrev', () => cycleCaseAtCursor(-1)),
       vscode.commands.registerCommand('devBoost.caseConverter.sqlToJava', () => sqlToJava(store)),
       vscode.commands.registerCommand('devBoost.caseConverter.javaToTs', () => javaToTypeScript()),
       vscode.commands.registerCommand('devBoost.caseConverter.javaToMyBatis', () => javaToMyBatisSql()),

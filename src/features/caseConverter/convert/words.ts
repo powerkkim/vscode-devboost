@@ -70,3 +70,22 @@ export function convertText(text: string, kind: CaseKind): string {
 export const toCamel = (s: string) => convertName(s, 'camel');
 export const toPascal = (s: string) => convertName(s, 'pascal');
 export const toSnake = (s: string) => convertName(s, 'snake');
+
+/** 단축키로 돌려 가며 바꿀 때의 순서 (dot.case 는 커서 아래 단어 인식이 어려워 뺌 — 명령 팔레트에서는 선택 가능) */
+export const CYCLE_ORDER: CaseKind[] = ['camel', 'pascal', 'snake', 'constant', 'kebab'];
+
+/**
+ * 롤업: 지금 표기의 다음(direction=1) 또는 이전(-1) 표기로 바꾼 글을 돌려준다.
+ * 단일 단어(`user`)처럼 케이스를 바꿔도 같은 글이 나오는 것은 건너뛰어, 누를 때마다 눈에 보이게 바뀐다.
+ * 지금 글이 어느 표기와도 맞지 않으면(`User_name` 등) 순서의 첫 번째(또는 direction=-1 이면 마지막)로 정리한다.
+ */
+export function cycleCase(text: string, direction: 1 | -1 = 1): string {
+  const candidates: string[] = [];
+  for (const kind of CYCLE_ORDER) {
+    const c = convertText(text, kind);
+    if (!candidates.includes(c)) candidates.push(c);
+  }
+  const idx = candidates.indexOf(text);
+  if (idx < 0) return direction === 1 ? candidates[0] : candidates[candidates.length - 1];
+  return candidates[(idx + direction + candidates.length) % candidates.length];
+}

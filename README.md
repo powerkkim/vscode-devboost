@@ -48,6 +48,7 @@
 | `Java 필드 → TypeScript 인터페이스` | 클래스·record·필드 몇 줄을 `export interface` 로 바꿈 (`List<X>` → `X[]`, 날짜 → `string` 등) |
 | `Java 필드 → MyBatis SQL` | SELECT 컬럼 · INSERT · UPDATE · resultMap 생성 |
 
+- **단축키 롤업**: 이름 위에 커서를 두고 `Alt+Shift+U` 를 누를 때마다 camel → Pascal → snake → SCREAMING_SNAKE → kebab 순으로 바뀜 (`Ctrl+Alt+Shift+U` 는 반대 방향, 우클릭 메뉴에도 있음)
 - 입력: 선택 영역 → (mapper XML 이면) 커서 위치 쿼리 → (`.sql`·`.java` 이면) 현재 파일 → 클립보드 순서. 같은 파일의 `<include refid>` 는 풀어서 반영
 - 타입: `DB 스키마`로 스키마를 가져와 두었다면 실제 컬럼 타입·설명을 쓰고(`SELECT *`·테이블 이름만 넣어도 컬럼을 펼침), 없으면 컬럼 이름으로 추정
 - 결과는 새 문서로 열림. 클립보드·선택 영역 아래 삽입으로 바꾸려면 설정 `devBoost.caseConverter.output`
