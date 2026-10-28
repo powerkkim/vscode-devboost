@@ -397,7 +397,7 @@ export class SearchService implements vscode.Disposable {
       );
     }
     const result: SearchResult = { items, timings, totalMs, groups: groupsOf(items) };
-    if ((tab === 'symbols' || tab === 'all') && query && this.classIndex?.ready && !this.classIndex.membersReady) {
+    if ((tab === 'symbols' || tab === 'all' || tab === 'mappers') && query && this.classIndex?.ready && !this.classIndex.membersReady) {
       result.indexIncomplete = true;
     }
     if (withSymbols) {
@@ -902,7 +902,7 @@ export class SearchService implements vscode.Disposable {
     }
     if (isStale()) return [];
 
-    type Cand = { kind: 'xml' | 'statement' | 'java'; name: string; file: string; line: number; desc: string; statement?: string };
+    type Cand = { kind: 'xml' | 'statement' | 'java' | 'method'; name: string; file: string; line: number; desc: string; statement?: string };
     const cands: Cand[] = [];
     for (const e of mi.entries()) {
       if (e.kind === 'statement' && !query) continue;
@@ -912,20 +912,33 @@ export class SearchService implements vscode.Disposable {
         name: e.name,
         file: e.file,
         line: e.line,
-        desc: e.kind === 'statement' ? `${shortNs} · ${e.statement}` : e.namespace,
+        desc: e.kind === 'statement' ? `${shortNs || path.basename(e.file, path.extname(e.file))}.xml · ${e.statement}` : e.namespace,
         statement: e.statement,
       });
     }
     if (ci) {
+      // Java mapper: @Mapper, mapper XML namespace 와 같은 이름, 또는 이름이 …Mapper 인 인터페이스 (@MapperScan 으로 등록하는 경우)
       const ns = mi.namespaces();
+      const mapperFiles = new Map<string, string>(); // 파일 → 인터페이스 이름
       for (const c of ci.classes()) {
-        if (mi.isAnnotated(c.file) || ns.has(c.pkg ? `${c.pkg}.${c.name}` : c.name)) {
+        if (!c.file.toLowerCase().endsWith('.java')) continue;
+        if (mi.isAnnotated(c.file) || ns.has(c.pkg ? `${c.pkg}.${c.name}` : c.name) || (c.kind === 'interface' && c.name.endsWith('Mapper'))) {
           cands.push({ kind: 'java', name: c.name, file: c.file, line: c.line, desc: c.pkg });
+          mapperFiles.set(c.file, c.name);
+        }
+      }
+      // 그 인터페이스의 메서드 (검색어가 있을 때만, SQL id 와 같은 이름이면 나란히 나옴)
+      if (query && mapperFiles.size) {
+        for (const m of ci.members()) {
+          if (m.kind !== 'method') continue;
+          const owner = mapperFiles.get(m.file);
+          if (owner === undefined) continue;
+          cands.push({ kind: 'method', name: m.name, file: m.file, line: m.line, desc: `${m.container || owner}.java` });
         }
       }
     }
 
-    const order = { java: 0, xml: 1, statement: 2 };
+    const order = { java: 0, xml: 1, method: 2, statement: 3 };
     const scored = cands
       .map((c) => ({ c, score: query ? fuzzyScore(query, c.kind === 'xml' ? c.name.replace(/\.xml$/i, '') : c.name) : 0 }))
       .filter((x) => x.score >= 0);
@@ -958,13 +971,16 @@ export class SearchService implements vscode.Disposable {
         label: c.name,
         description: c.desc || undefined,
         detail: `${vscode.workspace.asRelativePath(uri)}:${c.line + 1}`,
-        icon: c.kind === 'java' ? 'symbol-interface' : c.kind === 'xml' ? 'file-code' : 'database',
+        icon: c.kind === 'java' ? 'symbol-interface' : c.kind === 'xml' ? 'file-code' : c.kind === 'method' ? 'symbol-method' : 'database',
         uri,
         range: new vscode.Range(c.line, 0, c.line, 0),
         selectName: c.kind !== 'xml',
       });
     }
     count?.(total);
+    if (!mi.entries().length && !cands.length) {
+      this.logLine('[Mapper] mapper XML·Java mapper 를 하나도 못 찾음 (<mapper namespace> 나 MyBatis DOCTYPE 이 있는 XML, …Mapper 인터페이스·@Mapper 가 없음)');
+    }
     return out;
   }
 

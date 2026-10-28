@@ -29,15 +29,17 @@ export interface MapperEntry {
 
 /**
  * rg 정규식 (Rust 문법).
- *  $1 = mapper namespace, $2 = 문장 종류, $3 = SQL id
- * id 속성이 태그와 같은 줄에 있는 경우만 (MyBatis mapper 는 거의 모두 이렇게 씀)
+ *  $1 = mapper namespace, $2 = 문장 종류, $3 = SQL id, $4 = `<!DOCTYPE mapper` 표시
+ * 속성은 태그와 같은 줄에 있는 경우만 (MyBatis mapper 는 거의 모두 이렇게 씀). 따옴표는 " ' 둘 다.
+ * namespace 가 다음 줄에 있어도 MyBatis DOCTYPE 이 있으면 mapper XML 로 본다
  */
 export const MAPPER_XML_PATTERN =
-  `<mapper\\s+namespace\\s*=\\s*"([^"]+)"` +
-  `|<(select|insert|update|delete|sql)\\b[^>]*?\\bid\\s*=\\s*"([^"]+)"`;
+  `<mapper\\b[^>]*?\\bnamespace\\s*=\\s*["']([^"']+)["']` +
+  `|<(select|insert|update|delete|sql)\\b[^>]*?\\bid\\s*=\\s*["']([^"']+)["']` +
+  `|<!DOCTYPE\\s+(mapper)\\b`;
 
 export function buildMapperXmlArgs(roots: string[], excludeGlobs: string[]): string[] {
-  const args = ['--no-config', '--no-heading', '--with-filename', '--line-number', '--null', '--only-matching', '--max-filesize', '1M', '--max-columns', '0', '-r', '$1\t$2\t$3', '--iglob', '*.xml'];
+  const args = ['--no-config', '--no-heading', '--with-filename', '--line-number', '--null', '--only-matching', '--max-filesize', '1M', '--max-columns', '0', '-r', '$1\t$2\t$3\t$4', '--iglob', '*.xml'];
   for (const g of excludeGlobs) args.push('--iglob', `!${g}`);
   args.push('-e', MAPPER_XML_PATTERN, '--', ...roots);
   return args;
@@ -53,7 +55,7 @@ export function buildMapperJavaArgs(roots: string[], excludeGlobs: string[]): st
 
 /** rg 출력 → mapper XML 항목. namespace 가 있는 파일의 문장만 남긴다 */
 export function parseMapperXmlOutput(out: string): MapperEntry[] {
-  const byFile = new Map<string, { ns?: { name: string; line: number }; stmts: MapperEntry[] }>();
+  const byFile = new Map<string, { ns?: { name: string; line: number }; doctype?: number; stmts: MapperEntry[] }>();
   for (const raw of out.split('\n')) {
     const z = raw.indexOf('\0');
     if (z < 0) continue;
@@ -62,20 +64,24 @@ export function parseMapperXmlOutput(out: string): MapperEntry[] {
     const colon = rest.indexOf(':');
     if (colon < 0) continue;
     const line = Number(rest.slice(0, colon)) - 1;
-    const [ns, stmt, id] = rest.slice(colon + 1).split('\t');
+    const [ns, stmt, id, doctype] = rest.slice(colon + 1).split('\t');
     const f = byFile.get(file) ?? { stmts: [] };
     byFile.set(file, f);
     if (ns) {
       if (!f.ns) f.ns = { name: ns, line };
+    } else if (doctype) {
+      f.doctype ??= line;
     } else if (stmt && id) {
       f.stmts.push({ kind: 'statement', name: id, file, line, namespace: '', statement: stmt });
     }
   }
   const out2: MapperEntry[] = [];
   for (const [file, f] of byFile) {
-    if (!f.ns) continue; // <mapper namespace> 가 없으면 MyBatis mapper 가 아님 (select 태그만 우연히 있는 XML 등)
-    out2.push({ kind: 'xml', name: path.basename(file), file, line: f.ns.line, namespace: f.ns.name });
-    for (const s of f.stmts) out2.push({ ...s, namespace: f.ns.name });
+    // <mapper namespace> 도 MyBatis DOCTYPE 도 없으면 mapper 가 아님 (select 태그만 우연히 있는 XML 등)
+    if (!f.ns && f.doctype === undefined) continue;
+    const ns = f.ns?.name ?? '';
+    out2.push({ kind: 'xml', name: path.basename(file), file, line: f.ns?.line ?? f.doctype ?? 0, namespace: ns });
+    for (const s of f.stmts) out2.push({ ...s, namespace: ns });
   }
   return out2;
 }

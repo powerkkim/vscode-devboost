@@ -22,12 +22,18 @@ function write(root, rel, text) {
   return f;
 }
 
-test('parseMapperXmlOutput: namespace 가 없는 XML 의 select 는 버림', () => {
-  const out = ['a.xml\u00002:com.x.AMapper\t\t', 'a.xml\u00003:\tselect\tfindAll', 'b.xml\u00005:\tselect\tnotMapper'].join('\n');
+test('parseMapperXmlOutput: namespace·DOCTYPE 가 없는 XML 의 select 는 버림', () => {
+  const out = [
+    'a.xml\u00002:com.x.AMapper\t\t\t', 'a.xml\u00003:\tselect\tfindAll\t',
+    'b.xml\u00005:\tselect\tnotMapper\t',
+    'c.xml\u00002:\t\t\tmapper', 'c.xml\u00006:\tupdate\tsave\t',
+  ].join('\n');
   const e = parseMapperXmlOutput(out);
   assert.deepEqual(e.map((x) => [x.kind, x.name, x.namespace]), [
     ['xml', 'a.xml', 'com.x.AMapper'],
     ['statement', 'findAll', 'com.x.AMapper'],
+    ['xml', 'c.xml', ''],
+    ['statement', 'save', ''],
   ]);
 });
 
@@ -37,19 +43,21 @@ test('MapperIndex: mapper XML·SQL id·@Mapper, 갱신과 삭제, 상위 폴더 
   const xml = write(root, 'src/main/resources/mapper/UserMapper.xml',
     '<?xml version="1.0"?>\r\n<mapper namespace="com.demo.UserMapper">\r\n  <select id="selectUser" resultType="map">\r\n  </select>\r\n  <update\r\n    id="multi">\r\n  </update>\r\n  <insert id="insertUser">\r\n  </insert>\r\n</mapper>\r\n');
   write(root, 'pom.xml', '<project><select id="x"/></project>');
+  // namespace 가 다음 줄, 작은따옴표 id
+  write(root, 'src/main/resources/mapper/CoinMapper.xml', '<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "x">\n<mapper\n  namespace="com.demo.CoinMapper">\n<select id=\'selectCoin\'></select>\n</mapper>\n');
   write(root, 'src/main/java/com/demo/OrderMapper.java', 'package com.demo;\n@Mapper\npublic interface OrderMapper {}\n');
   write(root, 'target/classes/mapper/UserMapper.xml', '<mapper namespace="com.demo.UserMapper"><select id="dup"></select></mapper>');
   const idx = new MapperIndex(rg);
   await idx.ensure([root], ['**/target/**', '**/bin/**']);
   const names = idx.entries().map((e) => `${e.kind}:${e.name}`).sort();
-  assert.deepEqual(names, ['statement:insertUser', 'statement:selectUser', 'xml:UserMapper.xml']);
+  assert.deepEqual(names, ['statement:insertUser', 'statement:selectCoin', 'statement:selectUser', 'xml:CoinMapper.xml', 'xml:UserMapper.xml']);
   assert.ok(idx.namespaces().has('com.demo.UserMapper'));
   assert.ok(idx.isAnnotated(path.join(root, 'src/main/java/com/demo/OrderMapper.java')));
 
   fs.writeFileSync(xml, '<mapper namespace="com.demo.UserMapper">\n<delete id="deleteUser"></delete>\n</mapper>\n');
   idx.queueUpdate(xml);
   await idx.flush();
-  assert.deepEqual(idx.entries().map((e) => e.name).sort(), ['UserMapper.xml', 'deleteUser']);
+  assert.deepEqual(idx.entries().map((e) => e.name).sort(), ['CoinMapper.xml', 'UserMapper.xml', 'deleteUser', 'selectCoin']);
 
   idx.removeFile(path.join(root, 'src/main/resources'));
   assert.equal(idx.entries().length, 0);

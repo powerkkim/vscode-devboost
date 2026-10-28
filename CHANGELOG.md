@@ -8,7 +8,7 @@
 - **Java 메서드·필드를 언어 서버 없이 검색** (심볼 탭, 모두 탭): Java 언어 서버는 기본 설정에서 메서드를 주지 않고 필드는 아예 주지 않아 직접 색인. 수식어 없는 필드(`Foo foo;`)는 제외. Kotlin `fun` 포함
 - 색인은 검색 창을 열 때 미리 만들기 시작 (클래스 먼저, 메서드·필드는 이어서). 저장한 파일은 그 파일만 다시 읽음
 - 색인·파일 목록·텍스트 검색·파일 감시가 모두 설정 `devBoost.searchEverywhere.exclude` 를 따름. 제외 폴더(`target`·`bin`·`logs` 등)에서 파일이 생기거나 지워져도(빌드 중) 파일 목록을 다시 모으지 않음
-- **Mapper 탭** (새 탭, QuickPick 접두어 `m/`): MyBatis mapper XML 파일·SQL id(select·insert·update·delete·sql)와 Java mapper 인터페이스만 모아 검색. mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 골라 pom.xml·설정 XML 은 안 나옴. Java 는 `@Mapper` 이거나 XML namespace 와 이름이 같은 인터페이스. 검색어가 비면 mapper 파일 목록
+- **Mapper 탭** (새 탭, QuickPick 접두어 `m/`): MyBatis mapper XML 파일·SQL id(select·insert·update·delete·sql)와 Java mapper 인터페이스만 모아 검색. mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 골라 pom.xml·설정 XML 은 안 나옴. MyBatis DOCTYPE 만 있고 namespace 가 다음 줄에 있어도 인식. Java 는 `@Mapper`, XML namespace 와 같은 이름, 또는 이름이 `…Mapper` 인 인터페이스(@MapperScan)와 그 메서드. 같은 이름의 Java 메서드와 SQL id 는 나란히 나옴. 검색어가 비면 mapper 파일 목록
 - **검색 범위 이름·순서 정리**: *프로젝트 (테스트 제외)* 를 맨 위·기본값으로. *프로젝트 (테스트 포함)*, *테스트만*, *프로젝트 + 라이브러리(jar)*, *최근에 연 파일*, *커밋 안 한 파일 (Git)*. Alt+N 은 테스트 제외 ↔ 라이브러리 포함
 - **프로젝트의 상위 폴더 이름이 제외 설정과 같으면**(예: `C:\work\bin\demo` 의 `bin`) 색인·파일 목록·텍스트가 통째로 비던 문제 수정 (rg 를 프로젝트 폴더에서 실행)
 - **출력 패널 DevBoost 로그 보강**: 언어 서버 요청·응답(건수·시간)·버림(검색어·범위가 바뀜)·화면에 붙인 건수, 색인 만들기·갱신 시간, 창을 닫아 검색을 멈춘 것, 이름은 맞는데 범위에서 모두 빠진 경우의 이유
