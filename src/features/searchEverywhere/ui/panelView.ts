@@ -64,9 +64,13 @@ export class SearchEverywhereView implements vscode.WebviewViewProvider {
     view.onDidChangeVisibility(() => {
       if (view.visible) {
         session.post({ type: 'focus' });
+        session.resume(); // 숨겨질 때 검색을 멈췄으면 같은 검색을 다시
+      } else {
+        session.cancel(); // 숨겨지면 진행 중인 검색을 멈춘다 (다시 보이면 새로 검색)
       }
     });
     view.onDidDispose(() => {
+      session.cancel();
       this.view = undefined;
       this.session = undefined;
     });

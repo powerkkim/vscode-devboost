@@ -109,6 +109,7 @@ export class SearchEverywherePanel {
 
   private dispose() {
     SearchEverywherePanel.current = undefined;
+    this.session.cancel(); // 진행 중인 rg 를 멈추고 늦게 오는 언어 서버 응답은 버린다
     this.disposables.forEach((d) => d.dispose());
   }
 }

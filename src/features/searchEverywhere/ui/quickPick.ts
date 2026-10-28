@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { SearchService, SearchItem, TabId, GroupCount } from '../search/searchService';
+import { SearchService, SearchItem, SearchResult, TabId, GroupCount } from '../search/searchService';
+import { SymbolThrottle } from '../search/symbolThrottle';
 
 /**
  * Search Everywhere 를 VS Code 기본 QuickPick 목록으로 여는 방식 (설정 ui = "quickPick").
@@ -50,6 +51,24 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   let limit: number | undefined; // "더 보기"로 늘린 표시 개수 (검색어·탭이 바뀌면 초기화)
   let lastGroups: GroupCount[] = []; // 지금 화면에 그린 결과의 개수 (partial 포함)
   let keepAfterMore: SearchItem | undefined; // "더 보기"를 누르기 직전에 보던 결과
+  // 언어 서버: 1초 단위로 묻고 마지막 요청 응답만 합친다 (검색 결과는 기다리지 않음)
+  const throttle = new SymbolThrottle<vscode.SymbolInformation[]>((q, key) => {
+    // 1초를 기다리는 사이 범위가 바뀌었으면 묻지 않는다
+    if (service.symbolRequestKey(q) !== key) return Promise.reject(new Error('조건 변경'));
+    return service.requestSymbols(q);
+  }, 1000);
+  let symbols: { key: string; list: vscode.SymbolInformation[]; time: number } | undefined;
+  let latest: { run: number; tab: TabId; key: string; result: SearchResult } | undefined;
+  const show = (tab: TabId, r: SearchResult) => {
+    lastGroups = r.groups;
+    const active = qp.activeItems[0]?.data;
+    qp.items = toPickItems(tab, r.items, r.groups);
+    // 늦게 온 언어 서버 결과로 목록이 바뀌어도 보던 항목에 머문다
+    if (active) {
+      const same = qp.items.find((i) => i.data && i.data.uri?.toString() === active.uri?.toString() && i.data.label === active.label);
+      if (same) qp.activeItems = [same];
+    }
+  };
 
   qp.matchOnDescription = false;
   // 우리가 정한 순서(점수·우선순위, 종류별 "더 보기" 위치)를 VS Code 가 라벨 일치도로 다시 섞지 않게
@@ -87,19 +106,39 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
 
     qp.busy = true;
     try {
-      // 언어 서버를 기다리는 동안 먼저 나온 결과를 보여 준다 (busy 표시는 유지)
       const keep = keepAfterMore;
       keepAfterMore = undefined;
-      const r = await service.searchTimed(tab, text, () => myRun !== runId, (partial) => {
-        if (myRun !== runId) return;
-        lastGroups = partial.groups;
-        qp.items = toPickItems(tab, partial.items, partial.groups);
-      }, limit);
+      const r = await service.searchTimed(tab, text, () => myRun !== runId, limit);
       if (myRun !== runId) {
         return; // 더 최신 검색이 시작됨
       }
-      lastGroups = r.groups;
-      qp.items = toPickItems(tab, r.items, r.groups);
+      let shown = r;
+      if (r.withSymbols) {
+        const key = service.symbolRequestKey(text);
+        latest = { run: myRun, tab, key, result: r };
+        if (symbols?.key === key && Date.now() - symbols.time < 5000) {
+          shown = r.withSymbols(symbols.list);
+        } else {
+          throttle.want(key, text, (q, k, list) => {
+            if (service.symbolRequestKey(q) !== k) return; // 응답을 기다리는 사이 범위가 바뀜
+            symbols = { key: k, list, time: Date.now() };
+            if (latest && latest.key === k && latest.run === runId && latest.result.withSymbols) {
+              show(latest.tab, latest.result.withSymbols(list));
+            }
+          });
+        }
+      } else {
+        latest = undefined;
+        throttle.stop();
+      }
+      lastGroups = shown.groups;
+      qp.items = toPickItems(tab, shown.items, shown.groups);
+      // 메서드·필드 색인이 아직 만들어지는 중이면 다 되는 대로 다시 검색
+      if (r.indexIncomplete) {
+        void service.whenIndexComplete().then(() => {
+          if (myRun === runId) void run();
+        });
+      }
       // "더 보기" 뒤에는 보던 항목 근처에 머문다
       if (keep && limit) {
         const same = qp.items.find((i) => i.data && i.data.uri?.toString() === keep.uri?.toString() && i.data.label === keep.label);
@@ -169,11 +208,14 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     if (debounce) {
       clearTimeout(debounce);
     }
-    runId++; // 진행 중이던 검색 무효화
+    runId++; // 진행 중이던 검색 무효화 (rg 는 25ms 안에 멈춤)
+    throttle.stop(); // 늦게 오는 언어 서버 응답은 버림
+    latest = undefined;
     qp.dispose();
   });
 
   updateTitle();
+  service.warmUp(); // 입력하는 동안 색인·파일 목록을 미리 만든다
   qp.show();
   run();
 }

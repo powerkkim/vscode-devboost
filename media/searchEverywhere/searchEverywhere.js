@@ -54,6 +54,7 @@
   let limit; // "더 보기"로 늘린 표시 개수 (검색어·탭·옵션이 바뀌면 초기화)
   let maxResults = 50;
   let pendingSelect; // "더 보기" 후 고를 결과 번호
+  let pendingKeep; // 다시 검색(rerun) 뒤에도 고를 줄
   let runId = 0;
   let shownRunId = 0;
   let shownSeq; // 지금 화면에 그린 결과 묶음 번호 (열 때 같이 보냄)
@@ -205,6 +206,7 @@
     if (!keepLimit) {
       limit = undefined;
       pendingSelect = undefined; // "더 보기" 결과를 기다리던 중 다른 검색을 시작하면 버린다
+      pendingKeep = undefined;
     }
     const run = () => {
       runId++;
@@ -569,6 +571,14 @@
         search(true);
       }
       $query.focus();
+    } else if (m.type === 'rerun') {
+      // 확장이 같은 검색을 다시 하라고 함 (메서드·필드 색인 완성, 숨겼다 다시 보임). 보던 줄·"더 보기" 개수는 유지
+      if ($query.value) {
+        pendingKeep = rows[(view[selected] || {}).idx];
+        search(true, true);
+      }
+    } else if (m.type === 'lsDone') {
+      if (m.runId === shownRunId) $timing.textContent = $timing.textContent.replace(/( · )?언어 서버 결과 기다리는 중…/, '');
     } else if (m.type === 'focus') {
       // 패널이 다시 보일 때: 검색창으로 커서, 기존 검색어는 전체 선택해서 바로 덮어쓸 수 있게
       $query.focus();
@@ -582,13 +592,21 @@
       const scroll = sameRun || pendingSelect !== undefined ? $results.scrollTop : 0;
       shownRunId = m.runId;
       shownSeq = m.seq;
-      if (!m.partial) $results.classList.remove('busy');
+      // 결과가 나왔으면 흐리게 두지 않는다 (언어 서버를 기다리는 중이면 하단에만 표시)
+      $results.classList.remove('busy');
       rows = m.rows || [];
       groups = m.groups || [];
       selected = 0;
       renderResults(m.query); // view 를 새로 만든다
       let want = -1;
-      if (pendingSelect !== undefined) {
+      if (pendingKeep && !prev) {
+        // 다시 검색(rerun) 전에 보던 줄을 찾아 그대로 고른다
+        const k = pendingKeep;
+        pendingKeep = undefined;
+        const i = rows.findIndex((r) => r.label === k.label && r.right === k.right && r.kind === k.kind);
+        if (i >= 0) want = i;
+      }
+      if (want < 0 && pendingSelect !== undefined) {
         // "더 보기": 새로 불러온 첫 줄로 (먼저 온 partial 에도, 최종 결과에도 같은 자리)
         want = Math.min(pendingSelect, rows.length - 1);
         if (!m.partial) pendingSelect = undefined;
@@ -605,7 +623,11 @@
         const el = $results.querySelector('.row.selected');
         el && el.scrollIntoView({ block: 'nearest' });
       }
-      if (!m.partial) renderTiming(m);
+      renderTiming(m);
+      // 언어 서버(jar 클래스, TS·Vue 메서드 등) 결과는 기다리지 않고 도착하면 이어서 붙는다
+      if (m.lsPending) {
+        $timing.textContent = ($timing.textContent ? $timing.textContent + ' · ' : '') + '언어 서버 결과 기다리는 중…';
+      }
     }
   });
 

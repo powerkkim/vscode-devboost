@@ -118,6 +118,88 @@ test('변경이 너무 많으면(git checkout 등) 전체를 다시 만듦', { s
   assert.equal(idx.entries().length, before);
 });
 
+test('Java 메서드·필드 (2단계): 선언만 잡고 문장(return foo( 등)·지역 변수는 뺌, 소속 클래스 기록', { skip }, async () => {
+  const dir = makeProject({
+    'src/main/java/a/Svc.java': [
+      'package a;',
+      'public class Svc {',
+      '  private static final Logger log = LoggerFactory.getLogger(Svc.class);',
+      '  private final InfluxDBClient influxDBClient;',
+      '  @Bean',
+      '  public InfluxDBClient influxDBClient() {',
+      '    final int local = 1;',
+      '    String s = format(x);',
+      '    return create(url);',
+      '  }',
+      '  <T> List<T> load(Class<T> c) throws IOException {',
+      '    if (a) { foo(); } else if (b) { bar(); }',
+      '    throw fail("x");',
+      '  }',
+      '  public Svc(Repo r) {}',
+      '}',
+    ].join('\n'),
+    'src/main/java/a/Mapper.java': 'package a;\npublic interface Mapper {\n  List<Order> findAll(Long id);\n}\n',
+    'src/main/kotlin/K.kt': 'package k\nclass K {\n  fun hello(): String = ""\n}\n',
+    'web/x.ts': 'export class W {\n  public load(a: string) {}\n}\n',
+  });
+  try {
+    const idx = new ci.ClassIndex(RG);
+    await idx.ensure([dir], []);
+    assert.equal(idx.membersReady, false, '1단계(클래스)만 끝난 시점');
+    assert.ok(idx.classes().some((e) => e.name === 'Svc'));
+    for (let i = 0; i < 100 && !idx.membersReady; i++) await new Promise((r) => setTimeout(r, 20));
+    const m = idx.members().map((e) => `${e.kind}:${e.container}.${e.name}:${e.line}`).sort();
+    assert.deepEqual(m, [
+      'field:Svc.influxDBClient:3',
+      'field:Svc.log:2',
+      'method:K.hello:2',
+      'method:Mapper.findAll:2',
+      'method:Svc.influxDBClient:5',
+      'method:Svc.load:10',
+    ]);
+    assert.ok(idx.hasSymbol(path.join(dir, 'src/main/java/a/Svc.java'), 'influxDBClient'));
+  } finally {
+    removeProject(dir);
+  }
+});
+
+test('저장한 기존 파일은 그 파일만 다시 읽음 (메서드 추가 반영)', { skip }, async () => {
+  const dir = makeProject({ 'src/A.java': 'public class A {\n  void one() {}\n}\n' });
+  try {
+    const idx = new ci.ClassIndex(RG);
+    await idx.ensure([dir], []);
+    for (let i = 0; i < 100 && !idx.membersReady; i++) await new Promise((r) => setTimeout(r, 20));
+    fs.writeFileSync(path.join(dir, 'src/A.java'), 'public class A {\n  void one() {}\n  void two() {}\n}\n');
+    idx.queueUpdate(path.join(dir, 'src/A.java'));
+    await idx.flush();
+    assert.deepEqual(idx.members().map((e) => e.name).sort(), ['one', 'two']);
+  } finally {
+    removeProject(dir);
+  }
+});
+
+test('수식어 뒤 어노테이션(public @Nullable …)도 메서드·필드로 인식, 점 있는 새 폴더도 색인', { skip }, async () => {
+  const dir = makeProject({
+    'src/N.java': 'public class N {\n  public @Nullable String foo() { return null; }\n  private @Autowired Repo repo;\n}\n',
+  });
+  try {
+    const idx = new ci.ClassIndex(RG);
+    await idx.ensure([dir], []);
+    await idx.whenMembersDone();
+    assert.deepEqual(idx.members().map((e) => `${e.kind}:${e.name}`).sort(), ['field:repo', 'method:foo']);
+    fs.mkdirSync(path.join(dir, 'src/v1.2'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src/v1.2/B.java'), 'class B {\n  void bee() {}\n}\n');
+    idx.queueUpdate(path.join(dir, 'src/v1.2'));
+    await idx.flush();
+    assert.ok(idx.entries().some((e) => e.name === 'bee' && e.container === 'B'));
+    fs.rmSync(path.join(dir, 'src/v1.2'), { recursive: true });
+    idx.removeFile(path.join(dir, 'src/v1.2'));
+    assert.ok(!idx.entries().some((e) => e.name === 'B'));
+  } finally {
+    removeProject(dir);
+  }
+});
+
 test('rg 출력 파싱: Windows 경로의 ":" 와 패키지 순서', () => {
   const out = ['C:\\w\\A.java\u00001:com.a\t\t\t', 'C:\\w\\A.java\u00003:\t\tclass\tFoo', 'C:\\w\\B.kt\u00002:\tclass\t\tColor', ''].join('\n');
   const m = ci.parseClassOutput(out);
