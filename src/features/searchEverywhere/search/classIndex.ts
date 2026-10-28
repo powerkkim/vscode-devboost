@@ -8,7 +8,7 @@ import { rgCwd } from './ripgrep';
  * (vscode 모듈에 의존하지 않아서 단독 테스트가 가능하다)
  *
  * - 클래스·인터페이스·enum (Java·Kotlin·Groovy·Scala·TS·JS)
- * - 메서드·필드 (Java), fun (Kotlin) — Java 언어 서버는 기본 설정에서 워크스페이스 심볼로 타입만 주므로 직접 모은다
+ * - 메서드·필드 (Java), fun (Kotlin), 함수·메서드 (TS·JS·Vue)
  * - 처음 한 번 워크스페이스 전체를 rg 로 훑고, 이후에는 바뀐 파일만 다시 읽는다
  * - jar 안의 라이브러리 클래스는 없다 (소스가 프로젝트에 없음)
  */
@@ -30,7 +30,10 @@ export interface ClassEntry {
 }
 
 /** 색인할 파일 */
-export const CLASS_FILE_GLOBS = ['*.java', '*.kt', '*.groovy', '*.scala', '*.ts', '*.tsx', '*.mts', '*.js', '*.jsx', '*.mjs'];
+export const CLASS_FILE_GLOBS = ['*.java', '*.kt', '*.groovy', '*.scala', '*.ts', '*.tsx', '*.mts', '*.js', '*.jsx', '*.mjs', '*.vue'];
+
+/** TS·JS·Vue (함수·메서드를 JS 규칙으로 읽는 파일) */
+const JS_EXTS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs', '.vue']);
 
 /** 선언 앞에 올 수 있는 수식어 (Java·Kotlin·Scala·TS) */
 const MODS =
@@ -56,8 +59,23 @@ const MODS_ANN = (mods: string) => `(?:(?:${mods})\\s+|${ANN1})*`;
 const JTYPE = `([\\w.$]+(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?(?:\\[\\])*(?:\\.\\.\\.)?)`;
 
 /**
- * 메서드·필드 정규식 (Java, Kotlin fun). 클래스 선언 정규식 뒤에 이어 붙인다.
- *  $5 = Kotlin fun 이름, $6·$7 = Java 메서드 반환 타입·이름, $8·$9 = Java 필드 타입·이름
+ * TS·JS·Vue 함수·메서드. Java 규칙보다 앞에 둔다 (`async load() {` 를 Java 메서드 "async load(" 로 읽지 않게).
+ * Java·Kotlin 줄에는 맞지 않는 모양이고, 맞더라도 parseClassOutput 이 확장자로 걸러 쓴다.
+ *  $6 = function 이름, $7 = const·let·var 이름 = 화살표·function, $8 = 메서드 축약 `name(…) {`, $9 = 객체 속성 `name: function` / `name: () =>`
+ * `if (…) {` 같은 문장은 JS_NOT_A_NAME 으로 걸러낸다
+ */
+const JS_MEMBER_PATTERN =
+  `|^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)\\s*[<(]` +
+  `|^\\s*(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]+)?=>|[A-Za-z_$][\\w$]*\\s*=>)` +
+  `|^\\s*(?:(?:public|private|protected|static|async|override|get|set)\\s+)*\\*?([A-Za-z_$][\\w$]*)\\s*(?:<[^>]*>)?\\s*\\([^;]*\\)\\s*(?::\\s*[^{;]+)?\\{\\s*$` +
+  `|^\\s*([A-Za-z_$][\\w$]*)\\s*:\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*=>)`;
+
+/** JS 메서드 축약 규칙에 걸리지만 선언이 아닌 단어 */
+const JS_NOT_A_NAME = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'with', 'do', 'else', 'typeof', 'await', 'new', 'super', 'this']);
+
+/**
+ * 메서드·필드 정규식 (Java, Kotlin fun, TS·JS·Vue). 클래스 선언 정규식 뒤에 이어 붙인다.
+ *  $5 = Kotlin fun 이름, $6~$9 = TS·JS (위), $10·$11 = Java 메서드 반환 타입·이름, $12·$13 = Java 필드 타입·이름
  * - 메서드: [어노테이션][수식어][<T>] 타입 이름( — 이름은 소문자로 시작 (생성자 제외)
  *   `return foo(`, `else if (` 처럼 문장이 걸리는 경우는 타입 자리 단어로 걸러낸다 (parseClassOutput)
  * - 필드: public·protected·private·static 중 하나가 있어야 함 (메서드 안 지역 변수와 구분). 수식어 없는 필드는 놓친다
@@ -65,21 +83,22 @@ const JTYPE = `([\\w.$]+(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?(?:\\[\\])*(?:\\.
  */
 export const MEMBER_DECL_PATTERN =
   `|^\\s*${ANN}(?:(?:public|protected|private|internal|open|override|abstract|final|suspend|inline|operator|infix|tailrec|external|actual|expect)\\s+)*fun\\s+(?:<[^>]*>\\s*)?(?:[\\w.]+\\.)?([A-Za-z_]\\w*)\\s*\\(` +
+  JS_MEMBER_PATTERN +
   `|^\\s*${MODS_ANN('public|protected|private|static|final|abstract|synchronized|native|default|strictfp')}(?:<(?:[^<>]|<[^<>]*>)*>\\s+)?${MODS_ANN('final')}${JTYPE}\\s+([a-z_$][\\w$]*)\\s*\\(` +
   `|^\\s*${MODS_ANN('final|transient|volatile')}(?:public|protected|private|static)\\s+${MODS_ANN('public|protected|private|static|final|transient|volatile')}${JTYPE}\\s+([A-Za-z_$][\\w$]*)\\s*(?:=|;)`;
 
 /** 메서드 정규식의 "타입" 자리에 오면 선언이 아니라 문장인 단어 */
 const NOT_A_TYPE = new Set(['return', 'else', 'new', 'throw', 'case', 'yield', 'await', 'assert', 'do', 'try', 'if', 'for', 'while', 'switch', 'catch', 'synchronized', 'this', 'super', 'package', 'import', 'goto', 'instanceof']);
 
-/** rg 출력 한 줄의 치환 결과 → 탭으로 구분: 패키지, enum-class, 종류, 클래스 이름, Kotlin fun, 메서드 타입·이름, 필드 타입·이름 */
-const REPLACE = '$1\t$2\t$3\t$4\t$5\t$6\t$7\t$8\t$9';
+/** rg 출력 한 줄의 치환 결과 → 탭으로 구분: 패키지, enum-class, 종류, 클래스 이름, Kotlin fun, JS 4칸, Java 메서드 타입·이름, 필드 타입·이름 */
+const REPLACE = '$1\t$2\t$3\t$4\t$5\t$6\t$7\t$8\t$9\t${10}\t${11}\t${12}\t${13}';
 
 /**
  * onlyGlobs: 주면 확장자 목록 대신 이 경로들만 읽는다 (저장·생성된 파일 갱신용).
  * 파일을 rg 에 직접 넘기면 .gitignore·숨김 폴더 규칙이 적용되지 않으므로, 루트에서 경로 glob 으로 좁힌다.
  */
 /** 메서드·필드를 모으는 파일 (두 번째 단계) */
-export const MEMBER_FILE_GLOBS = ['*.java', '*.kt'];
+export const MEMBER_FILE_GLOBS = ['*.java', '*.kt', '*.ts', '*.tsx', '*.mts', '*.js', '*.jsx', '*.mjs', '*.vue'];
 
 /**
  * mode: 'classes' = 클래스 선언만 (모든 대상 확장자, 빠름) / 'all' = 클래스 + 메서드·필드
@@ -154,7 +173,7 @@ export function parseClassOutput(out: string): Map<string, ClassEntry[]> {
     const colon = rest.indexOf(':');
     if (colon < 0) continue;
     const line = Number(rest.slice(0, colon)) - 1;
-    const [pkg, enumClass, word, name, kfun, mtype, mname, , fname] = rest.slice(colon + 1).split('\t');
+    const [pkg, enumClass, word, name, kfun, jsFn, jsVar, jsMethod, jsProp, mtype, mname, , fname] = rest.slice(colon + 1).split('\t');
     if (pkg) {
       if (pkg !== 'object') pkgOf.set(file, intern(pkg)); // Scala `package object util` 은 패키지 선언이 아님
       continue;
@@ -166,14 +185,18 @@ export function parseClassOutput(out: string): Map<string, ClassEntry[]> {
       entry = { name: n, kind: enumClass ? 'enum' : kindOf(word), file, line, pkg: pkgOf.get(file) ?? '' };
     } else {
       const ext = path.extname(file).toLowerCase();
-      // 메서드·필드는 Java(·Kotlin fun) 만. 다른 언어의 메서드는 색인하지 않는다
+      // 규칙과 확장자가 맞는 것만 (Java 줄의 JS 모양, JS 줄의 Java 모양은 버림)
+      const js = JS_EXTS.has(ext) ? jsFn || jsVar || jsProp || (jsMethod && !JS_NOT_A_NAME.has(jsMethod) ? jsMethod : '') : '';
       const member: [string, MemberKind] | undefined =
-        kfun && ext === '.kt' ? [kfun, 'method']
+        js ? [js, 'method']
+        : kfun && ext === '.kt' ? [kfun, 'method']
         : mname && ext === '.java' && !NOT_A_TYPE.has(mtype) ? [mname, 'method']
         : fname && ext === '.java' ? [fname, 'field']
         : undefined;
       if (member) {
-        entry = { name: intern(member[0]), kind: member[1], container: classOf.get(file), file, line, pkg: pkgOf.get(file) ?? '' };
+        // 소속: 앞에 나온 클래스. 없으면(JS 함수·Vue 컴포넌트) 파일 이름
+        const container = classOf.get(file) ?? (JS_EXTS.has(ext) ? intern(path.basename(file, path.extname(file))) : undefined);
+        entry = { name: intern(member[0]), kind: member[1], container, file, line, pkg: pkgOf.get(file) ?? '' };
       }
     }
     if (!entry) continue;

@@ -206,3 +206,49 @@ test('rg 출력 파싱: Windows 경로의 ":" 와 패키지 순서', () => {
   const all = [...m.values()].flat().map((e) => `${e.kind}:${e.name}:${e.pkg}:${e.line}`);
   assert.deepEqual(all, ['class:Foo:com.a:2', 'enum:Color::1']);
 });
+
+test('TS·JS·Vue 함수·메서드: 선언은 잡고 if·호출은 버림, Java 줄은 그대로', { skip }, async () => {
+  const dir = makeProject({
+    'web/src/views/order/index.vue': [
+      '<template><div/></template>',
+      '<script>',
+      'export default {',
+      '  data() {',
+      '    return {}',
+      '  },',
+      '  methods: {',
+      '    async getList(query) {',
+      '      if (query) {',
+      '        this.load(query);',
+      '      }',
+      '      onMounted(() => {',
+      '      })',
+      '    },',
+      '    handleDelete: function (row) {',
+      '    },',
+      '  }',
+      '}',
+      '</script>',
+    ].join('\n'),
+    'web/src/api/order.ts': [
+      'export function listOrder(query: Q) {',
+      '}',
+      'export const delOrder = async (id: number): Promise<void> => {',
+      '}',
+      'class OrderStore {',
+      '  private refresh<T>(x: T): void {',
+      '  }',
+      '}',
+    ].join('\n'),
+    'src/main/java/A.java': 'public class A {\n  public void run() {\n    if (x) {\n    }\n  }\n}\n',
+  });
+  try {
+    const idx = new ci.ClassIndex(RG);
+    await idx.ensure([dir], []);
+    await idx.whenMembersDone();
+    const got = idx.members().map((e) => `${e.container}.${e.name}`).sort();
+    assert.deepEqual(got, ['A.run', 'OrderStore.refresh', 'index.data', 'index.getList', 'index.handleDelete', 'order.delOrder', 'order.listOrder']);
+  } finally {
+    removeProject(dir);
+  }
+});

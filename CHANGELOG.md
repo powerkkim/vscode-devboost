@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 - 2026-10-29
 - **Search Everywhere: 언어 서버를 쓰지 않음** — Java 언어 서버가 프로젝트를 불러오거나 빌드하는 동안 결과가 한참 뒤에 나오던 문제
   - 모든 탭이 ripgrep 으로 만든 색인(클래스·메서드·필드·Mapper)·파일 목록·텍스트로 바로 확정. 이름 중간 글자로도 찾음 (`Application` → `CoinworkApplication`)
-  - jar·JDK 안의 클래스, TS·Vue 메서드는 검색하지 않음 (jar 파일 이름은 파일 탭). 범위 *프로젝트 + 라이브러리* 는 library 설정 경로(vendor, *.min.js 등)를 포함하는 뜻으로
+  - jar·JDK 안의 클래스는 검색하지 않음 (jar 파일 이름은 파일 탭). 범위 *프로젝트 + 라이브러리* 는 library 설정 경로(vendor, *.min.js 등)를 포함하는 뜻으로
   - 창을 닫거나 숨기면 진행 중인 텍스트 검색을 바로 멈춤
-- **Java 메서드·필드 검색** (심볼 탭, 모두 탭): 직접 색인. 수식어 없는 필드(`Foo foo;`)는 제외. Kotlin `fun` 포함
+- **메서드 검색** (심볼 탭, 모두 탭): Java 메서드·필드, Kotlin `fun`, TS·JS·Vue 함수·메서드(`function`, 화살표 함수, 클래스·Options API 메서드, `name: function`)를 직접 색인. 수식어 없는 필드(`Foo foo;`)는 제외. Kotlin `fun` 포함
 - 색인은 검색 창을 열 때 미리 만들기 시작 (클래스 먼저, 메서드·필드는 이어서). 저장한 파일은 그 파일만 다시 읽음
 - 색인·파일 목록·텍스트 검색·파일 감시가 모두 설정 `devBoost.searchEverywhere.exclude` 를 따름. 제외 폴더(`target`·`bin`·`logs` 등)에서 파일이 생기거나 지워져도(빌드 중) 파일 목록을 다시 모으지 않음
 - **Mapper 탭** (새 탭, QuickPick 접두어 `m/`): MyBatis mapper XML 파일·SQL id(select·insert·update·delete·sql)와 Java mapper 인터페이스만 모아 검색. mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 골라 pom.xml·설정 XML 은 안 나옴. MyBatis DOCTYPE 만 있고 namespace 가 다음 줄에 있어도 인식. Java 는 `@Mapper`, XML namespace 와 같은 이름, 또는 이름이 `…Mapper` 인 인터페이스(@MapperScan)와 그 메서드. 같은 이름의 Java 메서드와 SQL id 는 나란히 나옴. 검색어가 비면 mapper 파일 목록
