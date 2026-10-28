@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
-import { SearchService, SearchItem, TabId } from '../search/searchService';
+import { SearchService, SearchItem, SearchResult, TabId } from '../search/searchService';
 import { SearchOptions, SCOPES, isScopeId } from '../search/scope';
 
 /**
@@ -44,6 +44,10 @@ export class WebviewSession {
   /** 보낸 결과 묶음 번호 → 항목. 먼저 보낸 결과(partial)를 보고 Enter 를 눌러도 화면의 그 줄이 열리도록 */
   private sent = new Map<number, SearchItem[]>();
   private seq = 0;
+  /** cancel() 마다 바뀌는 번호. 진행 중이던 검색은 이 번호가 달라지면 멈춘다 (latestRunId 는 그대로 둬서 화면의 결과는 계속 열 수 있게) */
+  private gen = 0;
+  /** 취소된 뒤 다시 보이면 검색을 새로 해야 함 */
+  private cancelled = false;
   private pendingInit: { tab: TabId; query: string } = { tab: 'all', query: '' };
   private openStartedAt = performance.now();
   private ready = false;
@@ -54,9 +58,28 @@ export class WebviewSession {
     private readonly host: SessionHost
   ) {}
 
+
+  /**
+   * 창이 닫히거나 숨겨질 때: 진행 중인 검색(rg)은 25ms 안에 멈춘다(isStale)
+   */
+  cancel(reason?: string) {
+    if (reason) this.service.logLine(`[검색] ${reason} → 진행 중 검색 중단`);
+    this.gen++;
+    this.cancelled = true;
+  }
+
+  /** 다시 보일 때: 취소된 상태였으면 화면에 같은 검색을 다시 하라고 알린다 (결과가 낡았거나 중간에 멈췄을 수 있음) */
+  resume() {
+    if (this.cancelled) {
+      this.cancelled = false;
+      this.post({ type: 'rerun' });
+    }
+  }
+
   /** 열기 명령: 화면이 준비됐으면 바로 init, 아니면 ready가 올 때 보낸다 */
   open(tab: TabId, query: string) {
     this.openStartedAt = performance.now();
+    this.service.warmUp(); // 입력하는 동안 클래스 색인·파일 목록을 미리 만든다 (이미 있으면 아무 일 없음)
     this.pendingInit = { tab, query };
     if (this.ready) {
       this.sendInit(0);
@@ -117,28 +140,34 @@ export class WebviewSession {
         if (m.options) {
           this.applyOptions(m.options);
         }
+        const runId = m.runId;
+        const gen = this.gen;
+        this.cancelled = false;
+        const isStale = () => this.latestRunId !== runId || this.gen !== gen;
         try {
-          const isStale = () => this.latestRunId !== m.runId;
-          // 언어 서버를 기다리는 동안 먼저 나온 결과를 보낸다 (partial). 같은 runId 로 최종 결과가 뒤따른다
-          const r = await this.service.searchTimed(m.tab, m.query, isStale, (p) => {
-            if (isStale()) return;
-            this.post({ type: 'results', runId: m.runId, seq: this.remember(p.items), query: m.query, rows: p.items.map(toRow), groups: p.groups, timings: p.timings, totalMs: p.totalMs, partial: true });
-          }, m.limit);
-          if (this.latestRunId !== m.runId) {
-            return; // 더 최신 검색이 있음
+          const r = await this.service.searchTimed(m.tab, m.query, isStale, m.limit);
+          if (isStale()) {
+            return; // 더 최신 검색이 있음 (또는 창이 닫힘)
+          }
+          const shown = r;
+          // 메서드·필드 색인이 아직 만들어지는 중이면, 다 되는 대로 같은 검색을 다시 하게 한다
+          if (r.indexIncomplete) {
+            void this.service.whenIndexComplete().then(() => {
+              if (this.latestRunId === runId && this.gen === gen) this.post({ type: 'rerun' });
+            });
           }
           this.post({
             type: 'results',
-            runId: m.runId,
-            seq: this.remember(r.items),
+            runId,
+            seq: this.remember(shown.items),
             query: m.query,
-            rows: r.items.map(toRow),
-            groups: r.groups,
-            timings: r.timings,
-            totalMs: r.totalMs,
+            rows: shown.items.map(toRow),
+            groups: shown.groups,
+            timings: shown.timings,
+            totalMs: shown.totalMs,
           });
         } catch (e) {
-          this.post({ type: 'results', runId: m.runId, query: m.query, rows: [], error: String(e) });
+          this.post({ type: 'results', runId, query: m.query, rows: [], error: String(e) });
         }
         break;
       }
@@ -148,6 +177,7 @@ export class WebviewSession {
         const column = this.host.targetColumn();
         // 결과를 실제로 열었을 때의 포함 경로만 최근 목록에 남긴다 (입력 중간값 제외)
         this.service.rememberInclude(this.service.options.paths.include);
+        this.cancel();
         this.host.close(); // 먼저 닫아야 원래 에디터 위치에 파일이 열린다
         if (item) {
           await this.service.open(item, column);
@@ -156,6 +186,7 @@ export class WebviewSession {
       }
 
       case 'close':
+        this.cancel('창 닫힘');
         this.host.close();
         break;
     }
@@ -200,7 +231,7 @@ export class WebviewSession {
     <div class="header">
       <div class="tabs" role="tablist" id="tabs"></div>
       <div class="controls" id="controls">
-        <select id="scope" class="ctl" title="검색 범위 (Alt+N: 프로젝트 ↔ 라이브러리 포함)"></select>
+        <select id="scope" class="ctl" title="검색 범위 (Alt+N: 테스트 제외 ↔ 라이브러리 포함)"></select>
         <input id="fileMask" class="ctl text-only" list="fileMaskList" placeholder="모든 파일 타입" title="파일 타입 (예: *.java, *.xml)" spellcheck="false">
         <datalist id="fileMaskList"></datalist>
         <button id="optCase" class="toggle text-only" title="대소문자 구분 (Alt+C)">Cc</button>
@@ -238,6 +269,7 @@ export function toRow(item: SearchItem): ResultRow {
   switch (item.kind) {
     case 'classes':
     case 'symbols':
+    case 'mappers':
       // description = 패키지/컨테이너, detail = 상대경로:줄
       return {
         ...base,

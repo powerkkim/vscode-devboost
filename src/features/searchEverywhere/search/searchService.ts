@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
-import { findRipgrep, runRipgrep, listFiles, splitGlobs, RgMatch, RG_MAX_PER_FILE } from './ripgrep';
+import { findRipgrep, findRipgrepOnPath, runRipgrep, listFiles, splitGlobs, RgMatch, RG_MAX_PER_FILE } from './ripgrep';
 import { GlobMatcher } from './glob';
 import {
   SearchOptions,
@@ -20,8 +20,9 @@ import {
 } from './scope';
 import { RecentFiles, gitChangedFiles } from './recent';
 import { ClassIndex, ClassEntry } from './classIndex';
+import { MapperIndex } from './mapperIndex';
 
-export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'actions' | 'text';
+export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'mappers' | 'actions' | 'text';
 export type ResultKind = Exclude<TabId, 'all'>;
 
 export interface SearchItem {
@@ -42,12 +43,12 @@ export interface SearchItem {
 
 /** 검색 단계 하나의 소요 시간 (속도 측정용) */
 export interface SearchTiming {
-  /** 단계 이름: 언어서버 / 파일 / 텍스트 / 액션 */
+  /** 단계 이름: 클래스 / 심볼 / Mapper / 파일 / 텍스트 / 액션 */
   part: string;
   ms: number;
   /** 이 단계에서 나온 결과 수 */
   count: number;
-  /** 추가 정보: 캐시 사용, rg/scan, 언어서버 원본 개수 등 */
+  /** 추가 정보: 색인 개수, rg/파일 직접 읽기 등 */
   note?: string;
 }
 
@@ -66,17 +67,12 @@ export interface SearchResult {
   /** 확장(Node) 쪽에서 검색에 걸린 전체 시간 */
   totalMs: number;
   groups: GroupCount[];
+  /** 메서드·필드 색인이 아직 만들어지는 중이라 결과에 빠졌을 수 있음 (whenIndexComplete 뒤 다시 검색) */
+  indexIncomplete?: boolean;
 }
 
 /** 하위 검색이 전체 개수를 알려 주는 통로 */
 type CountSink = (total: number, capped?: boolean) => void;
-
-const CLASS_KINDS = new Set<vscode.SymbolKind>([
-  vscode.SymbolKind.Class,
-  vscode.SymbolKind.Interface,
-  vscode.SymbolKind.Enum,
-  vscode.SymbolKind.Struct,
-]);
 
 const MAX_TEXT_FILE_SIZE = 1024 * 1024; // 1MB 넘는 파일은 텍스트 검색에서 제외
 /**
@@ -84,9 +80,6 @@ const MAX_TEXT_FILE_SIZE = 1024 * 1024; // 1MB 넘는 파일은 텍스트 검색
  * 흔한 단어도 이 정도는 금방 모인다(수십 ms). 끝까지 다 모으면 큰 프로젝트에서 1초 가까이 걸린다.
  */
 const TEXT_COLLECT_MAX = 2000;
-const SYMBOL_CACHE_MS = 5000; // 같은 검색어의 심볼 결과는 5초간 재사용 (탭 전환 시 재요청 방지)
-const SYMBOL_WAIT_MAX_MS = 3000; // 앞 언어 서버 요청을 기다리는 최대 시간
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function config() {
   return vscode.workspace.getConfiguration('devBoost.searchEverywhere');
@@ -101,6 +94,7 @@ function globSettings() {
   if (!globCache) {
     const c = config();
     globCache = {
+      // 검색에서 뺄 경로는 설정 devBoost.searchEverywhere.exclude 하나로 관리 (색인·파일 목록·텍스트·파일 감시 모두 이것을 따름)
       exclude: [...c.get<string[]>('exclude', []), ...splitGlobs(c.get<string>('excludeGlob'))],
       library: [...c.get<string[]>('library', []), ...c.get<string[]>('libraryGlobs', [])],
     };
@@ -113,7 +107,7 @@ function excludeGlobs(): string[] {
   return globSettings().exclude;
 }
 
-/** 라이브러리로 취급할 glob 목록 ("프로젝트 및 라이브러리" 범위에서만 보임). 예전 libraryGlobs도 합친다 */
+/** 라이브러리로 취급할 glob 목록 ("프로젝트 + 라이브러리" 범위에서만 보임). 예전 libraryGlobs도 합친다 */
 function libraryGlobs(): string[] {
   return globSettings().library;
 }
@@ -127,7 +121,7 @@ export class SearchService implements vscode.Disposable {
     return this.options.scope === 'projectAndLibs';
   }
   set includeNonProject(v: boolean) {
-    this.options = { ...this.options, scope: v ? 'projectAndLibs' : 'project' };
+    this.options = { ...this.options, scope: v ? 'projectAndLibs' : 'production' };
   }
 
   private readonly recent: RecentFiles;
@@ -136,12 +130,10 @@ export class SearchService implements vscode.Disposable {
 
   private fileCache: vscode.Uri[] | undefined;
   private fileCachePromise: Promise<vscode.Uri[]> | undefined;
-  /** done=false 인 동안(응답 대기 중)은 시간과 상관없이 같은 검색어에 재사용 */
-  private symbolCache: { key: string; time: number; done: boolean; promise: Promise<vscode.SymbolInformation[]> } | undefined;
-  /** 언어 서버에 보낸 요청이 끝나기 전에는 새 요청을 보내지 않는다 (요청이 언어 서버 안에 쌓이지 않게) */
-  private symbolInFlight: Promise<unknown> | undefined;
-  /** rg 로 만든 프로젝트 클래스 색인. rg 를 못 찾으면 null → 언어 서버만 쓴다 */
+  /** rg 로 만든 프로젝트 클래스·메서드·필드 색인. rg 를 못 찾으면 null (클래스·심볼 탭이 비고 출력 패널에 이유) */
   private classIndex: ClassIndex | null | undefined;
+  /** MyBatis mapper 색인 (Mapper 탭). rg 를 못 찾으면 null */
+  private mapperIndex: MapperIndex | null | undefined;
   // 설정 배열이 바뀔 때(globCache 를 비울 때)만 새로 만든다 — 배열 자체를 키로 비교
   private libraryMatcher: { key: string[]; matcher: GlobMatcher } | undefined;
   private excludeMatcher: { key: string[]; matcher: GlobMatcher } | undefined;
@@ -153,9 +145,6 @@ export class SearchService implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
 
   // 속도 측정용: 마지막 심볼/텍스트 검색의 부가 정보
-  private lastSymbolCacheHit = false;
-  private lastSymbolRawCount = 0;
-  private lastSymbolSkipped = false;
   private lastClassNote: string | undefined;
   private lastTextEngine: 'rg' | 'scan' = 'scan';
   /** 출력 패널 "DevBoost" 채널 (속도 기록) */
@@ -172,19 +161,31 @@ export class SearchService implements vscode.Disposable {
       this.fileCache = undefined;
       this.fileCachePromise = undefined;
     };
+    // target·node_modules 같은 제외 폴더의 변경은 무시 (빌드 중 파일이 계속 생기면 입력할 때마다 파일 목록을 다시 모으게 됨)
     watcher.onDidCreate((u) => {
+      if (this.isExcluded(u)) return;
       invalidate();
       this.indexFileChanged(u);
     });
     watcher.onDidDelete((u) => {
+      if (this.isExcluded(u)) return;
       invalidate();
-      if (u.scheme === 'file') this.classIndex?.removeFile(u.fsPath);
+      if (u.scheme === 'file') {
+        this.classIndex?.removeFile(u.fsPath);
+        this.mapperIndex?.removeFile(u.fsPath);
+      }
     });
     watcher.onDidChange((u) => this.indexFileChanged(u));
     this.disposables.push(watcher);
     // 제외 설정·워크스페이스 폴더가 바뀌면 파일 목록을 다시 모은다 (클래스 색인은 ensure 의 키로 알아서 다시 만든다)
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('devBoost.searchEverywhere.ripgrepPath') && this.rgPath === null) {
+          // rg 를 못 찾았던 상태에서 경로를 넣으면 다음 검색부터 색인을 쓴다
+          this.rgPath = undefined;
+          this.classIndex = undefined;
+          this.mapperIndex = undefined;
+        }
         if (e.affectsConfiguration('devBoost.searchEverywhere')) {
           globCache = undefined;
           invalidate();
@@ -203,40 +204,33 @@ export class SearchService implements vscode.Disposable {
   }
 
   /** isStale(): 더 새로운 검색이 시작됐으면 true → 긴 작업(텍스트 검색)을 중간에 멈춘다 */
-  async search(
-    tab: TabId,
-    query: string,
-    isStale: () => boolean = () => false,
-    onPartial?: (items: SearchItem[]) => void,
-    limit?: number
-  ): Promise<SearchItem[]> {
-    return (await this.searchTimed(tab, query, isStale, onPartial && ((r) => onPartial(r.items)), limit)).items;
+  async search(tab: TabId, query: string, isStale: () => boolean = () => false, limit?: number): Promise<SearchItem[]> {
+    return (await this.searchTimed(tab, query, isStale, limit)).items;
+  }
+
+  /** 출력 패널 DevBoost 채널에 시각과 함께 한 줄 */
+  logLine(msg: string) {
+    this.log.appendLine(`[${new Date().toLocaleTimeString()}] ${msg}`);
   }
 
   /**
-   * search()와 같지만 단계별 소요 시간을 함께 돌려준다 (속도 측정).
-   * onPartial: 언어 서버를 기다리는 탭에서, 먼저 나온 결과(클래스 색인·파일·텍스트)를 미리 받는다.
+   * 검색. 언어 서버를 쓰지 않는다 (rg 색인·파일 목록·텍스트). 단계별 소요 시간을 함께 돌려준다.
+   * - 클래스·메서드·필드: rg 색인 / 파일: rg 파일 목록 / 텍스트: rg
    * limit: 한 탭에서 보여 줄 개수 ("더 보기"로 늘어남). 기본은 maxResults 설정
    */
-  async searchTimed(
-    tab: TabId,
-    query: string,
-    isStale: () => boolean = () => false,
-    onPartial?: (r: SearchResult) => void,
-    limit?: number
-  ): Promise<SearchResult> {
+  async searchTimed(tab: TabId, query: string, isStale: () => boolean = () => false, limit?: number): Promise<SearchResult> {
     const start = performance.now();
     const timings: SearchTiming[] = [];
     const max = Math.max(1, limit ?? this.max);
     /** 종류별 전체 개수 */
     const totals = new Map<ResultKind, { total: number; capped?: boolean }>();
     const sink = (kind: ResultKind): CountSink => (total, capped) => totals.set(kind, { total, capped });
-    const groupsOf = (items: SearchItem[]): GroupCount[] => {
+    const groupsOf = (items: SearchItem[], tot = totals): GroupCount[] => {
       const shown = new Map<ResultKind, number>();
       items.forEach((i) => shown.set(i.kind, (shown.get(i.kind) ?? 0) + 1));
-      const kinds = [...new Set([...items.map((i) => i.kind), ...totals.keys()])];
+      const kinds = [...new Set([...items.map((i) => i.kind), ...tot.keys()])];
       return kinds.map((kind) => {
-        const t = totals.get(kind);
+        const t = tot.get(kind);
         const n = shown.get(kind) ?? 0;
         return { kind, shown: n, total: Math.max(t?.total ?? n, n), capped: t?.capped };
       });
@@ -253,53 +247,30 @@ export class SearchService implements vscode.Disposable {
       timings.push({ part, ms: Math.round(performance.now() - t0), count: r?.length ?? 0, note: note?.() });
       return r;
     };
-    const symbolNote = () =>
-      this.lastSymbolCacheHit ? '캐시' : this.lastSymbolSkipped ? '건너뜀' : `원본 ${this.lastSymbolRawCount}개`;
     const textNote = () => (this.lastTextEngine === 'rg' ? 'ripgrep' : '파일 직접 읽기');
     const classNote = () => this.lastClassNote;
-    const partial = (items: SearchItem[]) => {
-      if (onPartial && !isStale()) {
-        onPartial({ items, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(items) });
-      }
-    };
+
     let items: SearchItem[];
     switch (tab) {
       case 'classes': {
+        // 클래스는 rg 색인 (rg 를 못 찾으면 비어 있음, 출력 패널에 이유)
         let indexedTotal = 0;
-        const indexed = await measure('클래스', () => this.searchClassesIndexed(query, max, (t) => (indexedTotal = t), isStale), classNote);
-        if (indexed === undefined) {
-          // rg 가 없으면 예전처럼 언어 서버
-          const symbols = await measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
-          const all = toSymbolItems(symbols.filter(isClass), 'classes');
-          totals.set('classes', { total: all.length });
-          items = all.slice(0, max);
-        } else if (query) {
-          // 색인 결과를 먼저 보여 주고, 언어 서버만 아는 클래스(jar·JDK, 색인하지 않는 언어, gitignore 된 생성 소스)를 뒤에 붙인다
-          totals.set('classes', { total: indexedTotal });
-          partial(indexed);
-          const symbols = await measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
-          const more = toSymbolItems(symbols.filter((s) => isClass(s) && !this.inClassIndex(s)), 'classes');
-          totals.set('classes', { total: indexedTotal + more.length });
-          items = [...indexed, ...more].slice(0, max);
-        } else {
-          totals.set('classes', { total: indexedTotal });
-          items = indexed;
-        }
+        const indexed = await measure('클래스', () => this.searchIndexed('classes', query, max, (t) => (indexedTotal = t), isStale), classNote);
+        items = indexed ?? [];
+        totals.set('classes', { total: indexedTotal });
         break;
       }
       case 'symbols': {
-        // IntelliJ 심볼 탭처럼 클래스도 포함. 색인의 클래스를 먼저 보여 주고 언어 서버 결과로 바꾼다
-        const indexed = await measure('클래스', () => this.searchClassesIndexed(query, max, undefined, isStale), classNote);
-        if (indexed?.length) partial(indexed.map((x) => ({ ...x, kind: 'symbols' as const })));
-        const symbols = await measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
-        const fromLs = toSymbolItems(symbols, 'symbols');
-        // 언어 서버가 아직 준비 전이라 빠진 프로젝트 클래스는 색인으로 채운다
-        const known = new Set(fromLs.map(itemKey));
-        const extra = (indexed ?? []).filter((x) => !known.has(itemKey(x))).map((x) => ({ ...x, kind: 'symbols' as const }));
-        totals.set('symbols', { total: fromLs.length + extra.length });
-        items = [...fromLs, ...extra].slice(0, max);
+        // 클래스·메서드·필드 색인 (메서드·필드는 Java·Kotlin)
+        let indexedTotal = 0;
+        const indexed = await measure('심볼', () => this.searchIndexed('all', query, max, (t) => (indexedTotal = t), isStale), classNote);
+        items = indexed ?? [];
+        totals.set('symbols', { total: indexedTotal });
         break;
       }
+      case 'mappers':
+        items = await measure('Mapper', () => this.searchMappers(query, max, sink('mappers'), isStale));
+        break;
       case 'files':
         items = await measure('파일', () => this.searchFiles(query, max, sink('files')));
         break;
@@ -310,12 +281,13 @@ export class SearchService implements vscode.Disposable {
         items = await measure('텍스트', () => this.searchText(query, max, isStale, sink('text')), textNote);
         break;
       case 'all': {
-        // 클래스는 색인에서, 메서드·필드 같은 나머지 심볼만 언어 서버에서. 액션은 '모두'에서 제외 (잡음)
+        // 클래스·메서드·필드는 색인, 파일·텍스트는 rg. 액션은 '모두'에서 제외 (잡음)
         const per = Math.max(5, Math.floor(this.max / 3));
-        const symbolsP = measure('언어서버', () => this.querySymbols(query, isStale), symbolNote);
-        symbolsP.catch(() => undefined); // 아래에서 기다린다 (먼저 실패해도 처리되지 않은 거부로 남지 않게)
-        const [indexed, files, text] = await Promise.all([
-          measure('클래스', () => this.searchClassesIndexed(query, per, sink('classes'), isStale), classNote),
+        let classTotal = 0;
+        let memberTotal = 0;
+        const [indexed, members, files, text] = await Promise.all([
+          measure('클래스', () => this.searchIndexed('classes', query, per, (t) => (classTotal = t), isStale), classNote),
+          measure('심볼', () => this.searchIndexed('members', query, per, (t) => (memberTotal = t), isStale)),
           measure('파일', () => this.searchFiles(query, per, sink('files'))),
           query.length >= 3
             ? measure('텍스트', () => this.searchText(query, per, isStale, sink('text')), textNote)
@@ -327,23 +299,9 @@ export class SearchService implements vscode.Disposable {
           ...others.slice(0, per),
           ...text.slice(0, per),
         ];
-        if (indexed !== undefined) partial(combine(indexed, []));
-        const symbols = await symbolsP;
-        let classes: SearchItem[];
-        if (indexed === undefined) {
-          classes = toSymbolItems(symbols.filter(isClass), 'classes');
-          totals.set('classes', { total: classes.length });
-        } else {
-          const more = toSymbolItems(symbols.filter((s) => isClass(s) && !this.inClassIndex(s)), 'classes');
-          classes = [...indexed, ...more];
-          totals.set('classes', { total: (totals.get('classes')?.total ?? indexed.length) + more.length });
-        }
-        const others = toSymbolItems(
-          symbols.filter((s) => !isClass(s)),
-          'symbols'
-        );
-        totals.set('symbols', { total: others.length });
-        items = combine(classes, others);
+        totals.set('classes', { total: classTotal });
+        totals.set('symbols', { total: memberTotal });
+        items = combine(indexed ?? [], members ?? []);
         break;
       }
     }
@@ -361,7 +319,11 @@ export class SearchService implements vscode.Disposable {
           ` → ${parts} | 전체 ${totalMs}ms`
       );
     }
-    return { items, timings, totalMs, groups: groupsOf(items) };
+    const result: SearchResult = { items, timings, totalMs, groups: groupsOf(items) };
+    if ((tab === 'symbols' || tab === 'all' || tab === 'mappers') && query && this.classIndex?.ready && !this.classIndex.membersReady) {
+      result.indexIncomplete = true;
+    }
+    return result;
   }
 
   /** 선택된 항목 열기/실행 */
@@ -524,7 +486,8 @@ export class SearchService implements vscode.Disposable {
         return Promise.resolve(vscode.workspace.findFiles('**/*', exclude, 20000));
       };
       const p: Promise<vscode.Uri[]> = (rg && roots.length
-        ? listFiles(rg, roots, globs).then((paths) => paths.map((f) => vscode.Uri.file(f)))
+        ? // rg 는 여러 스레드로 훑어 순서가 매번 달라서, 같은 점수의 파일이 항상 같은 순서로 나오게 경로순으로 정렬
+          listFiles(rg, roots, globs).then((paths) => paths.sort().map((f) => vscode.Uri.file(f)))
         : viaFindFiles()
       )
         .catch((e) => {
@@ -566,114 +529,46 @@ export class SearchService implements vscode.Disposable {
 
   // ─────────────────── 클래스 / 심볼 ───────────────────
 
-  /**
-   * 언어 서버에 심볼을 한 번만 요청하고 (5초 캐시), 범위 필터·중복 제거·정렬까지 끝낸 목록을 돌려준다.
-   * 클래스 탭, 심볼 탭, 모두 탭이 이 결과를 같이 쓴다.
-   */
-  private async querySymbols(query: string, isStale: () => boolean = () => false): Promise<vscode.SymbolInformation[]> {
-    this.lastSymbolSkipped = false;
-    // 빈 쿼리는 workspace symbol provider가 아무것도 돌려주지 않는 경우가 많다
-    if (!query) {
-      return [];
-    }
-    // 앞 요청이 끝날 때까지 기다린다. 그사이 더 새 검색이 시작됐으면 이 요청은 보내지 않는다
-    // (글자마다 요청하면 언어 서버 안에 요청이 줄줄이 쌓여 마지막 검색어의 결과가 늦게 온다)
-    const waitStart = Date.now();
-    while (this.symbolInFlight && !this.symbolCacheFor(query) && Date.now() - waitStart < SYMBOL_WAIT_MAX_MS) {
-      // 앞 요청이 끝나지 않아도(언어 서버가 멈춤 등) 일정 시간 뒤에는 그냥 보낸다
-      await Promise.race([this.symbolInFlight.catch(() => undefined), sleep(SYMBOL_WAIT_MAX_MS)]);
-      if (isStale()) {
-        this.lastSymbolSkipped = true;
-        return [];
-      }
-    }
-    return this.querySymbolsNow(query);
-  }
-
-  /** 같은 검색어의 결과(또는 진행 중인 요청)가 캐시에 있으면 그 Promise */
-  private symbolCacheFor(query: string): Promise<vscode.SymbolInformation[]> | undefined {
-    const c = this.symbolCache;
-    return c && c.key === this.symbolKey(query) && (!c.done || Date.now() - c.time < SYMBOL_CACHE_MS) ? c.promise : undefined;
-  }
-
-  private symbolKey(query: string): string {
-    return `${query}\u0000${this.options.scope}\u0000${JSON.stringify([libraryGlobs(), excludeGlobs(), this.options.paths])}`;
-  }
-
-  private querySymbolsNow(query: string): Promise<vscode.SymbolInformation[]> {
-    const key = this.symbolKey(query);
-    const now = Date.now();
-    const cached = this.symbolCacheFor(query);
-    if (cached) {
-      this.lastSymbolCacheHit = true;
-      return cached;
-    }
-    this.lastSymbolCacheHit = false;
-    const promise = this.fetchSymbols(query);
-    this.symbolCache = { key, time: now, done: false, promise };
-    promise.catch(() => {
-      if (this.symbolCache?.promise === promise) this.symbolCache = undefined;
-    });
-    this.symbolInFlight = promise;
-    const clear = () => {
-      if (this.symbolInFlight === promise) this.symbolInFlight = undefined;
-    };
-    promise.then(() => {
-      // 캐시 유효 시간은 응답을 받은 때부터 (언어 서버가 오래 걸렸어도 탭 전환 때 같은 요청을 또 보내지 않게)
-      if (this.symbolCache?.promise === promise) {
-        this.symbolCache.time = Date.now();
-        this.symbolCache.done = true;
-      }
-      clear();
-    }, clear);
-    return promise;
-  }
-
-  private async fetchSymbols(query: string): Promise<vscode.SymbolInformation[]> {
-    const raw =
-      (await vscode.commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeWorkspaceSymbolProvider', query)) ??
-      [];
-    this.lastSymbolRawCount = raw.length;
-
-    const changed = (await this.getChanged()).set;
-    const seen = new Set<string>();
-    const scored: { s: vscode.SymbolInformation; score: number }[] = [];
-    for (const s of raw) {
-      // exclude(target, node_modules 등)는 어떤 범위에서도 제외
-      if (this.isExcluded(s.location.uri)) {
-        continue;
-      }
-      // 화면의 포함/제외 경로
-      if (!this.pathAccepts(s.location.uri)) {
-        continue;
-      }
-      const lib = this.isLibrary(s.location.uri);
-      // 범위 적용: 기본(프로젝트 파일)은 jar/JDK/.m2/vendor 제외
-      if (!scopeAccepts(this.options.scope, this.facts(s.location.uri, changed))) {
-        continue;
-      }
-      // 같은 라이브러리 클래스가 jar 경로 / 소스 jar 경로로 두 번 오는 것 제거
-      const dedupeKey = isInProject(s.location.uri)
-        ? `${s.location.uri.toString()}#${s.name}#${s.location.range.start.line}`
-        : `lib#${s.kind}#${s.containerName}#${s.name}`;
-      if (seen.has(dedupeKey)) {
-        continue;
-      }
-      seen.add(dedupeKey);
-      // 언어 서버마다 매칭 규칙이 달라 우리 점수가 -1이어도 버리지 않고 뒤로만 보낸다
-      const score = Math.max(fuzzyScore(query, s.name), -20) + (lib ? -40 : 0);
-      scored.push({ s, score });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map((x) => x.s);
-  }
-
   // ─────────────────── 클래스 색인 (rg) ───────────────────
+
+  /**
+   * 검색 창을 열 때 부른다: 클래스 색인(메서드·필드는 이어서)과 파일 목록을 백그라운드로 미리 만든다.
+   * 사용자가 검색어를 치는 동안 대부분 끝나서 첫 검색도 바로 나온다. 이미 있으면 아무 일도 하지 않는다.
+   * (VS Code 시작 때 만들지 않는 이유: 다른 확장이 프로젝트를 불러오는 동안 디스크·CPU 를 나눠 쓰게 됨)
+   */
+  /** 메서드·필드 색인이 끝날 때 (색인이 없거나 이미 끝났으면 바로) */
+  whenIndexComplete(): Promise<void> {
+    return this.classIndex ? this.classIndex.whenMembersDone() : Promise.resolve();
+  }
+
+  warmUp() {
+    const idx = this.getClassIndex();
+    const roots = this.fileRoots();
+    if (idx && roots.length) {
+      idx.ensure(roots, excludeGlobs()).catch(() => undefined);
+    }
+    void this.getFiles().catch(() => undefined);
+    // mapper 색인은 클래스 색인이 끝난 뒤 (디스크를 동시에 훑지 않게)
+    const mi = this.getMapperIndex();
+    if (idx && mi && roots.length) {
+      void idx.whenMembersDone().then(() => mi.ensure(this.fileRoots(), excludeGlobs()).catch(() => undefined));
+    }
+  }
+
+  private getMapperIndex(): MapperIndex | undefined {
+    if (this.mapperIndex === undefined) {
+      const rg = this.getRipgrep();
+      this.mapperIndex = rg ? new MapperIndex(rg) : null;
+      if (this.mapperIndex) this.mapperIndex.onLog = (m) => this.logLine(m);
+    }
+    return this.mapperIndex ?? undefined;
+  }
 
   private getClassIndex(): ClassIndex | undefined {
     if (this.classIndex === undefined) {
       const rg = this.getRipgrep();
       this.classIndex = rg ? new ClassIndex(rg) : null;
+      if (this.classIndex) this.classIndex.onLog = (m) => this.logLine(m);
     }
     return this.classIndex ?? undefined;
   }
@@ -684,21 +579,22 @@ export class SearchService implements vscode.Disposable {
 
   /** 파일이 생기거나 저장되면 그 파일의 클래스만 다시 읽는다 */
   private indexFileChanged(uri: vscode.Uri) {
-    if (uri.scheme !== 'file' || !this.classIndex || this.isExcluded(uri)) return;
+    if (uri.scheme !== 'file' || this.isExcluded(uri)) return;
     // 모았다가 처리. .gitignore·숨김 폴더는 rg 가 루트에서 걸러 준다
-    this.classIndex.queueUpdate(uri.fsPath);
-  }
-
-  /** 언어 서버 결과 중 색인에 이미 있는 클래스인가 (같은 파일·같은 이름) */
-  private inClassIndex(s: vscode.SymbolInformation): boolean {
-    return s.location.uri.scheme === 'file' && !!this.classIndex?.has(s.location.uri.fsPath, s.name);
+    this.classIndex?.queueUpdate(uri.fsPath);
+    this.mapperIndex?.queueUpdate(uri.fsPath);
   }
 
   /**
    * 프로젝트 클래스를 색인에서 찾는다. 범위·포함/제외 경로는 다른 탭과 같은 규칙.
-   * rg 를 못 쓰면 undefined (→ 언어 서버로 대체)
+   * rg 를 못 쓰면 undefined
    */
-  private async searchClassesIndexed(
+  /**
+   * 색인에서 찾는다. which: 'classes' = 클래스 탭, 'members' = 메서드·필드(모두 탭), 'all' = 클래스+메서드·필드(심볼 탭).
+   * 범위·포함/제외 경로는 다른 탭과 같은 규칙. rg 를 못 쓰면 undefined
+   */
+  private async searchIndexed(
+    which: 'classes' | 'members' | 'all',
     query: string,
     limit: number,
     count?: CountSink,
@@ -720,19 +616,35 @@ export class SearchService implements vscode.Disposable {
     try {
       await idx.ensure(roots, excludeGlobs());
     } catch (e) {
-      // 이번 검색만 언어 서버로. 색인은 다음 검색 때 다시 만들어 본다
-      this.log.appendLine(`[경고] 클래스 색인 실패, 언어 서버로 대체: ${e}`);
+      // 색인은 다음 검색 때 다시 만들어 본다
+      this.log.appendLine(`[경고] 클래스 색인 실패: ${e}`);
       return undefined;
     }
     if (isStale()) {
       return []; // 색인을 기다리는 동안 더 새 검색이 시작됨
     }
-    const all = idx.entries();
-    this.lastClassNote = wasReady ? `색인 ${all.length}개` : `색인 만듦 ${all.length}개 ${idx.lastBuildMs}ms`;
+    const all = which === 'classes' ? idx.classes() : which === 'members' ? idx.members() : idx.entries();
+    if (which === 'classes') {
+      this.lastClassNote = wasReady ? `색인 ${all.length}개` : `색인 만듦 ${all.length}개 ${idx.lastBuildMs}ms`;
+    }
 
-    // 이름 점수로 먼저 고르고 정렬한 뒤, 범위 필터는 위에서부터 필요한 만큼만 확인한다
+    // 이름 점수로 먼저 고르고 정렬한 뒤, 범위 필터는 위에서부터 필요한 만큼만 확인한다.
+    // 메서드까지 수만~수십만 개라, 글자가 순서대로 들어 있는지 소문자 이름으로 먼저 걸러 점수 계산을 줄인다
+    const q = query.toLowerCase();
     const cands: { e: ClassEntry; score: number }[] = [];
     for (const e of all) {
+      const lc = this.lowerName(e.name);
+      let ti = 0;
+      let ok = true;
+      for (let qi = 0; qi < q.length; qi++) {
+        const f = lc.indexOf(q[qi], ti);
+        if (f < 0) {
+          ok = false;
+          break;
+        }
+        ti = f + 1;
+      }
+      if (!ok) continue;
       const score = fuzzyScore(query, e.name);
       if (score >= 0) cands.push({ e, score });
     }
@@ -763,19 +675,150 @@ export class SearchService implements vscode.Disposable {
       total++;
       if (out.length >= limit) continue;
       const uri = vscode.Uri.file(e.file);
+      const isMember = e.kind === 'method' || e.kind === 'field';
       out.push({
-        kind: 'classes',
+        kind: which === 'classes' ? 'classes' : 'symbols',
         label: e.name,
-        description: e.pkg || undefined,
+        // 클래스는 패키지, 메서드·필드는 소속 클래스
+        description: (isMember ? e.container : e.pkg) || undefined,
         detail: `${vscode.workspace.asRelativePath(uri)}:${e.line + 1}`,
-        icon: e.kind === 'interface' ? 'symbol-interface' : e.kind === 'enum' ? 'symbol-enum' : 'symbol-class',
+        icon:
+          e.kind === 'method' ? 'symbol-method'
+          : e.kind === 'field' ? 'symbol-field'
+          : e.kind === 'interface' ? 'symbol-interface'
+          : e.kind === 'enum' ? 'symbol-enum'
+          : 'symbol-class',
         uri,
         range: new vscode.Range(e.line, 0, e.line, 0),
         selectName: true,
       });
     }
     count?.(total);
+    if (cands.length && !total) {
+      // 이름은 맞는데 모두 빠짐: 왜 빠졌는지 첫 번째 것으로 기록 (경로·범위 판정 문제를 찾기 위해)
+      const u = vscode.Uri.file(cands[0].e.file);
+      const f = this.facts(u, changed);
+      this.logLine(
+        `[색인] "${query}" 이름이 맞는 ${cands.length}개가 모두 범위에서 빠짐. 예: ${cands[0].e.file} → ` +
+          `제외설정=${this.isExcluded(u)} 포함/제외경로=${!this.pathAccepts(u)} 프로젝트안=${f.inProject} 라이브러리=${f.isLibrary} 상대경로=${f.relPath} 범위=${this.options.scope}`
+      );
+    }
     return out;
+  }
+
+  /**
+   * Mapper 탭: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스.
+   * mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 고르고, Java 는 @Mapper 이거나 XML namespace 와 같은 이름의 클래스.
+   * 검색어가 비어 있으면 mapper 파일 목록 (SQL id 제외)
+   */
+  private async searchMappers(query: string, limit: number, count?: CountSink, isStale: () => boolean = () => false): Promise<SearchItem[]> {
+    const mi = this.getMapperIndex();
+    const roots = this.fileRoots();
+    if (!mi || !roots.length) {
+      count?.(0);
+      return [];
+    }
+    const ci = this.getClassIndex();
+    try {
+      await Promise.all([mi.ensure(roots, excludeGlobs()), ci?.ensure(roots, excludeGlobs())]);
+    } catch (e) {
+      this.log.appendLine(`[경고] mapper 검색 실패: ${e}`);
+      return [];
+    }
+    if (isStale()) return [];
+
+    type Cand = { kind: 'xml' | 'statement' | 'java' | 'method'; name: string; file: string; line: number; desc: string; statement?: string };
+    const cands: Cand[] = [];
+    for (const e of mi.entries()) {
+      if (e.kind === 'statement' && !query) continue;
+      const shortNs = e.namespace.slice(e.namespace.lastIndexOf('.') + 1);
+      cands.push({
+        kind: e.kind,
+        name: e.name,
+        file: e.file,
+        line: e.line,
+        desc: e.kind === 'statement' ? `${shortNs || path.basename(e.file, path.extname(e.file))}.xml · ${e.statement}` : e.namespace,
+        statement: e.statement,
+      });
+    }
+    if (ci) {
+      // Java mapper: @Mapper, mapper XML namespace 와 같은 이름, 또는 이름이 …Mapper 인 인터페이스 (@MapperScan 으로 등록하는 경우)
+      const ns = mi.namespaces();
+      const mapperFiles = new Map<string, string>(); // 파일 → 인터페이스 이름
+      for (const c of ci.classes()) {
+        if (!c.file.toLowerCase().endsWith('.java')) continue;
+        if (mi.isAnnotated(c.file) || ns.has(c.pkg ? `${c.pkg}.${c.name}` : c.name) || (c.kind === 'interface' && c.name.endsWith('Mapper'))) {
+          cands.push({ kind: 'java', name: c.name, file: c.file, line: c.line, desc: c.pkg });
+          mapperFiles.set(c.file, c.name);
+        }
+      }
+      // 그 인터페이스의 메서드 (검색어가 있을 때만, SQL id 와 같은 이름이면 나란히 나옴)
+      if (query && mapperFiles.size) {
+        for (const m of ci.members()) {
+          if (m.kind !== 'method') continue;
+          const owner = mapperFiles.get(m.file);
+          if (owner === undefined) continue;
+          cands.push({ kind: 'method', name: m.name, file: m.file, line: m.line, desc: `${m.container || owner}.java` });
+        }
+      }
+    }
+
+    const order = { java: 0, xml: 1, method: 2, statement: 3 };
+    const scored = cands
+      .map((c) => ({ c, score: query ? fuzzyScore(query, c.kind === 'xml' ? c.name.replace(/\.xml$/i, '') : c.name) : 0 }))
+      .filter((x) => x.score >= 0);
+    scored.sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.c.name.length - b.c.name.length ||
+        (a.c.name < b.c.name ? -1 : a.c.name > b.c.name ? 1 : 0) ||
+        order[a.c.kind] - order[b.c.kind] ||
+        (a.c.file < b.c.file ? -1 : a.c.file > b.c.file ? 1 : a.c.line - b.c.line)
+    );
+    const changed = (await this.getChanged()).set;
+    if (isStale()) return [];
+    const fileOk = this.classFileOkCache();
+    const out: SearchItem[] = [];
+    let total = 0;
+    for (const { c } of scored) {
+      let ok = fileOk.get(c.file);
+      if (ok === undefined) {
+        const u = vscode.Uri.file(c.file);
+        ok = !this.isExcluded(u) && this.pathAccepts(u) && scopeAccepts(this.options.scope, this.facts(u, changed));
+        fileOk.set(c.file, ok);
+      }
+      if (!ok) continue;
+      total++;
+      if (out.length >= limit) continue;
+      const uri = vscode.Uri.file(c.file);
+      out.push({
+        kind: 'mappers',
+        label: c.name,
+        description: c.desc || undefined,
+        detail: `${vscode.workspace.asRelativePath(uri)}:${c.line + 1}`,
+        icon: c.kind === 'java' ? 'symbol-interface' : c.kind === 'xml' ? 'file-code' : c.kind === 'method' ? 'symbol-method' : 'database',
+        uri,
+        range: new vscode.Range(c.line, 0, c.line, 0),
+        selectName: c.kind !== 'xml',
+      });
+    }
+    count?.(total);
+    if (!mi.entries().length && !cands.length) {
+      this.logLine('[Mapper] mapper XML·Java mapper 를 하나도 못 찾음 (<mapper namespace> 나 MyBatis DOCTYPE 이 있는 XML, …Mapper 인터페이스·@Mapper 가 없음)');
+    }
+    return out;
+  }
+
+  /** 이름 → 소문자 (같은 이름이 많아서 캐시) */
+  private lowerCache = new Map<string, string>();
+  private lowerName(name: string): string {
+    let lc = this.lowerCache.get(name);
+    if (lc === undefined) {
+      lc = name.toLowerCase();
+      if (this.lowerCache.size > 500000) this.lowerCache.clear();
+      this.lowerCache.set(name, lc);
+    }
+    return lc;
   }
 
   /** 클래스 결과의 파일별 범위 판정 캐시. 범위·포함/제외 경로·설정이 바뀌면 새로 */
@@ -857,9 +900,28 @@ export class SearchService implements vscode.Disposable {
 
   private getRipgrep(): string | undefined {
     if (this.rgPath === undefined) {
-      this.rgPath = findRipgrep(vscode.env.appRoot) ?? null;
-      if (!this.rgPath) {
-        console.warn('[DevBoost] VS Code 내장 ripgrep을 찾지 못했습니다. 느린 방식으로 텍스트 검색합니다.');
+      // 1) 설정에 직접 지정한 경로 2) VS Code 내장 3) 시스템 PATH
+      const custom = (config().get<string>('ripgrepPath') ?? '').trim();
+      let found: string | undefined;
+      let from = '';
+      if (custom) {
+        if (fs.existsSync(custom)) {
+          found = custom;
+          from = '설정 ripgrepPath';
+        } else {
+          this.logLine(`[경고] 설정 ripgrepPath 의 파일이 없음: ${custom} → VS Code 내장 rg 를 찾습니다`);
+        }
+      }
+      if (!found && (found = findRipgrep(vscode.env.appRoot))) from = 'VS Code 내장';
+      if (!found && (found = findRipgrepOnPath())) from = '시스템 PATH';
+      this.rgPath = found ?? null;
+      if (found) {
+        this.logLine(`[ripgrep] ${from}: ${found}`);
+      } else {
+        this.logLine(
+          `[경고] ripgrep(rg) 을 찾지 못함 (VS Code 설치 폴더: ${vscode.env.appRoot}). ` +
+            '클래스·메서드·Mapper 색인이 꺼지고 텍스트 검색이 느려집니다. 설정 devBoost.searchEverywhere.ripgrepPath 에 rg 경로를 넣으면 그것을 씁니다'
+        );
       }
     }
     return this.rgPath ?? undefined;
@@ -963,7 +1025,11 @@ export class SearchService implements vscode.Disposable {
       .map((m) => ({ m, f: fileInfo(m.file) }))
       .filter(({ f }) => f.ok)
       .map(({ m, f }) => ({ m, uri: f.uri, prio: f.prio }));
-    withUri.sort((a, b) => a.prio - b.prio); // 안정 정렬: 같은 우선순위는 rg 가 찾은 순서
+    // 우선순위 → 경로 → 줄. rg 는 여러 스레드로 훑어 찾은 순서가 매번 달라서, 같은 우선순위끼리는 경로·줄 순으로 고정
+    withUri.sort(
+      (a, b) =>
+        a.prio - b.prio || (a.m.file < b.m.file ? -1 : a.m.file > b.m.file ? 1 : a.m.line - b.m.line || a.m.column - b.m.column)
+    );
     // 한 파일에서 최대 20줄(--max-count)만 가져오므로, 그 상한에 걸린 파일이 있으면 실제 개수는 더 많다
     const perFileCount = new Map<string, number>();
     let fileCapped = false;
@@ -1072,22 +1138,6 @@ function toTextItem(m: RgMatch, uri: vscode.Uri, query: string): SearchItem {
   };
 }
 
-function toSymbolItems(symbols: vscode.SymbolInformation[], kind: 'classes' | 'symbols'): SearchItem[] {
-  return symbols.map((s) => ({
-    kind,
-    label: s.name,
-    description: s.containerName || undefined,
-    detail: `${vscode.workspace.asRelativePath(s.location.uri)}:${s.location.range.start.line + 1}`,
-    icon: symbolIcon(s.kind),
-    uri: s.location.uri,
-    range: s.location.range,
-  }));
-}
-
-function isClass(s: vscode.SymbolInformation): boolean {
-  return CLASS_KINDS.has(s.kind);
-}
-
 /**
  * 간단한 fuzzy 점수. 쿼리 문자가 순서대로 들어 있으면 매치.
  * 연속 매치, 단어 시작(대문자/구분자 뒤), 앞쪽 위치에 가산점.
@@ -1128,7 +1178,7 @@ export function fuzzyScore(query: string, target: string): number {
 function loadDefaultOptions(): SearchOptions {
   const c = config();
   const s = c.get<string>('defaultScope');
-  const scope = isScopeId(s) ? s : c.get<boolean>('includeNonProject', false) ? 'projectAndLibs' : 'project';
+  const scope = isScopeId(s) ? s : c.get<boolean>('includeNonProject', false) ? 'projectAndLibs' : 'production';
   return { ...DEFAULT_OPTIONS, scope, text: { ...DEFAULT_OPTIONS.text }, paths: { ...DEFAULT_OPTIONS.paths } };
 }
 
@@ -1137,34 +1187,7 @@ function isInProject(uri: vscode.Uri): boolean {
   return uri.scheme === 'file' && vscode.workspace.getWorkspaceFolder(uri) !== undefined;
 }
 
-function symbolIcon(kind: vscode.SymbolKind): string {
-  switch (kind) {
-    case vscode.SymbolKind.Class:
-      return 'symbol-class';
-    case vscode.SymbolKind.Interface:
-      return 'symbol-interface';
-    case vscode.SymbolKind.Enum:
-      return 'symbol-enum';
-    case vscode.SymbolKind.Method:
-    case vscode.SymbolKind.Function:
-    case vscode.SymbolKind.Constructor:
-      return 'symbol-method';
-    case vscode.SymbolKind.Field:
-    case vscode.SymbolKind.Property:
-      return 'symbol-field';
-    case vscode.SymbolKind.Variable:
-    case vscode.SymbolKind.Constant:
-      return 'symbol-variable';
-    default:
-      return 'symbol-misc';
-  }
-}
-
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** 같은 클래스인지 비교할 키 (파일 + 이름) */
-function itemKey(x: SearchItem): string {
-  return `${x.uri?.toString()}#${x.label}`;
-}

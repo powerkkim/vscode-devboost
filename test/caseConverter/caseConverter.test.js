@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const path = require('path');
 
 const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'caseConverter', 'convert');
-const { convertName, convertText, splitWords } = require(path.join(OUT, 'words.js'));
+const { convertName, convertText, splitWords, cycleCase } = require(path.join(OUT, 'words.js'));
 const { sqlToJavaFields, renderJavaFields, statementAt, sqlTypeToJava } = require(path.join(OUT, 'sql.js'));
 const { parseJavaFields, javaToTs, javaToMyBatis } = require(path.join(OUT, 'java.js'));
 
@@ -247,4 +247,36 @@ test('Java → MyBatis SQL', () => {
   assert.ok(sql.includes('<result column="create_date" property="createDate"/>'));
   const alias = javaToMyBatis(cls, ['select'], { ...MB, mapUnderscore: false, columnCase: 'upper' });
   assert.ok(alias.startsWith('SELECT ID, USER_NAME AS userName, CREATE_DATE AS createDate'));
+});
+
+test('케이스 롤업: camel → Pascal → snake → SCREAMING → kebab → camel', () => {
+  let t = 'userName';
+  const seen = [t];
+  for (let i = 0; i < 5; i++) seen.push((t = cycleCase(t)));
+  assert.deepStrictEqual(seen, ['userName', 'UserName', 'user_name', 'USER_NAME', 'user-name', 'userName']);
+});
+
+test('케이스 롤업: 반대 방향', () => {
+  assert.strictEqual(cycleCase('userName', -1), 'user-name');
+  assert.strictEqual(cycleCase('user-name', -1), 'USER_NAME');
+  assert.strictEqual(cycleCase('UserName', -1), 'userName');
+});
+
+test('케이스 롤업: 단일 단어는 같은 글을 건너뜀', () => {
+  let t = 'user';
+  const seen = [t];
+  for (let i = 0; i < 3; i++) seen.push((t = cycleCase(t)));
+  assert.deepStrictEqual(seen, ['user', 'User', 'USER', 'user']);
+});
+
+test('케이스 롤업: 어느 표기도 아니면 첫 표기로 정리, 앞뒤 밑줄·약어 유지', () => {
+  assert.strictEqual(cycleCase('User_name'), 'userName');
+  assert.strictEqual(cycleCase('User_name', -1), 'user-name');
+  assert.strictEqual(cycleCase('_privateValue'), '_PrivateValue');
+  assert.strictEqual(cycleCase('userID'), 'userId');
+  assert.strictEqual(cycleCase('user_id'), 'USER_ID');
+});
+
+test('케이스 롤업: 여러 이름이 섞인 선택', () => {
+  assert.strictEqual(cycleCase('id, user_name'), 'ID, USER_NAME');
 });

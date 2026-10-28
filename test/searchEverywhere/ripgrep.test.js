@@ -110,3 +110,23 @@ test('listFiles: 개수 제한 없이 .gitignore 반영, 숨김 파일 포함, .
   assert.ok(!all.some((p) => p.startsWith('target/')), '제외 설정');
   assert.ok(!all.some((p) => p.startsWith('ignored/')), '.gitignore');
 });
+
+test('findRipgrep: 2026년 VS Code 배치 (@vscode/ripgrep-universal/bin/<OS>-<CPU>/rg)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { findRipgrep } = require(path.join(__dirname, '..', '..', 'out', 'features', 'searchEverywhere', 'search', 'ripgrep.js'));
+  const exe = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  const app = fs.mkdtempSync(path.join(os.tmpdir(), 'app-'));
+  assert.equal(findRipgrep(app), undefined);
+  const bin = path.join(app, 'node_modules.asar.unpacked', '@vscode', 'ripgrep-universal', 'bin', `${process.platform}-${process.arch}`);
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, exe), '');
+  assert.equal(findRipgrep(app), path.join(bin, exe));
+  // 이름이 또 바뀌어도 @vscode/*ripgrep*/bin 아래에서 찾음
+  const app2 = fs.mkdtempSync(path.join(os.tmpdir(), 'app-'));
+  const bin2 = path.join(app2, 'node_modules', '@vscode', 'ripgrep-next', 'bin', 'any');
+  fs.mkdirSync(bin2, { recursive: true });
+  fs.writeFileSync(path.join(bin2, exe), '');
+  assert.equal(findRipgrep(app2), path.join(bin2, exe));
+});

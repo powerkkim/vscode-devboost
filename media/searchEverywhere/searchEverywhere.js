@@ -8,11 +8,12 @@
     { id: 'classes', label: '클래스' },
     { id: 'files', label: '파일' },
     { id: 'symbols', label: '심볼' },
+    { id: 'mappers', label: 'Mapper' },
     { id: 'actions', label: '액션' },
     { id: 'text', label: '텍스트' },
   ];
-  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', actions: '액션', text: '텍스트' };
-  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', actions: '⚡', text: 'T' };
+  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', mappers: 'Mapper', actions: '액션', text: '텍스트' };
+  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', mappers: 'M', actions: '⚡', text: 'T' };
   // 심볼 종류별 배지 (IntelliJ: C=클래스, I=인터페이스, E=enum, m=메서드, f=필드, v=변수)
   const ICON_BADGE = {
     'symbol-class': ['C', 'class'],
@@ -24,6 +25,8 @@
     terminal: ['>', 'action'],
     gear: ['⚙', 'action'],
     keyboard: ['⌨', 'action'],
+    'file-code': ['X', 'class'],
+    database: ['q', 'method'],
   };
 
   const $tabs = document.getElementById('tabs');
@@ -54,6 +57,7 @@
   let limit; // "더 보기"로 늘린 표시 개수 (검색어·탭·옵션이 바뀌면 초기화)
   let maxResults = 50;
   let pendingSelect; // "더 보기" 후 고를 결과 번호
+  let pendingKeep; // 다시 검색(rerun) 뒤에도 고를 줄
   let runId = 0;
   let shownRunId = 0;
   let shownSeq; // 지금 화면에 그린 결과 묶음 번호 (열 때 같이 보냄)
@@ -205,6 +209,7 @@
     if (!keepLimit) {
       limit = undefined;
       pendingSelect = undefined; // "더 보기" 결과를 기다리던 중 다른 검색을 시작하면 버린다
+      pendingKeep = undefined;
     }
     const run = () => {
       runId++;
@@ -474,7 +479,7 @@
           (filterOpen ? $incl : $query).focus();
         } else if (e.code === 'KeyN') {
           e.preventDefault();
-          $scope.value = $scope.value === 'projectAndLibs' ? 'project' : 'projectAndLibs';
+          $scope.value = $scope.value === 'projectAndLibs' ? 'production' : 'projectAndLibs';
           optionsChanged();
         } else if (tab === 'text' && e.code === 'KeyC') {
           e.preventDefault();
@@ -569,6 +574,12 @@
         search(true);
       }
       $query.focus();
+    } else if (m.type === 'rerun') {
+      // 확장이 같은 검색을 다시 하라고 함 (메서드·필드 색인 완성, 숨겼다 다시 보임). 보던 줄·"더 보기" 개수는 유지
+      if ($query.value) {
+        pendingKeep = rows[(view[selected] || {}).idx];
+        search(true, true);
+      }
     } else if (m.type === 'focus') {
       // 패널이 다시 보일 때: 검색창으로 커서, 기존 검색어는 전체 선택해서 바로 덮어쓸 수 있게
       $query.focus();
@@ -582,13 +593,21 @@
       const scroll = sameRun || pendingSelect !== undefined ? $results.scrollTop : 0;
       shownRunId = m.runId;
       shownSeq = m.seq;
-      if (!m.partial) $results.classList.remove('busy');
+      // 결과가 나왔으면 흐리게 두지 않는다
+      $results.classList.remove('busy');
       rows = m.rows || [];
       groups = m.groups || [];
       selected = 0;
       renderResults(m.query); // view 를 새로 만든다
       let want = -1;
-      if (pendingSelect !== undefined) {
+      if (pendingKeep && !prev) {
+        // 다시 검색(rerun) 전에 보던 줄을 찾아 그대로 고른다
+        const k = pendingKeep;
+        pendingKeep = undefined;
+        const i = rows.findIndex((r) => r.label === k.label && r.right === k.right && r.kind === k.kind);
+        if (i >= 0) want = i;
+      }
+      if (want < 0 && pendingSelect !== undefined) {
         // "더 보기": 새로 불러온 첫 줄로 (먼저 온 partial 에도, 최종 결과에도 같은 자리)
         want = Math.min(pendingSelect, rows.length - 1);
         if (!m.partial) pendingSelect = undefined;
@@ -605,12 +624,12 @@
         const el = $results.querySelector('.row.selected');
         el && el.scrollIntoView({ block: 'nearest' });
       }
-      if (!m.partial) renderTiming(m);
+      renderTiming(m);
     }
   });
 
   /**
-   * 하단 오른쪽에 속도 표시. 예) 언어서버 420ms · 파일 3ms · 텍스트 85ms | 전체 512ms
+   * 하단 오른쪽에 속도 표시. 예) 클래스 2ms · 파일 3ms · 텍스트 85ms | 전체 512ms
    * 전체 = 검색 요청을 보낸 순간부터 화면에 그릴 때까지 (확장 처리 + 메시지 왕복 + 그리기)
    */
   function renderTiming(m) {

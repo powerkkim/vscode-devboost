@@ -109,6 +109,7 @@ export class SearchEverywherePanel {
 
   private dispose() {
     SearchEverywherePanel.current = undefined;
+    this.session.cancel('창 닫힘'); // 진행 중인 rg 를 멈춘다
     this.disposables.forEach((d) => d.dispose());
   }
 }

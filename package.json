@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -101,6 +101,16 @@
         "command": "devBoost.caseConverter.javaToMyBatis",
         "title": "Java 필드 → MyBatis SQL (SELECT·INSERT·UPDATE·resultMap)",
         "category": "케이스 변환"
+      },
+      {
+        "command": "devBoost.caseConverter.cycleNext",
+        "title": "다음 케이스로 바꾸기 (camel → Pascal → snake → SCREAMING → kebab)",
+        "category": "케이스 변환"
+      },
+      {
+        "command": "devBoost.caseConverter.cyclePrev",
+        "title": "이전 케이스로 바꾸기",
+        "category": "케이스 변환"
       }
     ],
     "viewsContainers": {
@@ -183,6 +193,14 @@
         {
           "command": "devBoost.caseConverter.javaToMyBatis",
           "when": "config.devBoost.caseConverter.enabled"
+        },
+        {
+          "command": "devBoost.caseConverter.cycleNext",
+          "when": "config.devBoost.caseConverter.enabled && editorTextFocus"
+        },
+        {
+          "command": "devBoost.caseConverter.cyclePrev",
+          "when": "config.devBoost.caseConverter.enabled && editorTextFocus"
         }
       ],
       "editor/context": [
@@ -200,6 +218,11 @@
           "command": "devBoost.caseConverter.convertCase",
           "when": "config.devBoost.caseConverter.enabled && editorHasSelection",
           "group": "devboost@1"
+        },
+        {
+          "command": "devBoost.caseConverter.cycleNext",
+          "when": "config.devBoost.caseConverter.enabled && editorTextFocus && !editorReadonly",
+          "group": "devboost@2"
         }
       ]
     },
@@ -221,6 +244,18 @@
         "key": "ctrl+alt+enter",
         "mac": "cmd+alt+enter",
         "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+      },
+      {
+        "command": "devBoost.caseConverter.cycleNext",
+        "key": "alt+shift+u",
+        "mac": "alt+shift+u",
+        "when": "editorTextFocus && !editorReadonly && config.devBoost.caseConverter.enabled"
+      },
+      {
+        "command": "devBoost.caseConverter.cyclePrev",
+        "key": "ctrl+alt+shift+u",
+        "mac": "cmd+alt+shift+u",
+        "when": "editorTextFocus && !editorReadonly && config.devBoost.caseConverter.enabled"
       }
     ],
     "configuration": [
@@ -284,6 +319,11 @@
             "default": false,
             "description": "사이드바 방식에서 항목을 열거나 Esc를 눌러도 사이드바를 닫지 않고 그대로 둠"
           },
+          "devBoost.searchEverywhere.ripgrepPath": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "ripgrep(`rg`) 실행 파일 경로. 비워 두면 VS Code 에 들어 있는 rg 를 찾아 쓰고, 없으면 시스템 PATH 의 rg 를 씁니다. 어느 rg 를 쓰는지는 출력 패널 *DevBoost* 에 찍힙니다."
+          },
           "devBoost.searchEverywhere.showTiming": {
             "type": "boolean",
             "default": true,
@@ -302,22 +342,22 @@
           "devBoost.searchEverywhere.defaultScope": {
             "type": "string",
             "enum": [
-              "project",
-              "projectAndLibs",
               "production",
+              "project",
               "test",
+              "projectAndLibs",
               "recentViewed",
               "recentChanged"
             ],
             "enumDescriptions": [
-              "프로젝트 파일 (라이브러리·vendor 제외)",
-              "프로젝트 및 라이브러리 (~/.m2, JDK, vendor 포함)",
-              "프로젝트 프로덕션 파일 (src/test 등 테스트 제외)",
-              "프로젝트 테스트 파일",
-              "최근에 본 파일",
-              "최근 변경된 파일 (Git 작업 트리)"
+              "프로젝트 (테스트 제외): src/test 등 테스트 코드와 라이브러리(vendor 등)를 뺀 프로젝트 파일",
+              "프로젝트 (테스트 포함): 테스트 코드까지 포함한 프로젝트 파일 (라이브러리 제외)",
+              "테스트만: 테스트 코드만",
+              "프로젝트 + 라이브러리: library 설정 경로(vendor, *.min.js 등)까지",
+              "최근에 연 파일: VS Code 에서 최근 연 파일 100개",
+              "커밋 안 한 파일 (Git): 수정·스테이지·새 파일"
             ],
-            "default": "project",
+            "default": "production",
             "description": "검색 창을 열 때의 기본 범위"
           },
           "devBoost.searchEverywhere.fileMasks": {
@@ -367,7 +407,7 @@
               "**/.nuxt/**",
               "**/*.log"
             ],
-            "markdownDescription": "**검색에서 완전히 뺄** 경로 (파일·텍스트·클래스·심볼 모든 탭에 적용). 빌드 결과물·캐시·로그처럼 볼 일이 없는 것. 텍스트 검색은 `.gitignore`도 자동 반영됩니다.\n\n라이브러리로 취급해 *프로젝트 및 라이브러리* 범위에서만 보고 싶은 것은 `library`에 넣으세요."
+            "markdownDescription": "**검색에서 완전히 뺄** 경로 (파일·텍스트·클래스·심볼 모든 탭에 적용). 빌드 결과물·캐시·로그처럼 볼 일이 없는 것. 텍스트 검색은 `.gitignore`도 자동 반영됩니다.\n\n라이브러리로 취급해 *프로젝트 + 라이브러리* 범위에서만 보고 싶은 것은 `library`에 넣으세요."
           },
           "devBoost.searchEverywhere.library": {
             "type": "array",
@@ -381,7 +421,7 @@
               "**/*.min.js",
               "**/*.min.css"
             ],
-            "markdownDescription": "**라이브러리로 취급**할 경로 (bootstrap, fontawesome 등 프로젝트 안에 복사해 둔 외부 코드). 기본 범위(*프로젝트 파일*)에서는 안 보이고, 범위를 *프로젝트 및 라이브러리*로 바꾸면 보입니다.\n\n아예 검색하지 않으려면 `exclude`에 넣으세요."
+            "markdownDescription": "**라이브러리로 취급**할 경로 (bootstrap, fontawesome 등 프로젝트 안에 복사해 둔 외부 코드). 기본 범위(*프로젝트 (테스트 제외)*)에서는 안 보이고, 범위를 *프로젝트 + 라이브러리*로 바꾸면 보입니다.\n\n아예 검색하지 않으려면 `exclude`에 넣으세요."
           }
         }
       },
