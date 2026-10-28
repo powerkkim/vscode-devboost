@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { SearchService, SearchItem, SearchResult, TabId } from '../search/searchService';
-import { SymbolThrottle } from '../search/symbolThrottle';
 import { SearchOptions, SCOPES, isScopeId } from '../search/scope';
 
 /**
@@ -40,30 +39,15 @@ export interface SessionHost {
   targetColumn(): vscode.ViewColumn | undefined;
 }
 
-/** 언어 서버에 묻는 간격 */
-const SYMBOL_INTERVAL_MS = 1000;
-/** 세션이 같은 조건의 언어 서버 응답을 다시 쓰는 시간 (넘으면 다시 묻는다) */
-const SYMBOL_REUSE_MS = 5000;
-/** "언어 서버 결과 기다리는 중" 표시를 이 시간 뒤에는 끈다 */
-const LS_WAIT_HINT_MS = 10000;
-
 export class WebviewSession {
   private latestRunId = 0;
   /** 보낸 결과 묶음 번호 → 항목. 먼저 보낸 결과(partial)를 보고 Enter 를 눌러도 화면의 그 줄이 열리도록 */
   private sent = new Map<number, SearchItem[]>();
   private seq = 0;
-  /** 언어 서버 요청: 1초 단위, 마지막 요청 응답만 (SymbolThrottle) */
-  private readonly throttle: SymbolThrottle<vscode.SymbolInformation[]>;
-  /** 마지막 언어 서버 응답 (같은 검색어·범위면 탭을 바꿔도 다시 묻지 않고 합친다) */
-  private symbols: { key: string; list: vscode.SymbolInformation[]; time: number } | undefined;
   /** cancel() 마다 바뀌는 번호. 진행 중이던 검색은 이 번호가 달라지면 멈춘다 (latestRunId 는 그대로 둬서 화면의 결과는 계속 열 수 있게) */
   private gen = 0;
   /** 취소된 뒤 다시 보이면 검색을 새로 해야 함 */
   private cancelled = false;
-  /** "언어 서버 결과 기다리는 중" 표시를 끝내는 타이머 (응답이 끝내 안 오는 경우) */
-  private lsWaitTimer: ReturnType<typeof setTimeout> | undefined;
-  /** 언어 서버 응답을 합칠 대상: 가장 최근 검색 결과 */
-  private latest: { runId: number; query: string; key: string; result: SearchResult } | undefined;
   private pendingInit: { tab: TabId; query: string } = { tab: 'all', query: '' };
   private openStartedAt = performance.now();
   private ready = false;
@@ -72,68 +56,16 @@ export class WebviewSession {
     private readonly webview: vscode.Webview,
     private readonly service: SearchService,
     private readonly host: SessionHost
-  ) {
-    this.throttle = new SymbolThrottle((q, key) => {
-      // 1초를 기다리는 사이 범위·필터가 바뀌었으면 그 조건으로 묻지 않는다 (키와 실제 요청이 어긋나지 않게)
-      if (this.service.symbolRequestKey(q) !== key) {
-        this.service.logLine(`[언어서버] 요청 안 함 "${q}" (범위·필터가 바뀜)`);
-        return Promise.reject(new Error('조건 변경'));
-      }
-      return this.service.requestSymbols(q);
-    }, SYMBOL_INTERVAL_MS, (q) => this.service.logLine(`[언어서버] 응답 버림 "${q}" (그사이 새 검색어로 요청함)`));
-  }
+  ) {}
 
-  /** 언어 서버 응답을 더 기다리지 않음: 화면의 "기다리는 중" 표시를 끈다 */
-  private endLsWait(runId: number) {
-    if (this.lsWaitTimer) clearTimeout(this.lsWaitTimer);
-    this.lsWaitTimer = undefined;
-    if (runId === this.latestRunId) this.post({ type: 'lsDone', runId });
-  }
-
-  /** 언어 서버 응답 도착: 지금 화면의 검색과 같은 조건이면 합쳐서 다시 보낸다 */
-  private onSymbols(key: string, list: vscode.SymbolInformation[]) {
-    // 응답을 기다리는 동안 범위·필터가 바뀌었으면 이 응답은 다른 조건의 것이라 버린다
-    const l = this.latest;
-    if (l && this.service.symbolRequestKey(l.query) !== key) {
-      this.service.logLine('[언어서버] 응답 버림 (범위·필터가 바뀜)');
-      this.endLsWait(l.runId);
-      return;
-    }
-    this.symbols = { key, list, time: Date.now() };
-    if (!l || l.key !== key || l.runId !== this.latestRunId || !l.result.withSymbols) {
-      this.service.logLine('[언어서버] 응답을 화면에는 안 붙임 (검색어·탭이 바뀜, 5초 동안 재사용)');
-      return; // 그사이 검색어·탭이 바뀜 → 다음 검색 때 캐시로 합쳐진다
-    }
-    if (this.lsWaitTimer) clearTimeout(this.lsWaitTimer);
-    this.lsWaitTimer = undefined;
-    const merged = l.result.withSymbols(list);
-    const had = new Set(l.result.items);
-    this.service.logLine(`[언어서버] "${l.query}" → 화면에 ${merged.items.filter((x) => !had.has(x)).length}건 추가`);
-    this.post({
-      type: 'results',
-      runId: l.runId,
-      seq: this.remember(merged.items),
-      query: l.query,
-      rows: merged.items.map(toRow),
-      groups: merged.groups,
-      timings: merged.timings,
-      late: true,
-    });
-  }
 
   /**
-   * 창이 닫히거나 숨겨질 때: 진행 중인 검색(rg)은 25ms 안에 멈추고(isStale), 언어 서버 응답은 버린다.
-   * (언어 서버 요청 자체는 VS Code 가 취소 수단을 주지 않아 서버 안에서 끝까지 돈다)
+   * 창이 닫히거나 숨겨질 때: 진행 중인 검색(rg)은 25ms 안에 멈춘다(isStale)
    */
   cancel(reason?: string) {
-    if (reason) this.service.logLine(`[검색] ${reason} → 진행 중 검색 중단, 늦게 오는 언어 서버 응답은 버림`);
+    if (reason) this.service.logLine(`[검색] ${reason} → 진행 중 검색 중단`);
     this.gen++;
     this.cancelled = true;
-    this.latest = undefined;
-    this.symbols = undefined;
-    this.throttle.stop();
-    if (this.lsWaitTimer) clearTimeout(this.lsWaitTimer);
-    this.lsWaitTimer = undefined;
   }
 
   /** 다시 보일 때: 취소된 상태였으면 화면에 같은 검색을 다시 하라고 알린다 (결과가 낡았거나 중간에 멈췄을 수 있음) */
@@ -213,36 +145,11 @@ export class WebviewSession {
         this.cancelled = false;
         const isStale = () => this.latestRunId !== runId || this.gen !== gen;
         try {
-          // 검색은 언어 서버를 기다리지 않는다 (rg 결과로 바로 확정)
           const r = await this.service.searchTimed(m.tab, m.query, isStale, m.limit);
           if (isStale()) {
             return; // 더 최신 검색이 있음 (또는 창이 닫힘)
           }
-          let shown = r;
-          let lsPending = false;
-          if (r.withSymbols) {
-            // 언어 서버로 보탤 수 있는 검색: 같은 조건의 응답이 이미 있으면 바로 합치고, 없으면 1초 단위로 요청
-            const key = this.service.symbolRequestKey(m.query);
-            this.latest = { runId, query: m.query, key, result: r };
-            // 세션 캐시는 짧게만 (언어 서버 결과도 파일이 바뀌면 달라짐)
-            if (this.symbols?.key === key && Date.now() - this.symbols.time < SYMBOL_REUSE_MS) {
-              shown = { ...r.withSymbols(this.symbols.list), late: false };
-            } else {
-              lsPending = true;
-              this.throttle.want(
-                key,
-                m.query,
-                (q, k, list) => this.onSymbols(k, list),
-                () => this.endLsWait(runId)
-              );
-              // 응답이 끝내 오지 않으면(언어 서버 멈춤) 표시만 끈다. 늦게라도 오면 그때 합친다
-              if (this.lsWaitTimer) clearTimeout(this.lsWaitTimer);
-              this.lsWaitTimer = setTimeout(() => this.endLsWait(runId), LS_WAIT_HINT_MS);
-            }
-          } else {
-            this.latest = undefined;
-            this.throttle.stop(); // 언어 서버가 필요 없는 탭(파일·텍스트 등): 대기 중인 요청도 버림
-          }
+          const shown = r;
           // 메서드·필드 색인이 아직 만들어지는 중이면, 다 되는 대로 같은 검색을 다시 하게 한다
           if (r.indexIncomplete) {
             void this.service.whenIndexComplete().then(() => {
@@ -258,7 +165,6 @@ export class WebviewSession {
             groups: shown.groups,
             timings: shown.timings,
             totalMs: shown.totalMs,
-            lsPending,
           });
         } catch (e) {
           this.post({ type: 'results', runId, query: m.query, rows: [], error: String(e) });
@@ -325,7 +231,7 @@ export class WebviewSession {
     <div class="header">
       <div class="tabs" role="tablist" id="tabs"></div>
       <div class="controls" id="controls">
-        <select id="scope" class="ctl" title="검색 범위 (Alt+N: 프로젝트 ↔ 라이브러리 포함)"></select>
+        <select id="scope" class="ctl" title="검색 범위 (Alt+N: 테스트 제외 ↔ 라이브러리 포함)"></select>
         <input id="fileMask" class="ctl text-only" list="fileMaskList" placeholder="모든 파일 타입" title="파일 타입 (예: *.java, *.xml)" spellcheck="false">
         <datalist id="fileMaskList"></datalist>
         <button id="optCase" class="toggle text-only" title="대소문자 구분 (Alt+C)">Cc</button>

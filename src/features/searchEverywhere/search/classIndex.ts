@@ -10,7 +10,7 @@ import { rgCwd } from './ripgrep';
  * - 클래스·인터페이스·enum (Java·Kotlin·Groovy·Scala·TS·JS)
  * - 메서드·필드 (Java), fun (Kotlin) — Java 언어 서버는 기본 설정에서 워크스페이스 심볼로 타입만 주므로 직접 모은다
  * - 처음 한 번 워크스페이스 전체를 rg 로 훑고, 이후에는 바뀐 파일만 다시 읽는다
- * - jar 안의 라이브러리 클래스는 여기 없다 → 그때는 언어 서버를 쓴다
+ * - jar 안의 라이브러리 클래스는 없다 (소스가 프로젝트에 없음)
  */
 
 export type ClassKind = 'class' | 'interface' | 'enum';
@@ -166,7 +166,7 @@ export function parseClassOutput(out: string): Map<string, ClassEntry[]> {
       entry = { name: n, kind: enumClass ? 'enum' : kindOf(word), file, line, pkg: pkgOf.get(file) ?? '' };
     } else {
       const ext = path.extname(file).toLowerCase();
-      // 메서드·필드는 Java(·Kotlin fun) 만. 다른 언어의 메서드는 언어 서버(TypeScript 등)가 준다
+      // 메서드·필드는 Java(·Kotlin fun) 만. 다른 언어의 메서드는 색인하지 않는다
       const member: [string, MemberKind] | undefined =
         kfun && ext === '.kt' ? [kfun, 'method']
         : mname && ext === '.java' && !NOT_A_TYPE.has(mtype) ? [mname, 'method']
@@ -473,7 +473,7 @@ export class ClassIndex {
     return (this.byFile.get(path.normalize(file)) ?? []).some((e) => e.name === name);
   }
 
-  /** 이 파일의 이 이름 심볼(클래스·메서드·필드)이 색인에 있는가 — 언어 서버 결과와 중복 확인용 */
+  /** 이 파일의 이 이름 심볼(클래스·메서드·필드)이 색인에 있는가 */
   hasSymbol(file: string, name: string): boolean {
     return (this.byFile.get(path.normalize(file)) ?? []).some((e) => e.name === name);
   }

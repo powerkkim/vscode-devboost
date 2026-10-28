@@ -4,7 +4,7 @@
 
 export type ScopeId =
   | 'project' // 프로젝트 파일 (라이브러리·vendor 제외)
-  | 'projectAndLibs' // 프로젝트 + 라이브러리(jar) (.m2, JDK, vendor 포함)
+  | 'projectAndLibs' // 프로젝트 + 라이브러리 (library 설정 경로: vendor, *.min.js 등)
   | 'production' // 프로젝트 프로덕션 파일 (테스트 제외)
   | 'test' // 프로젝트 테스트 파일
   | 'recentViewed' // 최근에 본 파일
@@ -14,7 +14,7 @@ export const SCOPES: { id: ScopeId; label: string }[] = [
   { id: 'production', label: '프로젝트 (테스트 제외)' },
   { id: 'project', label: '프로젝트 (테스트 포함)' },
   { id: 'test', label: '테스트만' },
-  { id: 'projectAndLibs', label: '프로젝트 + 라이브러리(jar)' },
+  { id: 'projectAndLibs', label: '프로젝트 + 라이브러리' },
   { id: 'recentViewed', label: '최근에 연 파일' },
   { id: 'recentChanged', label: '커밋 안 한 파일 (Git)' },
 ];

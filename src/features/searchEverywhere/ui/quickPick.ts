@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { SearchService, SearchItem, SearchResult, TabId, GroupCount } from '../search/searchService';
-import { SymbolThrottle } from '../search/symbolThrottle';
 
 /**
  * Search Everywhere 를 VS Code 기본 QuickPick 목록으로 여는 방식 (설정 ui = "quickPick").
@@ -33,14 +32,14 @@ class TabButton implements vscode.QuickInputButton {
   ) {}
 }
 
-/** "라이브러리(jar) 포함" 토글 버튼 */
+/** "라이브러리 포함" 토글 버튼 */
 class NonProjectToggle implements vscode.QuickInputButton {
   constructor(public readonly on: boolean) {}
   get iconPath() {
     return new vscode.ThemeIcon(this.on ? 'library' : 'root-folder');
   }
   get tooltip() {
-    return this.on ? '라이브러리(jar) 포함: 켜짐' : '라이브러리(jar) 포함: 꺼짐 (프로젝트, 테스트 제외)';
+    return this.on ? '라이브러리 포함: 켜짐' : '라이브러리 포함: 꺼짐 (프로젝트, 테스트 제외)';
   }
 }
 
@@ -52,33 +51,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   let limit: number | undefined; // "더 보기"로 늘린 표시 개수 (검색어·탭이 바뀌면 초기화)
   let lastGroups: GroupCount[] = []; // 지금 화면에 그린 결과의 개수 (partial 포함)
   let keepAfterMore: SearchItem | undefined; // "더 보기"를 누르기 직전에 보던 결과
-  // 언어 서버: 1초 단위로 묻고 마지막 요청 응답만 합친다 (검색 결과는 기다리지 않음)
-  const throttle = new SymbolThrottle<vscode.SymbolInformation[]>((q, key) => {
-    // 1초를 기다리는 사이 범위가 바뀌었으면 묻지 않는다
-    if (service.symbolRequestKey(q) !== key) {
-      service.logLine(`[언어서버] 요청 안 함 "${q}" (범위·필터가 바뀜)`);
-      return Promise.reject(new Error('조건 변경'));
-    }
-    return service.requestSymbols(q);
-  }, 1000, (q) => service.logLine(`[언어서버] 응답 버림 "${q}" (그사이 새 검색어로 요청함)`));
-  let symbols: { key: string; list: vscode.SymbolInformation[]; time: number } | undefined;
-  let latest: { run: number; tab: TabId; key: string; result: SearchResult } | undefined;
-  const show = (tab: TabId, r: SearchResult) => {
-    lastGroups = r.groups;
-    const active = qp.activeItems[0]?.data;
-    qp.items = toPickItems(tab, r.items, r.groups);
-    // 늦게 온 언어 서버 결과로 목록이 바뀌어도 보던 항목에 머문다
-    if (active) {
-      const same = qp.items.find((i) => i.data && i.data.uri?.toString() === active.uri?.toString() && i.data.label === active.label);
-      if (same) qp.activeItems = [same];
-    }
-  };
-
   qp.matchOnDescription = false;
   // 우리가 정한 순서(점수·우선순위, 종류별 "더 보기" 위치)를 VS Code 가 라벨 일치도로 다시 섞지 않게
   (qp as { sortByLabel?: boolean }).sortByLabel = false;
   qp.matchOnDetail = false;
-  qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ a/ t/';
+  qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ m/ a/ t/';
   const updateButtons = () => {
     qp.buttons = [
       ...TABS.map((t) => new TabButton(t.id, new vscode.ThemeIcon(t.icon), t.label)),
@@ -90,7 +67,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     const tabs = TABS.map((t) => (t.id === currentTab ? `[${t.label}]` : t.label)).join('   ');
     const p = service.options.paths;
     const filter = p.include || p.exclude ? `   · 필터: ${p.include || '전체'}${p.exclude ? ' − ' + p.exclude : ''}` : '';
-    qp.title = (service.includeNonProject ? `${tabs}   · 라이브러리(jar) 포함` : tabs) + filter;
+    qp.title = (service.includeNonProject ? `${tabs}   · 라이브러리 포함` : tabs) + filter;
   };
   updateButtons();
 
@@ -116,32 +93,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
       if (myRun !== runId) {
         return; // 더 최신 검색이 시작됨
       }
-      let shown = r;
-      if (r.withSymbols) {
-        const key = service.symbolRequestKey(text);
-        latest = { run: myRun, tab, key, result: r };
-        if (symbols?.key === key && Date.now() - symbols.time < 5000) {
-          shown = r.withSymbols(symbols.list);
-        } else {
-          throttle.want(key, text, (q, k, list) => {
-            if (service.symbolRequestKey(q) !== k) {
-              service.logLine(`[언어서버] 응답 버림 "${q}" (범위·필터가 바뀜)`);
-              return;
-            }
-            symbols = { key: k, list, time: Date.now() };
-            if (latest && latest.key === k && latest.run === runId && latest.result.withSymbols) {
-              const merged = latest.result.withSymbols(list);
-              service.logLine(`[언어서버] "${q}" → 화면에 ${addedCount(latest.result.items, merged.items)}건 추가`);
-              show(latest.tab, merged);
-            } else {
-              service.logLine(`[언어서버] "${q}" 화면에는 안 붙임 (검색어·탭이 바뀜, 5초 동안 재사용)`);
-            }
-          });
-        }
-      } else {
-        latest = undefined;
-        throttle.stop();
-      }
+      const shown = r;
       lastGroups = shown.groups;
       qp.items = toPickItems(tab, shown.items, shown.groups);
       // 메서드·필드 색인이 아직 만들어지는 중이면 다 되는 대로 다시 검색
@@ -220,9 +172,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
       clearTimeout(debounce);
     }
     runId++; // 진행 중이던 검색 무효화 (rg 는 25ms 안에 멈춤)
-    service.logLine('[검색] 창 닫힘 → 진행 중 검색 중단, 늦게 오는 언어 서버 응답은 버림');
-    throttle.stop(); // 늦게 오는 언어 서버 응답은 버림
-    latest = undefined;
+    service.logLine('[검색] 창 닫힘 → 진행 중 검색 중단');
     qp.dispose();
   });
 
@@ -233,10 +183,6 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
 }
 
 /** 검색 결과를 QuickPick 항목으로 변환. '모두' 탭은 종류별 구분선을 넣는다. */
-const addedCount = (before: SearchItem[], after: SearchItem[]) => {
-  const had = new Set(before);
-  return after.filter((x) => !had.has(x)).length;
-};
 
 function toPickItems(tab: TabId, results: SearchItem[], groups: GroupCount[] = []): PickItem[] {
   const items: PickItem[] = [];
@@ -264,7 +210,7 @@ function toPickItems(tab: TabId, results: SearchItem[], groups: GroupCount[] = [
       description: r.description,
       detail: r.detail,
       // 우리가 이미 검색한 결과이므로 QuickPick의 자체 필터로 숨기지 않게 한다
-      // (접두어 "t/..." 나 언어서버의 CamelCase 매치가 사라지는 문제 방지)
+      // (접두어 "t/..." 나 중간 글자 매치가 사라지는 문제 방지)
       alwaysShow: true,
       data: r,
     });
