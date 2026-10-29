@@ -114,6 +114,7 @@ export class MapperIndex {
   /** @Mapper 가 붙은 Java 파일 */
   private annotated = new Set<string>();
   private key = '';
+  private roots: string[] = [];
   private building: Promise<void> | undefined;
   private buildId = 0;
   private pending = new Set<string>();
@@ -134,6 +135,7 @@ export class MapperIndex {
     const key = JSON.stringify([roots, excludeGlobs]);
     if (key !== this.key) {
       this.key = key;
+      this.roots = roots.map((r) => path.normalize(r));
       this.ready = false;
       const id = ++this.buildId;
       const started = Date.now();
@@ -168,6 +170,9 @@ export class MapperIndex {
   /** XML·Java 파일이 저장·생성되면 그 파일만 다시 읽는다 (모아서 처리) */
   queueUpdate(file: string) {
     if (!/\.(xml|java)$/i.test(file)) return;
+    // 색인 폴더 밖의 파일은 무시 (설정 indexFolders)
+    const f = path.normalize(file);
+    if (!this.roots.some((r) => f === r || f.startsWith(r.endsWith(path.sep) ? r : r + path.sep))) return;
     this.pending.add(path.normalize(file));
     this.schedule();
   }

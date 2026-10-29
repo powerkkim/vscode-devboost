@@ -632,6 +632,7 @@
    * 하단 오른쪽에 속도 표시. 예) 클래스 2ms · 파일 3ms · 텍스트 85ms | 전체 512ms
    * 전체 = 검색 요청을 보낸 순간부터 화면에 그릴 때까지 (확장 처리 + 메시지 왕복 + 그리기)
    */
+  let lastIndex = '';
   function renderTiming(m) {
     if (!showTiming) {
       $timing.textContent = '';
@@ -646,6 +647,11 @@
     let text = parts.join(' · ');
     if (total !== undefined) text += `${text ? ' | ' : ''}전체 ${total}ms`;
     if (openMs !== undefined) text = `창 열기 ${openMs}ms | ` + text;
+    // 색인 크기 (항목 수 · 대략의 메모리)
+    if (m.index) {
+      lastIndex = m.index;
+    }
+    if (lastIndex) text += ` | ${lastIndex}`;
     $timing.textContent = text;
     // 기준: 0.1초 이하 초록, 0.3초 이하 기본, 그 이상 주황
     $timing.className = 'footer-timing' + (total === undefined ? '' : total <= 100 ? ' fast' : total <= 300 ? '' : ' slow');

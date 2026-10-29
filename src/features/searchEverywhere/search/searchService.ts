@@ -638,8 +638,53 @@ export class SearchService implements vscode.Disposable {
     return this.classIndex ?? undefined;
   }
 
+  /**
+   * 색인·검색할 폴더. 설정 devBoost.searchEverywhere.indexFolders 가 있으면 그 폴더 아래만 (워크스페이스 폴더 기준 상대 경로 또는 절대 경로),
+   * 없거나 하나도 없는 폴더면 워크스페이스 폴더 전체. 클래스·심볼·Mapper 색인, 파일 목록, 텍스트 검색이 모두 이것을 쓴다
+   */
   private fileRoots(): string[] {
-    return (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath);
+    const ws = (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath);
+    const wanted = config()
+      .get<string[]>('indexFolders', [])
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (!wanted.length) return ws;
+    const key = JSON.stringify([ws, wanted]);
+    if (this.rootsCache?.key === key) return this.rootsCache.roots;
+    const found = new Set<string>();
+    for (const w of wanted) {
+      const cands = path.isAbsolute(w) ? [w] : ws.map((r) => path.join(r, w));
+      for (const c of cands) {
+        try {
+          if (fs.statSync(c).isDirectory()) found.add(path.normalize(c));
+        } catch {
+          // 없는 폴더는 건너뜀
+        }
+      }
+    }
+    // 다른 폴더 안에 든 폴더는 빼서 같은 파일을 두 번 읽지 않게
+    const list = [...found].sort();
+    const roots = list.filter((r) => !list.some((o) => o !== r && r.startsWith(o.endsWith(path.sep) ? o : o + path.sep)));
+    if (!roots.length) {
+      this.logLine(`[경고] 설정 indexFolders 의 폴더를 하나도 찾지 못함 (${wanted.join(', ')}) → 워크스페이스 전체를 씁니다`);
+    } else {
+      this.logLine(`[색인] 색인·검색 폴더: ${roots.join(', ')}`);
+    }
+    this.rootsCache = { key, roots: roots.length ? roots : ws };
+    return this.rootsCache.roots;
+  }
+  private rootsCache: { key: string; roots: string[] } | undefined;
+
+  /** 하단에 보여 줄 색인 크기 (항목 수와 대략의 메모리). 항목당 크기는 실측 평균값 */
+  indexSummary(): string | undefined {
+    const ci = this.classIndex;
+    if (!ci || !ci.ready) return undefined;
+    const n = ci.entries().length;
+    const m = this.mapperIndex?.ready ? this.mapperIndex.entries().length : 0;
+    const f = this.fileCache?.length ?? 0;
+    const bytes = n * 170 + m * 200 + f * 230;
+    const mb = bytes / 1048576;
+    return `색인 ${(n + m).toLocaleString('ko-KR')}개 · 약 ${mb < 0.1 ? '0.1' : mb.toFixed(1)}MB`;
   }
 
   /** 파일이 생기거나 저장되면 그 파일의 클래스만 다시 읽는다 */
@@ -740,7 +785,7 @@ export class SearchService implements vscode.Disposable {
       total++;
       if (out.length >= limit) continue;
       const uri = vscode.Uri.file(e.file);
-      const isMember = e.kind === 'method' || e.kind === 'field';
+      const isMember = e.kind === 'method' || e.kind === 'field' || e.kind === 'variable';
       out.push({
         kind: which === 'classes' ? 'classes' : 'symbols',
         label: e.name,
@@ -750,6 +795,7 @@ export class SearchService implements vscode.Disposable {
         icon:
           e.kind === 'method' ? 'symbol-method'
           : e.kind === 'field' ? 'symbol-field'
+          : e.kind === 'variable' ? 'symbol-variable'
           : e.kind === 'interface' ? 'symbol-interface'
           : e.kind === 'enum' ? 'symbol-enum'
           : 'symbol-class',
@@ -1003,9 +1049,7 @@ export class SearchService implements vscode.Disposable {
     count?: CountSink,
     onEarly?: (items: SearchItem[]) => void
   ): Promise<SearchItem[]> {
-    const roots = (vscode.workspace.workspaceFolders ?? [])
-      .filter((f) => f.uri.scheme === 'file')
-      .map((f) => f.uri.fsPath);
+    const roots = this.fileRoots();
     if (roots.length === 0) {
       return [];
     }

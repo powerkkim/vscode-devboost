@@ -180,6 +180,7 @@ export class WebviewSession {
             groups: shown.groups,
             timings: shown.timings,
             totalMs: shown.totalMs,
+            index: this.service.indexSummary(),
           });
         } catch (e) {
           this.post({ type: 'results', runId, query: m.query, rows: [], error: String(e) });
