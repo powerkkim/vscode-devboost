@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 - 2026-10-29
 - **Search Everywhere: JS·TS·Vue 최상위 변수도 심볼로** — `<script setup>`·모듈의 `const`·`let`·`var`(구조 분해 `const { a, b } = …` 는 이름마다). 함수 안 지역 변수는 넣지 않음
 - **색인·검색할 폴더 지정** (설정 `devBoost.searchEverywhere.indexFolders`): 넣은 폴더 아래만 색인·파일 목록·텍스트 검색. 비우면 워크스페이스 전체
 - **Spring 탭** (새 탭, QuickPick 접두어 `b/`): 빈 클래스(@Controller·@RestController·@Service·@Repository·@Component·@Configuration 등), @Bean 메서드, URL 매핑(@RequestMapping·@GetMapping 등, 적힌 그대로 — `"/search"` 로 검색). 검색어가 비면 빈 클래스 목록
