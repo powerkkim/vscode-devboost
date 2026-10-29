@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Search Everywhere: 창 고정** (오른쪽 위 `고정` 버튼 또는 `Alt+L`, QuickPick 은 핀 아이콘): 결과를 열어도 검색 창이 닫히지 않고 커서도 검색 창에 남아, 다른 결과를 이어서 열어 볼 수 있음. 탭 모드는 옆 칸에, 사이드바·떠 있는 창은 쓰던 에디터에 열림. `Esc` 로 닫기
+
 ## 0.14.0 - 2026-10-29
 - **Search Everywhere: JS·TS·Vue 최상위 변수도 심볼로** — `<script setup>`·모듈의 `const`·`let`·`var`(구조 분해 `const { a, b } = …` 는 이름마다). 함수 안 지역 변수는 넣지 않음
 - **색인·검색할 폴더 지정** (설정 `devBoost.searchEverywhere.indexFolders`): 넣은 폴더 아래만 색인·파일 목록·텍스트 검색. 비우면 워크스페이스 전체

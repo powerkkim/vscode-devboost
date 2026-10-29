@@ -43,6 +43,7 @@
   const $optRegex = document.getElementById('optRegex');
   const $controls = document.getElementById('controls');
   const $optFilter = document.getElementById('optFilter');
+  const $optPin = document.getElementById('optPin');
   const $filterbar = document.getElementById('filterbar');
   const $incl = document.getElementById('incl');
   const $excl = document.getElementById('excl');
@@ -182,6 +183,16 @@
   $optFilter.addEventListener('click', () => {
     setFilterOpen(!filterOpen);
     (filterOpen ? $incl : $query).focus();
+  });
+  // 창 고정: 결과를 열어도 닫지 않는다 (파일은 열리고 커서는 검색 창에 남음)
+  function setPinned(on) {
+    $optPin.classList.toggle('on', on);
+    vscode.postMessage({ type: 'pin', value: on });
+  }
+  $optPin.addEventListener('mousedown', (e) => e.preventDefault());
+  $optPin.addEventListener('click', () => {
+    setPinned(!$optPin.classList.contains('on'));
+    $query.focus();
   });
   $useCurDir.addEventListener('mousedown', (e) => e.preventDefault());
   $useCurDir.addEventListener('click', () => vscode.postMessage({ type: 'currentFolder' }));
@@ -479,6 +490,9 @@
           e.preventDefault();
           setFilterOpen(!filterOpen);
           (filterOpen ? $incl : $query).focus();
+        } else if (e.code === 'KeyL') {
+          e.preventDefault();
+          setPinned(!$optPin.classList.contains('on'));
         } else if (e.code === 'KeyN') {
           e.preventDefault();
           $scope.value = $scope.value === 'projectAndLibs' ? 'production' : 'projectAndLibs';
@@ -526,6 +540,7 @@
   window.addEventListener('message', (event) => {
     const m = event.data;
     if (m.type === 'init') {
+      $optPin.classList.toggle('on', !!m.pinned);
       showTiming = !!m.timing;
       openMs = m.openMs;
       if (m.maxResults) maxResults = m.maxResults;

@@ -368,14 +368,18 @@ export class SearchService implements vscode.Disposable {
   }
 
   /** 선택된 항목 열기/실행 */
-  async open(item: SearchItem, viewColumn?: vscode.ViewColumn): Promise<void> {
+  /** 창 고정: 결과를 열어도 검색 창을 닫지 않는다 (VS Code 를 다시 켜기 전까지 기억) */
+  pinned = false;
+
+  /** preserveFocus: 파일은 열되 커서는 검색 창에 둔다 (고정 상태에서 이어서 고를 수 있게) */
+  async open(item: SearchItem, viewColumn?: vscode.ViewColumn, preserveFocus = false): Promise<void> {
     if (item.kind === 'actions' && item.command) {
       await vscode.commands.executeCommand(item.command, ...(item.args ?? []));
       return;
     }
     if (item.uri) {
       const doc = await vscode.workspace.openTextDocument(item.uri);
-      const editor = await vscode.window.showTextDocument(doc, { viewColumn });
+      const editor = await vscode.window.showTextDocument(doc, { viewColumn, preserveFocus });
       let range = item.range;
       if (range && item.selectName && range.start.line < doc.lineCount) {
         const text = doc.lineAt(range.start.line).text;
