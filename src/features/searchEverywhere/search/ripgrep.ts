@@ -23,7 +23,16 @@ export interface RgOptions {
   limit: number;
   /** true를 돌려주면 즉시 중단 (더 새 검색이 시작됨) */
   isStale?: () => boolean;
+  /**
+   * 먼저 찾은 결과를 한 번 미리 받는다 (VS Code 검색처럼 첫 결과를 바로 보여 주려고).
+   * EARLY_COUNT 개가 모이거나 EARLY_MS 가 지났을 때 그때까지의 결과로 한 번만 부른다. 다 끝나면 평소처럼 resolve
+   */
+  onEarly?: (results: RgMatch[]) => void;
 }
+
+/** 미리 보여 줄 결과 수 / 시간 */
+export const EARLY_COUNT = 50;
+export const EARLY_MS = 100;
 
 export interface RgMatch {
   /** 절대 경로 */
@@ -181,6 +190,20 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
     // 새 검색이 시작됐는지 주기적으로 확인한다. 결과가 안 나오는 검색어(드문 단어)는 출력이 없어서
     // 출력 때만 확인하면 쓸모없어진 rg 가 끝까지 돌며 다음 검색과 디스크·CPU 를 나눠 쓴다.
     const staleTimer = o.isStale ? setInterval(() => o.isStale!() && finish(), STALE_CHECK_MS) : undefined;
+    // 먼저 찾은 결과 미리 보내기 (한 번만). 시간이 되어도 결과가 없으면 첫 결과가 올 때 보낸다
+    let early = !o.onEarly;
+    let earlyDue = false;
+    const sendEarly = () => {
+      if (early || done || !results.length || o.isStale?.()) return;
+      early = true;
+      o.onEarly!(results.slice());
+    };
+    const earlyTimer = o.onEarly
+      ? setTimeout(() => {
+          earlyDue = true;
+          sendEarly();
+        }, EARLY_MS)
+      : undefined;
 
     const finish = () => {
       if (done) {
@@ -188,6 +211,7 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
       }
       done = true;
       if (staleTimer) clearInterval(staleTimer);
+      if (earlyTimer) clearTimeout(earlyTimer);
       if (!child.killed) {
         child.kill();
       }
@@ -215,6 +239,7 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
           return;
         }
       }
+      if (!early && (earlyDue || results.length >= EARLY_COUNT)) sendEarly();
     });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (c: string) => (stderr += c));
@@ -222,6 +247,7 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
       if (!done) {
         done = true;
         if (staleTimer) clearInterval(staleTimer);
+        if (earlyTimer) clearTimeout(earlyTimer);
         reject(e);
       }
     });
@@ -236,6 +262,7 @@ export function runRipgrep(rgPath: string, o: RgOptions): Promise<RgMatch[]> {
       if (code === 2 && results.length === 0 && stderr.includes('regex')) {
         done = true;
         if (staleTimer) clearInterval(staleTimer);
+        if (earlyTimer) clearTimeout(earlyTimer);
         reject(new Error(stderr.trim()));
         return;
       }
