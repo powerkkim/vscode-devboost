@@ -89,7 +89,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     try {
       const keep = keepAfterMore;
       keepAfterMore = undefined;
-      const r = await service.searchTimed(tab, text, () => myRun !== runId, limit);
+      const r = await service.searchTimed(tab, text, () => myRun !== runId, limit, (p) => {
+        if (myRun !== runId) return;
+        lastGroups = p.groups;
+        qp.items = toPickItems(tab, p.items, p.groups); // 텍스트는 뒤에 붙는다
+      });
       if (myRun !== runId) {
         return; // 더 최신 검색이 시작됨
       }

@@ -145,7 +145,22 @@ export class WebviewSession {
         this.cancelled = false;
         const isStale = () => this.latestRunId !== runId || this.gen !== gen;
         try {
-          const r = await this.service.searchTimed(m.tab, m.query, isStale, m.limit);
+          // 모두 탭: 텍스트를 기다리지 않고 클래스·심볼·파일을 먼저 그린다
+          const onPartial = (p: SearchResult) => {
+            if (isStale()) return;
+            this.post({
+              type: 'results',
+              runId,
+              seq: this.remember(p.items),
+              query: m.query,
+              rows: p.items.map(toRow),
+              groups: p.groups,
+              timings: p.timings,
+              totalMs: p.totalMs,
+              partial: true,
+            });
+          };
+          const r = await this.service.searchTimed(m.tab, m.query, isStale, m.limit, onPartial);
           if (isStale()) {
             return; // 더 최신 검색이 있음 (또는 창이 닫힘)
           }

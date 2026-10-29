@@ -67,6 +67,8 @@ export interface SearchResult {
   /** 확장(Node) 쪽에서 검색에 걸린 전체 시간 */
   totalMs: number;
   groups: GroupCount[];
+  /** 먼저 보내는 결과 (모두 탭에서 텍스트를 빼고) — 뒤에 최종 결과가 온다 */
+  partial?: boolean;
   /** 메서드·필드 색인이 아직 만들어지는 중이라 결과에 빠졌을 수 있음 (whenIndexComplete 뒤 다시 검색) */
   indexIncomplete?: boolean;
 }
@@ -218,7 +220,14 @@ export class SearchService implements vscode.Disposable {
    * - 클래스·메서드·필드: rg 색인 / 파일: rg 파일 목록 / 텍스트: rg
    * limit: 한 탭에서 보여 줄 개수 ("더 보기"로 늘어남). 기본은 maxResults 설정
    */
-  async searchTimed(tab: TabId, query: string, isStale: () => boolean = () => false, limit?: number): Promise<SearchResult> {
+  async searchTimed(
+    tab: TabId,
+    query: string,
+    isStale: () => boolean = () => false,
+    limit?: number,
+    /** 모두 탭: 텍스트(rg 로 파일 내용 전체를 읽어 느림)를 기다리지 않고 클래스·심볼·파일을 먼저 보낼 때 */
+    onPartial?: (r: SearchResult) => void
+  ): Promise<SearchResult> {
     const start = performance.now();
     const timings: SearchTiming[] = [];
     const max = Math.max(1, limit ?? this.max);
@@ -285,23 +294,24 @@ export class SearchService implements vscode.Disposable {
         const per = Math.max(5, Math.floor(this.max / 3));
         let classTotal = 0;
         let memberTotal = 0;
-        const [indexed, members, files, text] = await Promise.all([
+        // 텍스트는 같이 시작하되 기다리지 않는다: 나머지가 끝나면 먼저 보내고(onPartial), 텍스트가 끝나면 최종 결과
+        const textP =
+          query.length >= 3
+            ? measure('텍스트', () => this.searchText(query, per, isStale, sink('text')), textNote)
+            : Promise.resolve([] as SearchItem[]);
+        const [indexed, members, files] = await Promise.all([
           measure('클래스', () => this.searchIndexed('classes', query, per, (t) => (classTotal = t), isStale), classNote),
           measure('심볼', () => this.searchIndexed('members', query, per, (t) => (memberTotal = t), isStale)),
           measure('파일', () => this.searchFiles(query, per, sink('files'))),
-          query.length >= 3
-            ? measure('텍스트', () => this.searchText(query, per, isStale, sink('text')), textNote)
-            : Promise.resolve([] as SearchItem[]),
         ]);
-        const combine = (classes: SearchItem[], others: SearchItem[]) => [
-          ...classes.slice(0, per),
-          ...files.slice(0, per),
-          ...others.slice(0, per),
-          ...text.slice(0, per),
-        ];
         totals.set('classes', { total: classTotal });
         totals.set('symbols', { total: memberTotal });
-        items = combine(indexed ?? [], members ?? []);
+        const head = [...(indexed ?? []).slice(0, per), ...files.slice(0, per), ...(members ?? []).slice(0, per)];
+        if (onPartial && head.length && query.length >= 3 && !isStale()) { // 비어 있으면 "결과 없음"이 잠깐 보이지 않게 텍스트까지 기다림
+          onPartial({ items: head, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(head), partial: true });
+        }
+        const text = await textP;
+        items = [...head, ...text.slice(0, per)];
         break;
       }
     }
@@ -700,7 +710,7 @@ export class SearchService implements vscode.Disposable {
       const f = this.facts(u, changed);
       this.logLine(
         `[색인] "${query}" 이름이 맞는 ${cands.length}개가 모두 범위에서 빠짐. 예: ${cands[0].e.file} → ` +
-          `제외설정=${this.isExcluded(u)} 포함/제외경로=${!this.pathAccepts(u)} 프로젝트안=${f.inProject} 라이브러리=${f.isLibrary} 상대경로=${f.relPath} 범위=${this.options.scope}`
+          `제외설정=${this.isExcluded(u)} 포함/제외경로=${!this.pathAccepts(u)} 프로젝트안=${f.inProject} 라이브러리=${f.isLibrary} 최근에연파일=${f.recentlyViewed} 상대경로(워크스페이스 폴더 기준)=${f.relPath} 범위=${this.options.scope}`
       );
     }
     return out;
