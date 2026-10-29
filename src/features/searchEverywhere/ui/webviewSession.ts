@@ -180,6 +180,7 @@ export class WebviewSession {
             groups: shown.groups,
             timings: shown.timings,
             totalMs: shown.totalMs,
+            index: this.service.indexSummary(),
           });
         } catch (e) {
           this.post({ type: 'results', runId, query: m.query, rows: [], error: String(e) });
@@ -285,6 +286,7 @@ export function toRow(item: SearchItem): ResultRow {
     case 'classes':
     case 'symbols':
     case 'mappers':
+    case 'spring':
       // description = 패키지/컨테이너, detail = 상대경로:줄
       return {
         ...base,

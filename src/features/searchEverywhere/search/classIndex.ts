@@ -14,7 +14,7 @@ import { rgCwd } from './ripgrep';
  */
 
 export type ClassKind = 'class' | 'interface' | 'enum';
-export type MemberKind = 'method' | 'field';
+export type MemberKind = 'method' | 'field' | 'variable';
 
 export interface ClassEntry {
   name: string;
@@ -68,14 +68,17 @@ const JS_MEMBER_PATTERN =
   `|^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)\\s*[<(]` +
   `|^\\s*(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]+)?=>|[A-Za-z_$][\\w$]*\\s*=>)` +
   `|^\\s*(?:(?:public|private|protected|static|async|override|get|set)\\s+)*\\*?([A-Za-z_$][\\w$]*)\\s*(?:<[^>]*>)?\\s*\\([^;]*\\)\\s*(?::\\s*[^{;]+)?\\{\\s*$` +
-  `|^\\s*([A-Za-z_$][\\w$]*)\\s*:\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*=>)`;
+  `|^\\s*([A-Za-z_$][\\w$]*)\\s*:\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*=>)` +
+  // 최상위 변수 (줄 맨 앞, 들여쓰기 없음 — <script setup>·모듈의 상태. 함수 안 지역 변수는 넣지 않음)
+  //  $10 = 이름, $11 = { a, b: c } 구조 분해 안쪽, $12 = [x, y] 구조 분해 안쪽 (한 줄에 닫힌 것만)
+  `|^(?:export\\s+)?(?:const|let|var)\\s+(?:([A-Za-z_$][\\w$]*)|\\{([^}]*)\\}|\\[([^\\]]*)\\])\\s*(?::[^=]+)?=`;
 
 /** JS 메서드 축약 규칙에 걸리지만 선언이 아닌 단어 */
 const JS_NOT_A_NAME = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'with', 'do', 'else', 'typeof', 'await', 'new', 'super', 'this']);
 
 /**
  * 메서드·필드 정규식 (Java, Kotlin fun, TS·JS·Vue). 클래스 선언 정규식 뒤에 이어 붙인다.
- *  $5 = Kotlin fun 이름, $6~$9 = TS·JS (위), $10·$11 = Java 메서드 반환 타입·이름, $12·$13 = Java 필드 타입·이름
+ *  $5 = Kotlin fun 이름, $6~$12 = TS·JS (위), $13·$14 = Java 메서드 반환 타입·이름, $15·$16 = Java 필드 타입·이름
  * - 메서드: [어노테이션][수식어][<T>] 타입 이름( — 이름은 소문자로 시작 (생성자 제외)
  *   `return foo(`, `else if (` 처럼 문장이 걸리는 경우는 타입 자리 단어로 걸러낸다 (parseClassOutput)
  * - 필드: public·protected·private·static 중 하나가 있어야 함 (메서드 안 지역 변수와 구분). 수식어 없는 필드는 놓친다
@@ -91,7 +94,7 @@ export const MEMBER_DECL_PATTERN =
 const NOT_A_TYPE = new Set(['return', 'else', 'new', 'throw', 'case', 'yield', 'await', 'assert', 'do', 'try', 'if', 'for', 'while', 'switch', 'catch', 'synchronized', 'this', 'super', 'package', 'import', 'goto', 'instanceof']);
 
 /** rg 출력 한 줄의 치환 결과 → 탭으로 구분: 패키지, enum-class, 종류, 클래스 이름, Kotlin fun, JS 4칸, Java 메서드 타입·이름, 필드 타입·이름 */
-const REPLACE = '$1\t$2\t$3\t$4\t$5\t$6\t$7\t$8\t$9\t${10}\t${11}\t${12}\t${13}';
+const REPLACE = '$1\t$2\t$3\t$4\t$5\t$6\t$7\t$8\t$9\t${10}\t${11}\t${12}\t${13}\t${14}\t${15}\t${16}';
 
 /**
  * onlyGlobs: 주면 확장자 목록 대신 이 경로들만 읽는다 (저장·생성된 파일 갱신용).
@@ -173,7 +176,7 @@ export function parseClassOutput(out: string): Map<string, ClassEntry[]> {
     const colon = rest.indexOf(':');
     if (colon < 0) continue;
     const line = Number(rest.slice(0, colon)) - 1;
-    const [pkg, enumClass, word, name, kfun, jsFn, jsVar, jsMethod, jsProp, mtype, mname, , fname] = rest.slice(colon + 1).split('\t');
+    const [pkg, enumClass, word, name, kfun, jsFn, jsVar, jsMethod, jsProp, topVar, topObj, topArr, mtype, mname, , fname] = rest.slice(colon + 1).split('\t');
     if (pkg) {
       if (pkg !== 'object') pkgOf.set(file, intern(pkg)); // Scala `package object util` 은 패키지 선언이 아님
       continue;
@@ -186,7 +189,17 @@ export function parseClassOutput(out: string): Map<string, ClassEntry[]> {
     } else {
       const ext = path.extname(file).toLowerCase();
       // 규칙과 확장자가 맞는 것만 (Java 줄의 JS 모양, JS 줄의 Java 모양은 버림)
-      const js = JS_EXTS.has(ext) ? jsFn || jsVar || jsProp || (jsMethod && !JS_NOT_A_NAME.has(jsMethod) ? jsMethod : '') : '';
+      const isJs = JS_EXTS.has(ext);
+      const js = isJs ? jsFn || jsVar || jsProp || (jsMethod && !JS_NOT_A_NAME.has(jsMethod) ? jsMethod : '') : '';
+      // 최상위 변수: 이름 하나 또는 구조 분해의 이름들
+      const vars = isJs && !js ? (topVar ? [topVar] : destructuredNames(topObj || topArr || '')) : [];
+      if (vars.length) {
+        const container = classOf.get(file) ?? intern(path.basename(file, path.extname(file)));
+        const list = byFile.get(file) ?? [];
+        for (const v of vars) list.push({ name: intern(v), kind: 'variable', container, file, line, pkg: pkgOf.get(file) ?? '' });
+        byFile.set(file, list);
+        continue;
+      }
       const member: [string, MemberKind] | undefined =
         js ? [js, 'method']
         : kfun && ext === '.kt' ? [kfun, 'method']
@@ -205,6 +218,20 @@ export function parseClassOutput(out: string): Map<string, ClassEntry[]> {
     byFile.set(file, list);
   }
   return byFile;
+}
+
+/** 구조 분해 안쪽 → 변수 이름들. `a, b: c, d = 1, ...rest` → a, c, d, rest (안쪽에 또 {} [] 가 있으면 그 부분은 건너뜀) */
+export function destructuredNames(inner: string): string[] {
+  const out: string[] = [];
+  for (const raw of inner.split(',')) {
+    let p = raw.trim().replace(/^\.\.\./, '');
+    if (!p) continue;
+    const colon = p.indexOf(':');
+    if (colon >= 0) p = p.slice(colon + 1).trim();
+    p = p.replace(/\s*=.*$/, '').trim();
+    if (/^[A-Za-z_$][\w$]*$/.test(p)) out.push(p);
+  }
+  return out;
 }
 
 /** rg 를 돌려 출력 전체를 받는다. isStale() 이 true 가 되면 끊고 undefined */
@@ -492,6 +519,11 @@ export class ClassIndex {
   }
 
   /** 이 파일의 이 이름 클래스가 색인에 있는가 */
+  /** 한 파일의 항목 (줄 순서) */
+  fileEntries(file: string): ClassEntry[] {
+    return this.byFile.get(path.normalize(file)) ?? [];
+  }
+
   has(file: string, name: string): boolean {
     return (this.byFile.get(path.normalize(file)) ?? []).some((e) => e.name === name);
   }
@@ -510,7 +542,7 @@ export class ClassIndex {
       for (const list of this.byFile.values()) {
         for (const e of list) {
           this.all.push(e);
-          if (e.kind === 'method' || e.kind === 'field') this.memberList.push(e);
+          if (e.kind === 'method' || e.kind === 'field' || e.kind === 'variable') this.memberList.push(e);
           else this.classList.push(e);
         }
       }

@@ -9,11 +9,12 @@
     { id: 'files', label: '파일' },
     { id: 'symbols', label: '심볼' },
     { id: 'mappers', label: 'Mapper' },
+    { id: 'spring', label: 'Spring' },
     { id: 'actions', label: '액션' },
     { id: 'text', label: '텍스트' },
   ];
-  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', mappers: 'Mapper', actions: '액션', text: '텍스트' };
-  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', mappers: 'M', actions: '⚡', text: 'T' };
+  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', mappers: 'Mapper', spring: 'Spring', actions: '액션', text: '텍스트' };
+  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', mappers: 'M', spring: 'S', actions: '⚡', text: 'T' };
   // 심볼 종류별 배지 (IntelliJ: C=클래스, I=인터페이스, E=enum, m=메서드, f=필드, v=변수)
   const ICON_BADGE = {
     'symbol-class': ['C', 'class'],
@@ -27,6 +28,7 @@
     keyboard: ['⌨', 'action'],
     'file-code': ['X', 'class'],
     database: ['q', 'method'],
+    link: ['@', 'action'],
   };
 
   const $tabs = document.getElementById('tabs');
@@ -632,6 +634,7 @@
    * 하단 오른쪽에 속도 표시. 예) 클래스 2ms · 파일 3ms · 텍스트 85ms | 전체 512ms
    * 전체 = 검색 요청을 보낸 순간부터 화면에 그릴 때까지 (확장 처리 + 메시지 왕복 + 그리기)
    */
+  let lastIndex = '';
   function renderTiming(m) {
     if (!showTiming) {
       $timing.textContent = '';
@@ -646,6 +649,11 @@
     let text = parts.join(' · ');
     if (total !== undefined) text += `${text ? ' | ' : ''}전체 ${total}ms`;
     if (openMs !== undefined) text = `창 열기 ${openMs}ms | ` + text;
+    // 색인 크기 (항목 수 · 대략의 메모리)
+    if (m.index) {
+      lastIndex = m.index;
+    }
+    if (lastIndex) text += ` | ${lastIndex}`;
     $timing.textContent = text;
     // 기준: 0.1초 이하 초록, 0.3초 이하 기본, 그 이상 주황
     $timing.className = 'footer-timing' + (total === undefined ? '' : total <= 100 ? ' fast' : total <= 300 ? '' : ' slow');

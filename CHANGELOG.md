@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Search Everywhere: JS·TS·Vue 최상위 변수도 심볼로** — `<script setup>`·모듈의 `const`·`let`·`var`(구조 분해 `const { a, b } = …` 는 이름마다). 함수 안 지역 변수는 넣지 않음
+- **색인·검색할 폴더 지정** (설정 `devBoost.searchEverywhere.indexFolders`): 넣은 폴더 아래만 색인·파일 목록·텍스트 검색. 비우면 워크스페이스 전체
+- **Spring 탭** (새 탭, QuickPick 접두어 `b/`): 빈 클래스(@Controller·@RestController·@Service·@Repository·@Component·@Configuration 등), @Bean 메서드, URL 매핑(@RequestMapping·@GetMapping 등, 적힌 그대로 — `"/search"` 로 검색). 검색어가 비면 빈 클래스 목록
+- Mapper·Spring 색인이 같은 틀(처음 한 번 전체, 이후 저장·삭제된 파일만)을 공유
+- 화면 하단 속도 표시에 색인 크기 (`색인 5,358개 · 약 1.0MB`)
 - **케이스 변환 — 단축키 롤업**: 커서 아래 이름(또는 선택)에서 `Alt+Shift+U` 를 누를 때마다 camelCase → PascalCase → snake_case → SCREAMING_SNAKE_CASE → kebab-case → camelCase 순으로 한 칸씩 바꿈. `Ctrl+Alt+Shift+U`(Mac `Cmd+Alt+Shift+U`)는 반대 방향. 바꾼 글을 선택 상태로 두어 같은 키를 계속 누르면 이어서 바뀌고, 여러 커서도 지원. `user` 처럼 케이스를 바꿔도 같은 글이 나오는 표기는 건너뜀. 우클릭 `케이스 변환` 메뉴는 그대로이고 `다음 케이스로 바꾸기` 항목이 추가됨
 
 ## 0.13.0 - 2026-10-29

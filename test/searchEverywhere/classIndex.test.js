@@ -252,3 +252,30 @@ test('TS·JS·Vue 함수·메서드: 선언은 잡고 if·호출은 버림, Java
     removeProject(dir);
   }
 });
+
+test('TS·JS·Vue 최상위 변수: 구조 분해 포함, 함수 안 지역 변수는 뺌', { skip }, async () => {
+  const dir = makeProject({
+    'web/src/App.vue': [
+      '<script setup>',
+      "const {layoutConfig, setPrimary: setP, isDark = false, ...rest} = useLayout();",
+      'const preset = ref(1);',
+      'let [first, , second = 2] = list;',
+      'export const API_URL = "/api";',
+      'const onChange = () => {',
+      '  const local = 1;',
+      '};',
+      '</script>',
+    ].join('\n'),
+  });
+  try {
+    const idx = new ci.ClassIndex(RG);
+    await idx.ensure([dir], []);
+    await idx.whenMembersDone();
+    const vars = idx.members().filter((e) => e.kind === 'variable').map((e) => e.name);
+    assert.deepEqual(vars, ['layoutConfig', 'setP', 'isDark', 'rest', 'preset', 'first', 'second', 'API_URL']);
+    assert.ok(idx.members().some((e) => e.kind === 'method' && e.name === 'onChange'));
+    assert.ok(!idx.members().some((e) => e.name === 'local'));
+  } finally {
+    removeProject(dir);
+  }
+});
