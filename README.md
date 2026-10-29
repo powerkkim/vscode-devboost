@@ -60,7 +60,7 @@
 |---|---|
 | `devBoost.searchEverywhere.ui` | 화면 방식: `popup`(에디터 탭, 기본) / `panel`(Activity Bar 사이드바) / `window`(별도 창) / `quickPick`(VS Code 기본 목록) |
 | `devBoost.searchEverywhere.exclude` | 검색에서 **완전히 뺄** 경로 (모든 탭). 기본: `target`, `node_modules`, `build`, `.git`, 로그 등 |
-| `devBoost.searchEverywhere.indexFolders` | **이 폴더 아래만** 색인·검색 (예: `coinwork_back/src/main`). 비우면 워크스페이스 전체 |
+| `devBoost.searchEverywhere.indexFolders` | **이 폴더 아래만** 색인·검색 (예: `example-back/src/main`). 비우면 워크스페이스 전체 |
 | `devBoost.searchEverywhere.ripgrepPath` | ripgrep(`rg`) 경로. 비우면 VS Code 안의 rg, 없으면 PATH 의 rg |
 | `devBoost.searchEverywhere.library` | **라이브러리로 취급**할 경로 → *프로젝트 + 라이브러리* 범위에서만 보임. 기본: `vendor`, `*.min.js` |
 | `devBoost.searchEverywhere.defaultScope` | 창을 열 때 기본 범위 |
