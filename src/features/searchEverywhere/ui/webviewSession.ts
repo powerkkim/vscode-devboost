@@ -286,6 +286,7 @@ export function toRow(item: SearchItem): ResultRow {
     case 'classes':
     case 'symbols':
     case 'mappers':
+    case 'spring':
       // description = 패키지/컨테이너, detail = 상대경로:줄
       return {
         ...base,

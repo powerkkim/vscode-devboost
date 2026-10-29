@@ -21,8 +21,10 @@ import {
 import { RecentFiles, gitChangedFiles } from './recent';
 import { ClassIndex, ClassEntry } from './classIndex';
 import { MapperIndex } from './mapperIndex';
+import { FileIndex } from './fileIndex';
+import { SpringEntry, createSpringIndex } from './springIndex';
 
-export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'mappers' | 'actions' | 'text';
+export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'mappers' | 'spring' | 'actions' | 'text';
 export type ResultKind = Exclude<TabId, 'all'>;
 
 export interface SearchItem {
@@ -136,6 +138,8 @@ export class SearchService implements vscode.Disposable {
   private classIndex: ClassIndex | null | undefined;
   /** MyBatis mapper 색인 (Mapper 탭). rg 를 못 찾으면 null */
   private mapperIndex: MapperIndex | null | undefined;
+  /** Spring 어노테이션 색인 (Spring 탭). rg 를 못 찾으면 null */
+  private springIndex: FileIndex<SpringEntry> | null | undefined;
   // 설정 배열이 바뀔 때(globCache 를 비울 때)만 새로 만든다 — 배열 자체를 키로 비교
   private libraryMatcher: { key: string[]; matcher: GlobMatcher } | undefined;
   private excludeMatcher: { key: string[]; matcher: GlobMatcher } | undefined;
@@ -175,6 +179,7 @@ export class SearchService implements vscode.Disposable {
       if (u.scheme === 'file') {
         this.classIndex?.removeFile(u.fsPath);
         this.mapperIndex?.removeFile(u.fsPath);
+        this.springIndex?.removeFile(u.fsPath);
       }
     });
     watcher.onDidChange((u) => this.indexFileChanged(u));
@@ -187,6 +192,7 @@ export class SearchService implements vscode.Disposable {
           this.rgPath = undefined;
           this.classIndex = undefined;
           this.mapperIndex = undefined;
+          this.springIndex = undefined;
         }
         if (e.affectsConfiguration('devBoost.searchEverywhere')) {
           globCache = undefined;
@@ -280,6 +286,9 @@ export class SearchService implements vscode.Disposable {
       case 'mappers':
         items = await measure('Mapper', () => this.searchMappers(query, max, sink('mappers'), isStale));
         break;
+      case 'spring':
+        items = await measure('Spring', () => this.searchSpring(query, max, sink('spring'), isStale));
+        break;
       case 'files':
         items = await measure('파일', () => this.searchFiles(query, max, sink('files')));
         break;
@@ -352,7 +361,7 @@ export class SearchService implements vscode.Disposable {
       );
     }
     const result: SearchResult = { items, timings, totalMs, groups: groupsOf(items) };
-    if ((tab === 'symbols' || tab === 'all' || tab === 'mappers') && query && this.classIndex?.ready && !this.classIndex.membersReady) {
+    if ((tab === 'symbols' || tab === 'all' || tab === 'mappers' || tab === 'spring') && query && this.classIndex?.ready && !this.classIndex.membersReady) {
       result.indexIncomplete = true;
     }
     return result;
@@ -618,6 +627,19 @@ export class SearchService implements vscode.Disposable {
     if (idx && mi && roots.length) {
       void idx.whenMembersDone().then(() => mi.ensure(this.fileRoots(), excludeGlobs()).catch(() => undefined));
     }
+    const si = this.getSpringIndex();
+    if (idx && si && roots.length) {
+      void idx.whenMembersDone().then(() => si.ensure(this.fileRoots(), excludeGlobs()).catch(() => undefined));
+    }
+  }
+
+  private getSpringIndex(): FileIndex<SpringEntry> | undefined {
+    if (this.springIndex === undefined) {
+      const rg = this.getRipgrep();
+      this.springIndex = rg ? createSpringIndex(rg) : null;
+      if (this.springIndex) this.springIndex.onLog = (m) => this.logLine(m);
+    }
+    return this.springIndex ?? undefined;
   }
 
   private getMapperIndex(): MapperIndex | undefined {
@@ -680,7 +702,7 @@ export class SearchService implements vscode.Disposable {
     const ci = this.classIndex;
     if (!ci || !ci.ready) return undefined;
     const n = ci.entries().length;
-    const m = this.mapperIndex?.ready ? this.mapperIndex.entries().length : 0;
+    const m = (this.mapperIndex?.ready ? this.mapperIndex.entries().length : 0) + (this.springIndex?.ready ? this.springIndex.entries().length : 0);
     const f = this.fileCache?.length ?? 0;
     const bytes = n * 170 + m * 200 + f * 230;
     const mb = bytes / 1048576;
@@ -693,6 +715,7 @@ export class SearchService implements vscode.Disposable {
     // 모았다가 처리. .gitignore·숨김 폴더는 rg 가 루트에서 걸러 준다
     this.classIndex?.queueUpdate(uri.fsPath);
     this.mapperIndex?.queueUpdate(uri.fsPath);
+    this.springIndex?.queueUpdate(uri.fsPath);
   }
 
   /**
@@ -917,6 +940,89 @@ export class SearchService implements vscode.Disposable {
     if (!mi.entries().length && !cands.length) {
       this.logLine('[Mapper] mapper XML·Java mapper 를 하나도 못 찾음 (<mapper namespace> 나 MyBatis DOCTYPE 이 있는 XML, …Mapper 인터페이스·@Mapper 가 없음)');
     }
+    return out;
+  }
+
+  /**
+   * Spring 탭: 빈 클래스(@Service 등), @Bean 메서드, URL 매핑(@GetMapping("/x") 적힌 그대로).
+   * 어노테이션 다음의 클래스·메서드 이름은 클래스 색인에서 같은 파일의 다음 선언으로 맞춘다.
+   * 검색어가 없으면 빈 클래스 목록
+   */
+  private async searchSpring(query: string, limit: number, count?: CountSink, isStale: () => boolean = () => false): Promise<SearchItem[]> {
+    const si = this.getSpringIndex();
+    const ci = this.getClassIndex();
+    const roots = this.fileRoots();
+    if (!si || !ci || !roots.length) {
+      count?.(0);
+      return [];
+    }
+    const started = !si.ready;
+    try {
+      await Promise.all([si.ensure(roots, excludeGlobs()), ci.ensure(roots, excludeGlobs())]);
+    } catch (e) {
+      this.log.appendLine(`[경고] Spring 검색 실패: ${e}`);
+      return [];
+    }
+    if (started && si.ready) this.logLine(`[색인] Spring 어노테이션 ${si.entries().length}개 (${si.fileCount}개 파일) ${si.lastBuildMs}ms`);
+    if (isStale()) return [];
+
+    type Cand = { kind: SpringEntry['kind']; label: string; names: string[]; desc: string; file: string; line: number; selectName: boolean };
+    const cands: Cand[] = [];
+    for (const e of si.entries()) {
+      if (!query && e.kind !== 'bean-class') continue;
+      // 어노테이션 다음에 오는 첫 선언 (클래스 또는 메서드)
+      const decls = ci.fileEntries(e.file);
+      const next = decls.find((d) => d.line >= e.line && (e.kind === 'bean-class' ? d.kind === 'class' || d.kind === 'interface' : d.kind !== 'field' && d.kind !== 'variable'));
+      if (e.kind === 'bean-class') {
+        if (!next) continue;
+        cands.push({ kind: e.kind, label: next.name, names: [next.name], desc: `@${e.ann}${next.pkg ? ' · ' + next.pkg : ''}`, file: e.file, line: next.line, selectName: true });
+      } else if (e.kind === 'bean-method') {
+        if (!next || next.kind !== 'method') continue;
+        cands.push({ kind: e.kind, label: next.name, names: [next.name], desc: `@Bean · ${next.container ?? ''}`, file: e.file, line: next.line, selectName: true });
+      } else {
+        const owner = next ? (next.kind === 'method' ? `${next.container ?? ''}.${next.name}` : next.name) : '';
+        cands.push({ kind: e.kind, label: e.text, names: [e.text, ...(next ? [next.name] : [])], desc: owner, file: e.file, line: e.line, selectName: false });
+      }
+    }
+    const order = { 'bean-class': 0, 'bean-method': 1, mapping: 2 };
+    const scored = cands
+      .map((c) => ({ c, score: query ? Math.max(...c.names.map((n) => fuzzyScore(query, n))) : 0 }))
+      .filter((x) => x.score >= 0);
+    scored.sort(
+      (a, b) =>
+        b.score - a.score ||
+        order[a.c.kind] - order[b.c.kind] ||
+        (a.c.label < b.c.label ? -1 : a.c.label > b.c.label ? 1 : 0) ||
+        (a.c.file < b.c.file ? -1 : a.c.file > b.c.file ? 1 : a.c.line - b.c.line)
+    );
+    const changed = (await this.getChanged()).set;
+    if (isStale()) return [];
+    const fileOk = this.classFileOkCache();
+    const out: SearchItem[] = [];
+    let total = 0;
+    for (const { c } of scored) {
+      let ok = fileOk.get(c.file);
+      if (ok === undefined) {
+        const u = vscode.Uri.file(c.file);
+        ok = !this.isExcluded(u) && this.pathAccepts(u) && scopeAccepts(this.options.scope, this.facts(u, changed));
+        fileOk.set(c.file, ok);
+      }
+      if (!ok) continue;
+      total++;
+      if (out.length >= limit) continue;
+      const uri = vscode.Uri.file(c.file);
+      out.push({
+        kind: 'spring',
+        label: c.label,
+        description: c.desc || undefined,
+        detail: `${vscode.workspace.asRelativePath(uri)}:${c.line + 1}`,
+        icon: c.kind === 'bean-class' ? 'symbol-class' : c.kind === 'bean-method' ? 'symbol-method' : 'link',
+        uri,
+        range: new vscode.Range(c.line, 0, c.line, 0),
+        selectName: c.selectName,
+      });
+    }
+    count?.(total);
     return out;
   }
 

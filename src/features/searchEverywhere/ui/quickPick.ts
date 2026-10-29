@@ -13,6 +13,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'files', label: '파일', icon: 'file' },
   { id: 'symbols', label: '심볼', icon: 'symbol-method' },
   { id: 'mappers', label: 'Mapper', icon: 'database' },
+  { id: 'spring', label: 'Spring', icon: 'symbol-namespace' },
   { id: 'actions', label: '액션', icon: 'zap' },
   { id: 'text', label: '텍스트', icon: 'whole-word' },
 ];
@@ -55,7 +56,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   // 우리가 정한 순서(점수·우선순위, 종류별 "더 보기" 위치)를 VS Code 가 라벨 일치도로 다시 섞지 않게
   (qp as { sortByLabel?: boolean }).sortByLabel = false;
   qp.matchOnDetail = false;
-  qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ m/ a/ t/';
+  qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ m/ b/ a/ t/';
   const updateButtons = () => {
     qp.buttons = [
       ...TABS.map((t) => new TabButton(t.id, new vscode.ThemeIcon(t.icon), t.label)),
@@ -76,11 +77,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     let text = qp.value;
 
     // 접두어로 탭 전환: "c/Foo" → 클래스 탭에서 Foo 검색
-    const prefix = /^([cfsmat])\/(.*)$/.exec(text);
+    const prefix = /^([cfsmbat])\/(.*)$/.exec(text);
     let tab = currentTab;
     if (prefix) {
       tab = (
-        { c: 'classes', f: 'files', s: 'symbols', m: 'mappers', a: 'actions', t: 'text' } as Record<string, TabId>
+        { c: 'classes', f: 'files', s: 'symbols', m: 'mappers', b: 'spring', a: 'actions', t: 'text' } as Record<string, TabId>
       )[prefix[1]];
       text = prefix[2];
     }
@@ -233,6 +234,8 @@ function kindLabel(kind: SearchItem['kind']): string {
       return '심볼';
     case 'mappers':
       return 'Mapper';
+    case 'spring':
+      return 'Spring';
     case 'actions':
       return '액션';
     case 'text':

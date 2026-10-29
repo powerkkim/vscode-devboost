@@ -519,6 +519,11 @@ export class ClassIndex {
   }
 
   /** 이 파일의 이 이름 클래스가 색인에 있는가 */
+  /** 한 파일의 항목 (줄 순서) */
+  fileEntries(file: string): ClassEntry[] {
+    return this.byFile.get(path.normalize(file)) ?? [];
+  }
+
   has(file: string, name: string): boolean {
     return (this.byFile.get(path.normalize(file)) ?? []).some((e) => e.name === name);
   }
