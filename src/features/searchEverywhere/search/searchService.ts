@@ -225,7 +225,7 @@ export class SearchService implements vscode.Disposable {
     query: string,
     isStale: () => boolean = () => false,
     limit?: number,
-    /** 모두 탭: 텍스트(rg 로 파일 내용 전체를 읽어 느림)를 기다리지 않고 클래스·심볼·파일을 먼저 보낼 때 */
+    /** 먼저 보낼 결과: 모두 탭은 클래스·심볼·파일(+먼저 찾은 텍스트), 텍스트 탭은 먼저 찾은 텍스트. 끝나면 최종 결과를 돌려준다 */
     onPartial?: (r: SearchResult) => void
   ): Promise<SearchResult> {
     const start = performance.now();
@@ -286,18 +286,41 @@ export class SearchService implements vscode.Disposable {
       case 'actions':
         items = await measure('액션', () => this.searchActions(query));
         break;
-      case 'text':
-        items = await measure('텍스트', () => this.searchText(query, max, isStale, sink('text')), textNote);
+      case 'text': {
+        // 먼저 찾은 결과를 바로 보내고(VS Code 검색처럼), 다 찾으면 전체를 정렬한 결과로 바꾼다
+        const early = onPartial
+          ? (e: SearchItem[]) => {
+              if (!isStale()) onPartial({ items: e, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(e), partial: true });
+            }
+          : undefined;
+        items = await measure('텍스트', () => this.searchText(query, max, isStale, sink('text'), early), textNote);
         break;
+      }
       case 'all': {
         // 클래스·메서드·필드는 색인, 파일·텍스트는 rg. 액션은 '모두'에서 제외 (잡음)
         const per = Math.max(5, Math.floor(this.max / 3));
         let classTotal = 0;
         let memberTotal = 0;
         // 텍스트는 같이 시작하되 기다리지 않는다: 나머지가 끝나면 먼저 보내고(onPartial), 텍스트가 끝나면 최종 결과
+        // 텍스트 중간 결과: 클래스·심볼·파일(head)이 준비된 뒤에 그 아래 붙여 보낸다
+        let head: SearchItem[] | undefined;
+        let textEarly: SearchItem[] = [];
+        const sendPartial = () => {
+          if (!onPartial || !head || isStale()) return;
+          const its = [...head, ...textEarly.slice(0, per)];
+          if (its.length) onPartial({ items: its, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(its), partial: true });
+        };
         const textP =
           query.length >= 3
-            ? measure('텍스트', () => this.searchText(query, per, isStale, sink('text')), textNote)
+            ? measure(
+                '텍스트',
+                () =>
+                  this.searchText(query, per, isStale, sink('text'), (e) => {
+                    textEarly = e;
+                    sendPartial();
+                  }),
+                textNote
+              )
             : Promise.resolve([] as SearchItem[]);
         const [indexed, members, files] = await Promise.all([
           measure('클래스', () => this.searchIndexed('classes', query, per, (t) => (classTotal = t), isStale), classNote),
@@ -306,10 +329,9 @@ export class SearchService implements vscode.Disposable {
         ]);
         totals.set('classes', { total: classTotal });
         totals.set('symbols', { total: memberTotal });
-        const head = [...(indexed ?? []).slice(0, per), ...files.slice(0, per), ...(members ?? []).slice(0, per)];
-        if (onPartial && head.length && query.length >= 3 && !isStale()) { // 비어 있으면 "결과 없음"이 잠깐 보이지 않게 텍스트까지 기다림
-          onPartial({ items: head, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(head), partial: true });
-        }
+        head = [...(indexed ?? []).slice(0, per), ...files.slice(0, per), ...(members ?? []).slice(0, per)];
+        // 텍스트를 기다리지 않고 먼저 보낸다. 비어 있으면 "결과 없음"이 잠깐 보이지 않게 텍스트 중간 결과까지 기다림
+        if (query.length >= 3) sendPartial();
         const text = await textP;
         items = [...head, ...text.slice(0, per)];
         break;
@@ -513,12 +535,45 @@ export class SearchService implements vscode.Disposable {
     return this.fileCachePromise;
   }
 
-  private async searchFiles(query: string, limit: number = this.max, count?: CountSink): Promise<SearchItem[]> {
-    const files = (await this.applyScope(await this.getFiles())).filter((u) => this.pathAccepts(u));
-    const scored: { score: number; uri: vscode.Uri; order: number }[] = [];
+  /**
+   * 범위·포함/제외 경로를 적용한 파일 목록 (이름·소문자 이름 포함).
+   * 파일마다 범위 판정(상대 경로·라이브러리 glob 등)이 들어가 수만 개면 수백 ms 라, 키를 칠 때마다 하지 않고
+   * 파일 목록·범위·경로·설정이 그대로면 재사용한다. 최근 본/변경 범위는 목록이 자주 바뀌고 작아서 매번 계산
+   */
+  private scopedFiles: { files: vscode.Uri[]; key: string; globs: unknown; list: { uri: vscode.Uri; name: string; lc: string }[] } | undefined;
+  private async getScopedFiles(): Promise<{ uri: vscode.Uri; name: string; lc: string }[]> {
+    const files = await this.getFiles();
+    const { scope, paths } = this.options;
+    const key = `${scope}\u0000${paths.include}\u0000${paths.exclude}`;
+    const globs = globSettings();
+    const reuse = scope !== 'recentViewed' && scope !== 'recentChanged';
+    const c = this.scopedFiles;
+    if (reuse && c && c.files === files && c.key === key && c.globs === globs) return c.list;
+    const list = (await this.applyScope(files))
+      .filter((u) => this.pathAccepts(u))
+      .map((uri) => {
+        const name = path.basename(uri.fsPath);
+        return { uri, name, lc: name.toLowerCase() };
+      });
+    if (reuse) this.scopedFiles = { files, key, globs, list };
+    return list;
+  }
 
-    files.forEach((uri, order) => {
-      const name = path.basename(uri.fsPath);
+  private async searchFiles(query: string, limit: number = this.max, count?: CountSink): Promise<SearchItem[]> {
+    const files = await this.getScopedFiles();
+    const scored: { score: number; uri: vscode.Uri; order: number }[] = [];
+    const q = query.toLowerCase();
+
+    files.forEach(({ uri, name, lc }, order) => {
+      // 글자가 순서대로 들어 있는지 소문자로 먼저 걸러 점수 계산을 줄인다 (색인 검색과 같은 방식)
+      if (q) {
+        let ti = 0;
+        for (let qi = 0; qi < q.length; qi++) {
+          const f = lc.indexOf(q[qi], ti);
+          if (f < 0) return;
+          ti = f + 1;
+        }
+      }
       // 파일명 기준으로 점수 계산, 쿼리가 비어 있으면 전부 0점 (최근 본/변경 범위는 목록 순서 유지)
       const score = query ? fuzzyScore(query, name) : 0;
       if (score >= 0) {
@@ -888,7 +943,9 @@ export class SearchService implements vscode.Disposable {
     query: string,
     limit: number,
     isStale: () => boolean = () => false,
-    count?: CountSink
+    count?: CountSink,
+    /** 먼저 찾은 결과(정렬은 그때까지 찾은 것끼리)를 한 번 미리 받는다. 끝나면 전체를 다시 정렬한 결과를 돌려준다 */
+    onEarly?: (items: SearchItem[]) => void
   ): Promise<SearchItem[]> {
     if (query.length < 2) {
       return [];
@@ -896,7 +953,7 @@ export class SearchService implements vscode.Disposable {
     const rg = this.getRipgrep();
     if (rg) {
       try {
-        const r = await this.searchTextRipgrep(rg, query, limit, isStale, count);
+        const r = await this.searchTextRipgrep(rg, query, limit, isStale, count, onEarly);
         this.lastTextEngine = 'rg';
         return r;
       } catch (e) {
@@ -943,7 +1000,8 @@ export class SearchService implements vscode.Disposable {
     query: string,
     limit: number,
     isStale: () => boolean,
-    count?: CountSink
+    count?: CountSink,
+    onEarly?: (items: SearchItem[]) => void
   ): Promise<SearchItem[]> {
     const roots = (vscode.workspace.workspaceFolders ?? [])
       .filter((f) => f.uri.scheme === 'file')
@@ -1000,19 +1058,6 @@ export class SearchService implements vscode.Disposable {
 
     // 우선순위 정렬을 위해 넉넉히(TEXT_COLLECT_MAX) 모은 뒤 정렬해서 자른다.
     // 먼저 찾은 몇 개만 받으면 폴더 순서상 뒤에 있는 src 의 매치가 정렬 대상에도 못 들어간다
-    const collect = Math.max(TEXT_COLLECT_MAX, limit);
-    const matches = await runRipgrep(rgPath, {
-      query,
-      roots: searchRoots,
-      excludeGlobs: exclude,
-      includeGlobs,
-      caseSensitive: text.caseSensitive,
-      wholeWord: text.wholeWord,
-      regex: text.regex,
-      limit: collect,
-      isStale,
-    });
-
     const openDocs = new Set(vscode.workspace.textDocuments.map((d) => d.uri.toString()));
     // 제외 경로는 결과에서도 한 번 더 거른다: rg 는 "src/**" 같은 경로 glob 을 실행 폴더 기준으로 맞춰서
     // "./src" 처럼 워크스페이스 바로 아래를 가리키는 제외가 rg 에서는 적용되지 않는다
@@ -1031,25 +1076,43 @@ export class SearchService implements vscode.Disposable {
       }
       return f;
     };
-    const withUri = matches
-      .map((m) => ({ m, f: fileInfo(m.file) }))
-      .filter(({ f }) => f.ok)
-      .map(({ m, f }) => ({ m, uri: f.uri, prio: f.prio }));
-    // 우선순위 → 경로 → 줄. rg 는 여러 스레드로 훑어 찾은 순서가 매번 달라서, 같은 우선순위끼리는 경로·줄 순으로 고정
-    withUri.sort(
-      (a, b) =>
-        a.prio - b.prio || (a.m.file < b.m.file ? -1 : a.m.file > b.m.file ? 1 : a.m.line - b.m.line || a.m.column - b.m.column)
-    );
-    // 한 파일에서 최대 20줄(--max-count)만 가져오므로, 그 상한에 걸린 파일이 있으면 실제 개수는 더 많다
-    const perFileCount = new Map<string, number>();
-    let fileCapped = false;
-    for (const { m } of withUri) {
-      const n = (perFileCount.get(m.file) ?? 0) + 1;
-      perFileCount.set(m.file, n);
-      if (n >= RG_MAX_PER_FILE) fileCapped = true;
-    }
-    count?.(withUri.length, matches.length >= collect || fileCapped);
-    return withUri.slice(0, limit).map(({ m, uri }) => toTextItem(m, uri, query));
+    const toItems = (matches: RgMatch[], final: boolean) => {
+      const withUri = matches
+        .map((m) => ({ m, f: fileInfo(m.file) }))
+        .filter(({ f }) => f.ok)
+        .map(({ m, f }) => ({ m, uri: f.uri, prio: f.prio }));
+      // 우선순위 → 경로 → 줄. rg 는 여러 스레드로 훑어 찾은 순서가 매번 달라서, 같은 우선순위끼리는 경로·줄 순으로 고정
+      withUri.sort(
+        (a, b) =>
+          a.prio - b.prio || (a.m.file < b.m.file ? -1 : a.m.file > b.m.file ? 1 : a.m.line - b.m.line || a.m.column - b.m.column)
+      );
+      // 한 파일에서 최대 20줄(--max-count)만 가져오므로, 그 상한에 걸린 파일이 있으면 실제 개수는 더 많다
+      const perFileCount = new Map<string, number>();
+      let fileCapped = false;
+      for (const { m } of withUri) {
+        const n = (perFileCount.get(m.file) ?? 0) + 1;
+        perFileCount.set(m.file, n);
+        if (n >= RG_MAX_PER_FILE) fileCapped = true;
+      }
+      if (final) count?.(withUri.length, matches.length >= collect || fileCapped);
+      return withUri.slice(0, limit).map(({ m, uri }) => toTextItem(m, uri, query));
+    };
+    const collect = Math.max(TEXT_COLLECT_MAX, limit);
+    const matches = await runRipgrep(rgPath, {
+      query,
+      roots: searchRoots,
+      excludeGlobs: exclude,
+      includeGlobs,
+      caseSensitive: text.caseSensitive,
+      wholeWord: text.wholeWord,
+      regex: text.regex,
+      limit: collect,
+      isStale,
+      // 먼저 찾은 결과를 바로 보여 준다 (그때까지 찾은 것끼리 정렬). 끝나면 전체를 다시 정렬
+      onEarly: onEarly ? (early) => onEarly(toItems(early, false)) : undefined,
+    });
+
+    return toItems(matches, true);
   }
 
   /** 텍스트 결과 순서: 0=열린 문서, 1=src 아래 소스, 2=기타, 3=라이브러리(vendor 등) */
