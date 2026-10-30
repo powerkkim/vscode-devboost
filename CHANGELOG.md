@@ -1,16 +1,20 @@
 # Changelog
 
+## 0.15.0 - 2026-10-30
+- **Search Everywhere: 창 고정** (오른쪽 위 `고정` 버튼 또는 `Alt+L`, QuickPick 은 핀 아이콘): 결과를 열어도 검색 창이 닫히지 않고 커서도 검색 창에 남아, 다른 결과를 이어서 열어 볼 수 있음. 탭 모드는 옆 칸에, 사이드바·떠 있는 창은 쓰던 에디터에 열림. `Esc` 로 닫기
+- 문서의 어노테이션 표기를 코드 표시로 바꿈 (릴리스 노트에서 GitHub 사용자 멘션으로 처리되던 문제), 예시 경로를 `example-back/src/main` 등으로
+
 ## 0.14.0 - 2026-10-29
 - **Search Everywhere: JS·TS·Vue 최상위 변수도 심볼로** — `<script setup>`·모듈의 `const`·`let`·`var`(구조 분해 `const { a, b } = …` 는 이름마다). 함수 안 지역 변수는 넣지 않음
 - **색인·검색할 폴더 지정** (설정 `devBoost.searchEverywhere.indexFolders`): 넣은 폴더 아래만 색인·파일 목록·텍스트 검색. 비우면 워크스페이스 전체
-- **Spring 탭** (새 탭, QuickPick 접두어 `b/`): 빈 클래스(@Controller·@RestController·@Service·@Repository·@Component·@Configuration 등), @Bean 메서드, URL 매핑(@RequestMapping·@GetMapping 등, 적힌 그대로 — `"/search"` 로 검색). 검색어가 비면 빈 클래스 목록
+- **Spring 탭** (새 탭, QuickPick 접두어 `b/`): 빈 클래스(`@Controller`·`@RestController`·`@Service`·`@Repository`·`@Component`·`@Configuration` 등), `@Bean` 메서드, URL 매핑(`@RequestMapping`·`@GetMapping` 등, 적힌 그대로 — `"/search"` 로 검색). 검색어가 비면 빈 클래스 목록
 - Mapper·Spring 색인이 같은 틀(처음 한 번 전체, 이후 저장·삭제된 파일만)을 공유
 - 화면 하단 속도 표시에 색인 크기 (`색인 5,358개 · 약 1.0MB`)
 - **케이스 변환 — 단축키 롤업**: 커서 아래 이름(또는 선택)에서 `Alt+Shift+U` 를 누를 때마다 camelCase → PascalCase → snake_case → SCREAMING_SNAKE_CASE → kebab-case → camelCase 순으로 한 칸씩 바꿈. `Ctrl+Alt+Shift+U`(Mac `Cmd+Alt+Shift+U`)는 반대 방향. 바꾼 글을 선택 상태로 두어 같은 키를 계속 누르면 이어서 바뀌고, 여러 커서도 지원. `user` 처럼 케이스를 바꿔도 같은 글이 나오는 표기는 건너뜀. 우클릭 `케이스 변환` 메뉴는 그대로이고 `다음 케이스로 바꾸기` 항목이 추가됨
 
 ## 0.13.0 - 2026-10-29
 - **Search Everywhere: 언어 서버를 쓰지 않음** — Java 언어 서버가 프로젝트를 불러오거나 빌드하는 동안 결과가 한참 뒤에 나오던 문제
-  - 모든 탭이 ripgrep 으로 만든 색인(클래스·메서드·필드·Mapper)·파일 목록·텍스트로 바로 확정. 이름 중간 글자로도 찾음 (`Application` → `CoinworkApplication`)
+  - 모든 탭이 ripgrep 으로 만든 색인(클래스·메서드·필드·Mapper)·파일 목록·텍스트로 바로 확정. 이름 중간 글자로도 찾음 (`Application` → `ExampleApplication`)
   - jar·JDK 안의 클래스는 검색하지 않음 (jar 파일 이름은 파일 탭). 범위 *프로젝트 + 라이브러리* 는 library 설정 경로(vendor, *.min.js 등)를 포함하는 뜻으로
   - 창을 닫거나 숨기면 진행 중인 텍스트 검색을 바로 멈춤
   - 모두 탭: 클래스·심볼·파일을 먼저 보여 주고 텍스트(파일 내용 전체를 읽어 느림)는 끝나는 대로 아래에 붙임 (입력을 멈춘 뒤 한참 있다 나오던 문제)
@@ -19,7 +23,7 @@
 - **메서드 검색** (심볼 탭, 모두 탭): Java 메서드·필드, Kotlin `fun`, TS·JS·Vue 함수·메서드(`function`, 화살표 함수, 클래스·Options API 메서드, `name: function`)를 직접 색인. 수식어 없는 필드(`Foo foo;`)는 제외. Kotlin `fun` 포함
 - 색인은 검색 창을 열 때 미리 만들기 시작 (클래스 먼저, 메서드·필드는 이어서). 저장한 파일은 그 파일만 다시 읽음
 - 색인·파일 목록·텍스트 검색·파일 감시가 모두 설정 `devBoost.searchEverywhere.exclude` 를 따름. 제외 폴더(`target`·`bin`·`logs` 등)에서 파일이 생기거나 지워져도(빌드 중) 파일 목록을 다시 모으지 않음
-- **Mapper 탭** (새 탭, QuickPick 접두어 `m/`): MyBatis mapper XML 파일·SQL id(select·insert·update·delete·sql)와 Java mapper 인터페이스만 모아 검색. mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 골라 pom.xml·설정 XML 은 안 나옴. MyBatis DOCTYPE 만 있고 namespace 가 다음 줄에 있어도 인식. Java 는 `@Mapper`, XML namespace 와 같은 이름, 또는 이름이 `…Mapper` 인 인터페이스(@MapperScan)와 그 메서드. 같은 이름의 Java 메서드와 SQL id 는 나란히 나옴. 검색어가 비면 mapper 파일 목록
+- **Mapper 탭** (새 탭, QuickPick 접두어 `m/`): MyBatis mapper XML 파일·SQL id(select·insert·update·delete·sql)와 Java mapper 인터페이스만 모아 검색. mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 골라 pom.xml·설정 XML 은 안 나옴. MyBatis DOCTYPE 만 있고 namespace 가 다음 줄에 있어도 인식. Java 는 `@Mapper`, XML namespace 와 같은 이름, 또는 이름이 `…Mapper` 인 인터페이스(`@MapperScan`)와 그 메서드. 같은 이름의 Java 메서드와 SQL id 는 나란히 나옴. 검색어가 비면 mapper 파일 목록
 - **검색 범위 이름·순서 정리**: *프로젝트 (테스트 제외)* 를 맨 위·기본값으로. *프로젝트 (테스트 포함)*, *테스트만*, *프로젝트 + 라이브러리*, *최근에 연 파일*, *커밋 안 한 파일 (Git)*. Alt+N 은 테스트 제외 ↔ 라이브러리 포함
 - **프로젝트의 상위 폴더 이름이 제외 설정과 같으면**(예: `C:\work\bin\demo` 의 `bin`) 색인·파일 목록·텍스트가 통째로 비던 문제 수정 (rg 를 프로젝트 폴더에서 실행)
 - **최신 VS Code 에서 ripgrep 을 못 찾던 문제** — VS Code 가 rg 를 `@vscode/ripgrep-universal/bin/<OS>-<CPU>/` 로 옮겨서, 클래스·메서드·Mapper 색인이 꺼지고 텍스트 검색이 느린 방식(파일 직접 읽기)으로 돌았음. 새 위치와 시스템 PATH 도 찾고, 설정 `devBoost.searchEverywhere.ripgrepPath` 로 직접 지정 가능. 어느 rg 를 쓰는지(못 찾으면 이유) 출력 패널에 기록

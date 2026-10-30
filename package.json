@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -388,7 +388,7 @@
               "type": "string"
             },
             "default": [],
-            "markdownDescription": "**이 폴더 아래만** 색인·검색합니다 (클래스·심볼·Mapper 색인, 파일 목록, 텍스트 검색). 워크스페이스 폴더 기준 상대 경로(예: `coinwork_back/src/main`, `coinwork_front/src`) 또는 절대 경로. 비워 두면 워크스페이스 전체. 맡은 업무 폴더만 넣으면 색인이 작아지고 텍스트 검색이 빨라집니다. 그 안에서 뺄 것은 `exclude` 로."
+            "markdownDescription": "**이 폴더 아래만** 색인·검색합니다 (클래스·심볼·Mapper 색인, 파일 목록, 텍스트 검색). 워크스페이스 폴더 기준 상대 경로(예: `example-back/src/main`, `example-front/src`) 또는 절대 경로. 비워 두면 워크스페이스 전체. 맡은 업무 폴더만 넣으면 색인이 작아지고 텍스트 검색이 빨라집니다. 그 안에서 뺄 것은 `exclude` 로."
           },
           "devBoost.searchEverywhere.exclude": {
             "type": "array",

@@ -146,7 +146,8 @@ body {
   background: var(--se-hover-bg);
 }
 
-.filter-btn {
+.filter-btn,
+.pin-btn {
   position: relative;
   font-weight: 500;
   font-size: 12px;

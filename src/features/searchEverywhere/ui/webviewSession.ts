@@ -14,6 +14,7 @@ export type FromWebview =
   | { type: 'ready' }
   | { type: 'search'; runId: number; tab: TabId; query: string; options?: Partial<SearchOptions>; limit?: number }
   | { type: 'toggleNonProject'; value: boolean }
+  | { type: 'pin'; value: boolean }
   | { type: 'setOptions'; options: Partial<SearchOptions> }
   | { type: 'currentFolder' }
   | { type: 'open'; runId: number; index: number; seq?: number }
@@ -37,6 +38,8 @@ export interface SessionHost {
   close(): void;
   /** 결과를 열 에디터 위치. 패널 모드에서는 마지막으로 쓰던 에디터 자리 */
   targetColumn(): vscode.ViewColumn | undefined;
+  /** 창 고정 상태에서 결과를 열 위치 (없으면 targetColumn). 탭 모드는 옆 칸 — 같은 칸에 열면 검색 탭이 가려짐 */
+  pinnedColumn?(): vscode.ViewColumn | undefined;
 }
 
 export class WebviewSession {
@@ -91,6 +94,7 @@ export class WebviewSession {
       type: 'init',
       ...this.pendingInit,
       includeNonProject: this.service.includeNonProject,
+      pinned: this.service.pinned,
       options: this.service.options,
       scopes: SCOPES,
       fileMasks: vscode.workspace.getConfiguration('devBoost.searchEverywhere').get<string[]>('fileMasks', []),
@@ -190,9 +194,15 @@ export class WebviewSession {
 
       case 'open': {
         const item = m.runId === this.latestRunId ? this.sent.get(m.seq ?? this.seq)?.[m.index] : undefined;
-        const column = this.host.targetColumn();
         // 결과를 실제로 열었을 때의 포함 경로만 최근 목록에 남긴다 (입력 중간값 제외)
         this.service.rememberInclude(this.service.options.paths.include);
+        if (this.service.pinned) {
+          // 창 고정: 닫지 않고 파일만 열고, 커서는 검색 창에 둔다 → 다른 결과를 이어서 연다
+          const col = this.host.pinnedColumn ? this.host.pinnedColumn() : this.host.targetColumn();
+          if (item) await this.service.open(item, col, true);
+          break;
+        }
+        const column = this.host.targetColumn();
         this.cancel();
         this.host.close(); // 먼저 닫아야 원래 에디터 위치에 파일이 열린다
         if (item) {
@@ -200,6 +210,10 @@ export class WebviewSession {
         }
         break;
       }
+
+      case 'pin':
+        this.service.pinned = !!m.value;
+        break;
 
       case 'close':
         this.cancel('창 닫힘');
@@ -254,6 +268,7 @@ export class WebviewSession {
         <button id="optWord" class="toggle text-only" title="단어 단위 (Alt+W)">W</button>
         <button id="optRegex" class="toggle text-only" title="정규식 (Alt+X)">.*</button>
         <button id="optFilter" class="toggle filter-btn" title="포함/제외 경로 (Alt+P)">필터</button>
+        <button id="optPin" class="toggle pin-btn" title="창 고정: 결과를 열어도 닫지 않고 이어서 열기 (Alt+L)">고정</button>
       </div>
     </div>
     <div class="searchbar">

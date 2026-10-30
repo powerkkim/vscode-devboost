@@ -44,6 +44,16 @@ class NonProjectToggle implements vscode.QuickInputButton {
   }
 }
 
+class PinToggle implements vscode.QuickInputButton {
+  constructor(public readonly on: boolean) {}
+  get iconPath() {
+    return new vscode.ThemeIcon(this.on ? 'pinned' : 'pin');
+  }
+  get tooltip() {
+    return this.on ? '창 고정: 켜짐 (결과를 열어도 닫지 않음)' : '창 고정: 꺼짐';
+  }
+}
+
 export function openQuickPick(service: SearchService, initialTab: TabId) {
   const qp = vscode.window.createQuickPick<PickItem>();
   let currentTab: TabId = initialTab;
@@ -61,7 +71,9 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     qp.buttons = [
       ...TABS.map((t) => new TabButton(t.id, new vscode.ThemeIcon(t.icon), t.label)),
       new NonProjectToggle(service.includeNonProject),
+      new PinToggle(service.pinned),
     ];
+    qp.ignoreFocusOut = service.pinned; // 고정이면 파일을 열어 포커스가 옮겨 가도 닫히지 않게
   };
 
   const updateTitle = () => {
@@ -139,6 +151,9 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
       limit = undefined;
       updateTitle();
       run();
+    } else if (b instanceof PinToggle) {
+      service.pinned = !service.pinned;
+      updateButtons();
     } else if (b instanceof NonProjectToggle) {
       service.includeNonProject = !service.includeNonProject;
       limit = undefined;
@@ -151,7 +166,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   qp.onDidAccept(async () => {
     const picked = qp.selectedItems[0];
     if (picked?.more) {
-      if (currentTab === 'all' && !/^[cfsat]\//.test(qp.value)) {
+      if (currentTab === 'all' && !/^[cfsmbat]\//.test(qp.value)) {
         currentTab = picked.more; // 모두 탭: 그 종류의 탭으로
         limit = undefined;
         updateTitle();
@@ -166,6 +181,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
       return;
     }
     if (!picked?.data) {
+      return;
+    }
+    if (service.pinned) {
+      // 고정: 닫지 않고 파일만 연다 (커서는 목록에 남아 이어서 고를 수 있음)
+      await service.open(picked.data, undefined, true);
       return;
     }
     qp.hide();

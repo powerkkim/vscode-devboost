@@ -45,7 +45,7 @@ engine.ts   요약을 이어 붙여 해석: import → 다른 모듈, call → �
 | Vuex(`this.$store.dispatch`) | 미지원 |
 | 언어 서버(Volar·Java) 보정 | 있을 때만 쓰는 2단계로 설계 예정. 기본은 정적 분석 |
 | Java 정규식 파서 → 실제 파서 | 다층 빈 체인 정확도를 위해 필요 |
-| coinwork·eGov 유형 정답 fixture 로 누락/오탐 측정 | 미착수 (유형별 합성 fixture 코퍼스 계획) |
+| 업무형·eGov 유형 정답 fixture 로 누락/오탐 측정 | 미착수 (유형별 합성 fixture 코퍼스 계획) |
 
 ## 5. 설정
 

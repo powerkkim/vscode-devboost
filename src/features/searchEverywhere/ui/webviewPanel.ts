@@ -54,6 +54,8 @@ export class SearchEverywherePanel {
       kindLabel: mode === 'window' ? '떠 있는 창' : '탭',
       close: () => this.panel.dispose(),
       targetColumn: () => (mode === 'window' ? this.targetColumn : undefined),
+      // 고정 상태: 탭 모드는 옆 칸에 연다 (같은 칸이면 검색 탭이 가려짐), 떠 있는 창은 원래 에디터 자리
+      pinnedColumn: () => (mode === 'window' ? this.targetColumn : vscode.ViewColumn.Beside),
     });
     this.session.open(tab, query);
     this.panel.webview.html = this.session.html(context.extensionUri, 'popup');
@@ -64,7 +66,8 @@ export class SearchEverywherePanel {
       (e) => {
         // 팝업처럼: 다른 곳을 클릭해 포커스를 잃으면 닫는다
         // (떠 있는 창 모드는 창 사이 이동이 잦아 자동으로 닫지 않는다. Esc나 선택으로 닫음)
-        if (!e.webviewPanel.active && !this.moving && this.mode === 'popup') {
+        // 창 고정 중에는 닫지 않는다 (결과를 옆 칸에 열면 포커스가 잠깐 옮겨 감)
+        if (!e.webviewPanel.active && !this.moving && this.mode === 'popup' && !this.service.pinned) {
           this.panel.dispose();
         }
       },
