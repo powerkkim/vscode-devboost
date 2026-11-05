@@ -29,6 +29,7 @@
     'file-code': ['X', 'class'],
     database: ['q', 'method'],
     link: ['@', 'action'],
+    search: ['T', 'field'], // Mapper 탭: mapper XML 본문에서 찾은 줄
   };
 
   const $tabs = document.getElementById('tabs');
