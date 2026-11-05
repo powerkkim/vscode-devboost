@@ -21,6 +21,7 @@ import {
 import { RecentFiles, gitChangedFiles } from './recent';
 import { ClassIndex, ClassEntry } from './classIndex';
 import { MapperIndex, MapperEntry } from './mapperIndex';
+import { NameHit, arrangeMapperResults, ownerStatement, mapperSearchRoots, hitPerFileCap } from './mapperText';
 import { FileIndex } from './fileIndex';
 import { SpringEntry, createSpringIndex } from './springIndex';
 
@@ -929,20 +930,20 @@ export class SearchService implements vscode.Disposable {
       }
       return ok;
     };
-    // 이름 결과: 검색어가 이름에 그대로 들어 있는 것(strong)과 글자만 순서대로 맞는 것(weak)으로 나눈다.
-    // 본문 결과는 그 사이에 둔다 → 느슨하게 맞은 이름 수십 개에 본문 결과가 밀려 안 보이는 일이 없게
+    // 범위에 맞는 것만 남기고, 화면 순서(이름에 그대로 든 것 → 본문 → 글자만 맞은 이름)로 나눈다 — mapperText.ts
     const ql = query.toLowerCase();
-    const strong: SearchItem[] = [];
-    const weak: SearchItem[] = [];
-    const nameLines = new Set<string>(); // 이름으로 이미 나온 줄 (본문 결과에서 같은 줄은 뺀다)
-    let total = 0;
+    const names: NameHit<Cand>[] = [];
     for (const { c } of scored) {
-      if (!accepts(c.file)) continue;
-      total++;
-      nameLines.add(`${c.file}\u0000${c.line}`);
-      if (strong.length + weak.length >= limit) continue;
+      if (accepts(c.file)) names.push({ value: c, file: c.file, line: c.line, strong: c.name.toLowerCase().includes(ql) });
+    }
+    const arranged = arrangeMapperResults(
+      names,
+      content.matches.filter((m) => accepts(m.file)),
+      limit
+    );
+    const nameItem = (c: Cand): SearchItem => {
       const uri = vscode.Uri.file(c.file);
-      (c.name.toLowerCase().includes(ql) ? strong : weak).push({
+      return {
         kind: 'mappers',
         label: c.name,
         description: c.desc || undefined,
@@ -951,12 +952,12 @@ export class SearchService implements vscode.Disposable {
         uri,
         range: new vscode.Range(c.line, 0, c.line, 0),
         selectName: c.kind !== 'xml',
-      });
-    }
-    // 본문 결과: 그 줄이 들어 있는 SQL id (그 줄보다 앞에 나온 마지막 문장)를 옆에 적는다
+      };
+    };
+    // 본문 결과: 그 줄이 들어 있는 SQL id 를 옆에 적는다
     const stmtsByFile = new Map<string, MapperEntry[]>();
-    if (content.matches.length) {
-      const wanted = new Set(content.matches.map((m) => m.file));
+    if (arranged.text.length) {
+      const wanted = new Set(arranged.text.map((m) => m.file));
       for (const e of mi.entries()) {
         if (e.kind !== 'statement' || !wanted.has(e.file)) continue;
         const l = stmtsByFile.get(e.file) ?? [];
@@ -964,16 +965,10 @@ export class SearchService implements vscode.Disposable {
         stmtsByFile.set(e.file, l);
       }
     }
-    const inText: SearchItem[] = [];
-    let textTotal = 0;
-    for (const m of content.matches) {
-      if (nameLines.has(`${m.file}\u0000${m.line}`) || !accepts(m.file)) continue;
-      textTotal++;
-      if (inText.length >= limit) continue;
-      let owner: MapperEntry | undefined;
-      for (const s of stmtsByFile.get(m.file) ?? []) if (s.line <= m.line && (!owner || s.line > owner.line)) owner = s;
+    const textItem = (m: RgMatch): SearchItem => {
+      const owner = ownerStatement(stmtsByFile.get(m.file), m.line);
       const uri = vscode.Uri.file(m.file);
-      inText.push({
+      return {
         kind: 'mappers',
         label: m.text.trim().slice(0, 200),
         description: owner ? `${owner.statement} ${owner.name}` : undefined,
@@ -981,10 +976,10 @@ export class SearchService implements vscode.Disposable {
         icon: 'search',
         uri,
         range: new vscode.Range(m.line, m.column, m.line, m.column + (m.length || query.length)),
-      });
-    }
-    const out = [...strong, ...inText, ...weak];
-    count?.(total + textTotal, content.capped);
+      };
+    };
+    const out = [...arranged.strong.map(nameItem), ...arranged.text.map(textItem), ...arranged.weak.map(nameItem)];
+    count?.(arranged.total, content.capped);
     if (!mi.entries().length && !cands.length) {
       this.logLine('[Mapper] mapper XML·Java mapper 를 하나도 못 찾음 (<mapper namespace> 나 MyBatis DOCTYPE 이 있는 XML, …Mapper 인터페이스·@Mapper 가 없음)');
     }
@@ -992,8 +987,9 @@ export class SearchService implements vscode.Disposable {
   }
 
   /**
-   * Mapper 탭의 본문 검색: mapper XML 안에서 검색어가 든 줄 (대소문자 무시, 글자 그대로).
-   * rg 를 *.xml 로 돌린 뒤 mapper 색인에 있는 파일만 남긴다 (pom.xml·설정 XML 제외). 경로·줄 순으로 정렬.
+   * Mapper 탭의 본문 검색: mapper XML 안에서 검색어가 든 줄 (대소문자 무시, 글자 그대로). 경로·줄 순으로 정렬.
+   * 워크스페이스 전체가 아니라 mapper XML 이 있는 폴더에서만 rg 를 돌리고, mapper 색인에 있는 파일만 남긴다.
+   * capped: 전체 한도(TEXT_COLLECT_MAX)나 파일당 한도(RG_MAX_PER_FILE)에 걸려 실제로는 더 많을 수 있음.
    * 검색어가 2글자 미만이거나 rg·mapper XML 이 없으면 빈 결과
    */
   private async mapperTextMatches(
@@ -1009,14 +1005,21 @@ export class SearchService implements vscode.Disposable {
     for (const e of mi.entries()) if (e.kind === 'xml') xmlFiles.add(e.file);
     if (!xmlFiles.size) return none;
     try {
-      const found = await runRipgrep(rg, { query, roots, excludeGlobs: excludeGlobs(), includeGlobs: ['*.xml'], limit: TEXT_COLLECT_MAX, isStale });
+      const found = await runRipgrep(rg, {
+        query,
+        roots: mapperSearchRoots(xmlFiles, roots),
+        excludeGlobs: excludeGlobs(),
+        includeGlobs: ['*.xml'],
+        limit: TEXT_COLLECT_MAX,
+        isStale,
+      });
       const matches: RgMatch[] = [];
       for (const m of found) {
         const file = path.normalize(m.file); // mapper 색인의 경로와 구분자를 맞춘다
         if (xmlFiles.has(file)) matches.push({ ...m, file });
       }
       matches.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line || a.column - b.column));
-      return { matches, capped: found.length >= TEXT_COLLECT_MAX };
+      return { matches, capped: found.length >= TEXT_COLLECT_MAX || hitPerFileCap(matches, RG_MAX_PER_FILE) };
     } catch (e) {
       this.log.appendLine(`[경고] mapper XML 본문 검색 실패 (이름 결과만 보여 줍니다): ${e}`);
       return none;
