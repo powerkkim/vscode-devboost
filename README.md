@@ -10,6 +10,7 @@
 | **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
+| **DB 콘솔** — Oracle(12.1 이상)에 직접 접속해 쿼리 실행, 결과는 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
@@ -30,7 +31,7 @@
 - **필터**: Ctrl+Shift+F 의 files to include / exclude 와 같은 형식
   - `src/main/java/com/demo/module/order` → 그 폴더 아래만 · `./src` → 워크스페이스 바로 아래 · `**/dto/**, *Test.java` → 패턴
   - `현재 폴더` 버튼: 지금 보는 파일의 폴더를 포함에 넣기
-- **Mapper 탭**: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스·메서드만. `<mapper namespace>` 가 있는 XML 만 골라 pom.xml·설정 XML 은 나오지 않습니다. SQL id 를 고르면 그 줄로 이동
+- **Mapper 탭**: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스·메서드만. `<mapper namespace>` 가 있는 XML 만 골라 pom.xml·설정 XML 은 나오지 않습니다. SQL id 를 고르면 그 줄로 이동. 검색어가 2글자 이상이면 mapper XML 본문(테이블·컬럼 이름 등)에서 찾은 줄도 함께 나오고, 어느 SQL id 안인지 옆에 표시합니다 (대소문자 무시)
 - **Spring 탭**: 빈 클래스(`@Service` 등)·`@Bean` 메서드·URL 매핑(`@GetMapping("/search")` 적힌 그대로). URL 일부(`/search`)나 클래스·메서드 이름으로 찾음
 - **액션 탭**: 명령 팔레트 / 설정 / 단축키 설정을 검색어가 채워진 상태로 엽니다
 - **결과 개수와 더 보기**: 탭마다 `maxResults`(기본 50)개씩 보여 주고, 더 있으면 끝에 `더 보기 — 123개 중 50개 표시`. 모두 탭은 종류별 머리글에 개수가 나오고 `더 보기`는 그 탭으로 이동
@@ -103,3 +104,5 @@ npm run package     # → devboost-<version>.vsix
 ## 라이선스
 
 [MIT](LICENSE)
+
+함께 묶어 배포하는 오픈 소스 라이브러리(Vue, Babel, node-oracledb 등)의 저작권·라이선스 고지는 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다. 빌드할 때 실제로 묶인 라이브러리에서 자동으로 만들어집니다.

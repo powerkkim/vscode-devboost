@@ -20,7 +20,8 @@ import {
 } from './scope';
 import { RecentFiles, gitChangedFiles } from './recent';
 import { ClassIndex, ClassEntry } from './classIndex';
-import { MapperIndex } from './mapperIndex';
+import { MapperIndex, MapperEntry } from './mapperIndex';
+import { NameHit, arrangeMapperResults, ownerStatement, mapperSearchRoots, hitPerFileCap } from './mapperText';
 import { FileIndex } from './fileIndex';
 import { SpringEntry, createSpringIndex } from './springIndex';
 
@@ -847,7 +848,8 @@ export class SearchService implements vscode.Disposable {
   /**
    * Mapper 탭: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스.
    * mapper XML 은 폴더가 아니라 내용(`<mapper namespace>`)으로 고르고, Java 는 @Mapper 이거나 XML namespace 와 같은 이름의 클래스.
-   * 검색어가 비어 있으면 mapper 파일 목록 (SQL id 제외)
+   * 검색어가 비어 있으면 mapper 파일 목록 (SQL id 제외).
+   * 검색어가 2글자 이상이면 mapper XML 본문에서 찾은 줄도 함께 (순서: 이름에 검색어가 그대로 든 것 → 본문 → 글자만 순서대로 맞은 이름)
    */
   private async searchMappers(query: string, limit: number, count?: CountSink, isStale: () => boolean = () => false): Promise<SearchItem[]> {
     const mi = this.getMapperIndex();
@@ -864,6 +866,8 @@ export class SearchService implements vscode.Disposable {
       return [];
     }
     if (isStale()) return [];
+    // mapper XML 본문(SQL 의 테이블·컬럼 이름 등)은 이름을 고르는 동안 rg 로 같이 찾는다
+    const contentP = this.mapperTextMatches(mi, query, roots, isStale);
 
     type Cand = { kind: 'xml' | 'statement' | 'java' | 'method'; name: string; file: string; line: number; desc: string; statement?: string };
     const cands: Cand[] = [];
@@ -914,22 +918,32 @@ export class SearchService implements vscode.Disposable {
         (a.c.file < b.c.file ? -1 : a.c.file > b.c.file ? 1 : a.c.line - b.c.line)
     );
     const changed = (await this.getChanged()).set;
+    const content = await contentP;
     if (isStale()) return [];
     const fileOk = this.classFileOkCache();
-    const out: SearchItem[] = [];
-    let total = 0;
-    for (const { c } of scored) {
-      let ok = fileOk.get(c.file);
+    const accepts = (file: string): boolean => {
+      let ok = fileOk.get(file);
       if (ok === undefined) {
-        const u = vscode.Uri.file(c.file);
+        const u = vscode.Uri.file(file);
         ok = !this.isExcluded(u) && this.pathAccepts(u) && scopeAccepts(this.options.scope, this.facts(u, changed));
-        fileOk.set(c.file, ok);
+        fileOk.set(file, ok);
       }
-      if (!ok) continue;
-      total++;
-      if (out.length >= limit) continue;
+      return ok;
+    };
+    // 범위에 맞는 것만 남기고, 화면 순서(이름에 그대로 든 것 → 본문 → 글자만 맞은 이름)로 나눈다 — mapperText.ts
+    const ql = query.toLowerCase();
+    const names: NameHit<Cand>[] = [];
+    for (const { c } of scored) {
+      if (accepts(c.file)) names.push({ value: c, file: c.file, line: c.line, strong: c.name.toLowerCase().includes(ql) });
+    }
+    const arranged = arrangeMapperResults(
+      names,
+      content.matches.filter((m) => accepts(m.file)),
+      limit
+    );
+    const nameItem = (c: Cand): SearchItem => {
       const uri = vscode.Uri.file(c.file);
-      out.push({
+      return {
         kind: 'mappers',
         label: c.name,
         description: c.desc || undefined,
@@ -938,13 +952,78 @@ export class SearchService implements vscode.Disposable {
         uri,
         range: new vscode.Range(c.line, 0, c.line, 0),
         selectName: c.kind !== 'xml',
-      });
+      };
+    };
+    // 본문 결과: 그 줄이 들어 있는 SQL id 를 옆에 적는다
+    const stmtsByFile = new Map<string, MapperEntry[]>();
+    if (arranged.text.length) {
+      const wanted = new Set(arranged.text.map((m) => m.file));
+      for (const e of mi.entries()) {
+        if (e.kind !== 'statement' || !wanted.has(e.file)) continue;
+        const l = stmtsByFile.get(e.file) ?? [];
+        l.push(e);
+        stmtsByFile.set(e.file, l);
+      }
     }
-    count?.(total);
+    const textItem = (m: RgMatch): SearchItem => {
+      const owner = ownerStatement(stmtsByFile.get(m.file), m.line);
+      const uri = vscode.Uri.file(m.file);
+      return {
+        kind: 'mappers',
+        label: m.text.trim().slice(0, 200),
+        description: owner ? `${owner.statement} ${owner.name}` : undefined,
+        detail: `${vscode.workspace.asRelativePath(uri)}:${m.line + 1}`,
+        icon: 'search',
+        uri,
+        range: new vscode.Range(m.line, m.column, m.line, m.column + (m.length || query.length)),
+      };
+    };
+    const out = [...arranged.strong.map(nameItem), ...arranged.text.map(textItem), ...arranged.weak.map(nameItem)];
+    count?.(arranged.total, content.capped);
     if (!mi.entries().length && !cands.length) {
       this.logLine('[Mapper] mapper XML·Java mapper 를 하나도 못 찾음 (<mapper namespace> 나 MyBatis DOCTYPE 이 있는 XML, …Mapper 인터페이스·@Mapper 가 없음)');
     }
     return out;
+  }
+
+  /**
+   * Mapper 탭의 본문 검색: mapper XML 안에서 검색어가 든 줄 (대소문자 무시, 글자 그대로). 경로·줄 순으로 정렬.
+   * 워크스페이스 전체가 아니라 mapper XML 이 있는 폴더에서만 rg 를 돌리고, mapper 색인에 있는 파일만 남긴다.
+   * capped: 전체 한도(TEXT_COLLECT_MAX)나 파일당 한도(RG_MAX_PER_FILE)에 걸려 실제로는 더 많을 수 있음.
+   * 검색어가 2글자 미만이거나 rg·mapper XML 이 없으면 빈 결과
+   */
+  private async mapperTextMatches(
+    mi: MapperIndex,
+    query: string,
+    roots: string[],
+    isStale: () => boolean
+  ): Promise<{ matches: RgMatch[]; capped: boolean }> {
+    const none = { matches: [] as RgMatch[], capped: false };
+    const rg = this.getRipgrep();
+    if (!rg || query.trim().length < 2) return none;
+    const xmlFiles = new Set<string>();
+    for (const e of mi.entries()) if (e.kind === 'xml') xmlFiles.add(e.file);
+    if (!xmlFiles.size) return none;
+    try {
+      const found = await runRipgrep(rg, {
+        query,
+        roots: mapperSearchRoots(xmlFiles, roots),
+        excludeGlobs: excludeGlobs(),
+        includeGlobs: ['*.xml'],
+        limit: TEXT_COLLECT_MAX,
+        isStale,
+      });
+      const matches: RgMatch[] = [];
+      for (const m of found) {
+        const file = path.normalize(m.file); // mapper 색인의 경로와 구분자를 맞춘다
+        if (xmlFiles.has(file)) matches.push({ ...m, file });
+      }
+      matches.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line || a.column - b.column));
+      return { matches, capped: found.length >= TEXT_COLLECT_MAX || hitPerFileCap(matches, RG_MAX_PER_FILE) };
+    } catch (e) {
+      this.log.appendLine(`[경고] mapper XML 본문 검색 실패 (이름 결과만 보여 줍니다): ${e}`);
+      return none;
+    }
   }
 
   /**

@@ -2,6 +2,7 @@
 //   npm run build            개발용 (소스맵 포함)
 //   npm run build -- --production   배포용 (minify)  ← vsce package 가 vscode:prepublish 로 호출
 import * as esbuild from 'esbuild';
+import { writeNotices } from './scripts/thirdPartyNotices.mjs';
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -26,6 +27,7 @@ const options = {
   external: ['vscode', ...optionalEngines],
   sourcemap: !production,
   minify: production,
+  metafile: true, // 묶인 라이브러리 목록 → THIRD-PARTY-NOTICES.md
   logLevel: 'info',
 };
 
@@ -39,6 +41,7 @@ const webviewOptions = {
   outfile: 'media/sourceAtlas/app.js',
   sourcemap: !production,
   minify: production,
+  metafile: true,
   logLevel: 'info',
   loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.svg': 'dataurl' },
   define: {
@@ -49,11 +52,27 @@ const webviewOptions = {
   },
 };
 
+// DB 콘솔 화면(Webview): SQL 편집기(CodeMirror) → media/dbConsole/console.js
+const consoleOptions = {
+  entryPoints: ['webview/dbConsole/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2022',
+  outfile: 'media/dbConsole/console.js',
+  sourcemap: !production,
+  minify: production,
+  metafile: true,
+  logLevel: 'info',
+};
+
 if (watch) {
-  for (const o of [options, webviewOptions]) {
+  for (const o of [options, webviewOptions, consoleOptions]) {
     const ctx = await esbuild.context(o);
     await ctx.watch();
   }
 } else {
-  await Promise.all([esbuild.build(options), esbuild.build(webviewOptions)]);
+  const results = await Promise.all([esbuild.build(options), esbuild.build(webviewOptions), esbuild.build(consoleOptions)]);
+  // 묶인 라이브러리의 라이선스 고지 (배포 파일에 함께 들어간다)
+  writeNotices(results.flatMap((r) => Object.keys(r.metafile.inputs)));
 }

@@ -310,6 +310,8 @@ export class ClassIndex {
   static BATCH_MS = 300;
   /** 한 번에 바뀐 경로가 이보다 많으면 (git checkout 등) 전체를 다시 만든다 */
   static MAX_BATCH = 200;
+  /** 바뀐 경로가 파일인지 폴더인지 한 번에 확인하는 개수 */
+  static STAT_BATCH = 64;
 
   constructor(private readonly rgPath: string) {}
 
@@ -424,8 +426,11 @@ export class ClassIndex {
     const paths = [...this.pending];
     this.pending.clear();
     const started = Date.now();
-    if (paths.length > ClassIndex.MAX_BATCH) {
-      this.onLog?.(`[색인] 바뀐 경로 ${paths.length}개 → 전체 다시 만듦`);
+    // 색인과 관계있는 경로만 센다: 색인에 있는 파일, 색인 대상 확장자, 확장자 없는 경로(폴더일 수 있음).
+    // .class·로그처럼 색인하지 않는 파일이 한꺼번에 바뀌었다고 전체를 다시 만들지 않게
+    const relevant = paths.filter((p) => this.byFile.has(p) || hasClassExt(p) || !path.extname(p));
+    if (relevant.length > ClassIndex.MAX_BATCH) {
+      this.onLog?.(`[색인] 바뀐 소스·폴더 ${relevant.length}개 (예: ${relevant[0]}) → 전체 다시 만듦`);
       this.key = '';
       await this.ensure(this.roots, this.excludes).catch(() => undefined);
       return;
@@ -436,13 +441,21 @@ export class ClassIndex {
     const dirs: string[] = [];
     // 이미 색인에 있는 파일(저장)은 .gitignore·제외 판정이 끝난 파일이므로 rg 에 직접 넘긴다 (트리를 훑지 않음)
     const known: string[] = [];
+    // 폴더인지는 실제로 확인 (이름에 점이 있는 폴더 v1.2, 확장자 없는 파일 Dockerfile 구분).
+    // 색인 대상이 아닌 파일이 수천 개 섞여 와도 같이 바뀐 소스가 늦게 반영되지 않게, 하나씩 기다리지 않고 묶어서 확인한다
+    const unknown = paths.filter((p) => !this.byFile.has(p));
+    const stats = new Map<string, fs.Stats | undefined>();
+    for (let i = 0; i < unknown.length; i += ClassIndex.STAT_BATCH) {
+      const part = unknown.slice(i, i + ClassIndex.STAT_BATCH);
+      const got = await Promise.all(part.map((p) => fs.promises.stat(p).catch(() => undefined)));
+      part.forEach((p, k) => stats.set(p, got[k]));
+    }
     for (const p of paths) {
       if (this.byFile.has(p)) {
         known.push(p);
         continue;
       }
-      // 폴더인지는 실제로 확인 (이름에 점이 있는 폴더 v1.2, 확장자 없는 파일 Dockerfile 구분)
-      const st = await fs.promises.stat(p).catch(() => undefined);
+      const st = stats.get(p);
       if (!st) continue; // 그사이 지워짐 (삭제 이벤트가 따로 처리)
       const isDir = st.isDirectory();
       if (!isDir && !hasClassExt(p)) continue;
@@ -488,7 +501,8 @@ export class ClassIndex {
       this.touchedDuringMembers.add(f);
     }
     this.all = undefined;
-    this.onLog?.(`[색인] 갱신 ${paths.map((p) => path.basename(p)).join(', ')} ${Date.now() - started}ms`);
+    // 실제로 다시 읽은 것만 적는다 (색인 대상이 아닌 파일은 빼고)
+    this.onLog?.(`[색인] 갱신 ${[...known, ...files, ...dirs].map((p) => path.basename(p)).join(', ')} ${Date.now() - started}ms`);
   }
 
   removeFile(file: string) {

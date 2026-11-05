@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.16.0 - 2026-11-06
+- **DB 콘솔** (새 기능, 설정 `devBoost.dbConsole.enabled`): Oracle(12.1 이상)에 직접 접속해 쿼리를 실행. Oracle Client 설치 없이 동작 (`node-oracledb` Thin 모드)
+  - 사이드바 DevBoost → `DB 연결`: 연결 추가·수정은 팝업 하나에서 모두 입력 (JDBC URL 붙여 넣기, 접속 테스트). 접속 방식은 서비스 이름·SID·연결 문자열. 비밀번호는 SecretStorage 에만 저장
+  - 접속한 연결을 펼치면 테이블·뷰·칸(타입)이 나오고, 누르면 콘솔의 커서 자리에 이름이 들어감
+  - 콘솔: 연결마다 탭 하나. `Ctrl+Enter` 로 커서가 있는 문장 실행, `Ctrl+E` 로 실행계획. 쓰던 SQL 은 연결별로 기억
+  - 파라미터: SQL 의 `:name` 과 MyBatis `#{name}` 을 찾아 값 칸을 만들고 타입(NUMBER·DATE·VARCHAR2)을 짐작. mapper XML 의 쿼리를 그대로 붙여 넣어 실행 가능
+  - 결과는 하단 패널 `DB 결과`: 결과·실행계획·메시지 탭, 정렬, 칸 선택 복사, `다음 N행 가져오기`(설정 `devBoost.dbConsole.pageSize`, 기본 500), 결과 복사 · 헤더 포함 복사 · INSERT문으로 복사 · CSV 내보내기
+  - 안전장치: 자동 커밋 없음(`커밋 안 한 변경 N건` 표시, 커밋·롤백 버튼), `읽기 전용` 연결은 조회만, WHERE 없는 UPDATE·DELETE 와 `운영 DB` 변경은 확인을 받음, 실행 취소
+  - 끊김 감지: 접속이 끊기면 알림과 `다시 접속`. 서버 확인 간격은 설정 `devBoost.dbConsole.checkConnectionSeconds`(기본 300초, `0` 이면 끔)
+  - 자주 만나는 접속·쿼리 오류(ORA-00942, ORA-00904, ORA-01017 등)에 한글 설명
+- **Search Everywhere: Mapper 탭에서 mapper XML 본문도 검색** — 파일 이름·SQL id 뿐 아니라 XML 안의 키워드(테이블·칸 이름 등)로도 찾음. mapper 폴더에서만 찾고, 한 파일 한도에 걸리면 `N건 이상` 으로 표시
+- **Search Everywhere: 관계없는 파일이 많이 바뀔 때 색인을 통째로 다시 만들던 문제** — 로그·빌드 결과물처럼 색인 대상이 아닌 파일은 세지 않음. 바뀐 경로 확인은 묶어서 처리
+- 디버그 실행 때 뜨던 오류 알림 수정 (사이드바 컨테이너 id 의 점: `devBoost.sidebar` → `devBoost-sidebar`)
+- 묶어 배포하는 오픈 소스 라이브러리의 라이선스 고지 (`THIRD-PARTY-NOTICES.md`, 빌드 때 자동 생성)
+
 ## 0.15.0 - 2026-10-30
 - **Search Everywhere: 창 고정** (오른쪽 위 `고정` 버튼 또는 `Alt+L`, QuickPick 은 핀 아이콘): 결과를 열어도 검색 창이 닫히지 않고 커서도 검색 창에 남아, 다른 결과를 이어서 열어 볼 수 있음. 탭 모드는 옆 칸에, 사이드바·떠 있는 창은 쓰던 에디터에 열림. `Esc` 로 닫기
 - 문서의 어노테이션 표기를 코드 표시로 바꿈 (릴리스 노트에서 GitHub 사용자 멘션으로 처리되던 문제), 예시 경로를 `example-back/src/main` 등으로
