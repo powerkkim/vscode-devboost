@@ -13,4 +13,5 @@ tsconfig*.json
 release-notes.md
 out/**
 esbuild.mjs
+scripts/**
 webview/**
