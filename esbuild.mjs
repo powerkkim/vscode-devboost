@@ -52,13 +52,27 @@ const webviewOptions = {
   },
 };
 
+// DB 콘솔 화면(Webview): SQL 편집기(CodeMirror) → media/dbConsole/console.js
+const consoleOptions = {
+  entryPoints: ['webview/dbConsole/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2022',
+  outfile: 'media/dbConsole/console.js',
+  sourcemap: !production,
+  minify: production,
+  metafile: true,
+  logLevel: 'info',
+};
+
 if (watch) {
-  for (const o of [options, webviewOptions]) {
+  for (const o of [options, webviewOptions, consoleOptions]) {
     const ctx = await esbuild.context(o);
     await ctx.watch();
   }
 } else {
-  const results = await Promise.all([esbuild.build(options), esbuild.build(webviewOptions)]);
+  const results = await Promise.all([esbuild.build(options), esbuild.build(webviewOptions), esbuild.build(consoleOptions)]);
   // 묶인 라이브러리의 라이선스 고지 (배포 파일에 함께 들어간다)
   writeNotices(results.flatMap((r) => Object.keys(r.metafile.inputs)));
 }

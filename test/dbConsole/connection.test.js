@@ -75,15 +75,6 @@ test('호스트 칸: 주소만 / host:port / host:port/service / host:port:SID /
   assert.equal(cs.buildConnectString({ host: hp.host, port: hp.port, targetKind: 'service', target: 'svc' }), 'db.example.com:1522/svc');
 });
 
-test('호스트 칸 확인: 읽을 수 없거나 값이 틀리면 이유', () => {
-  for (const ok of ['10.0.0.5', 'db.example.com:1522', 'h:1521/svc', 'h:1521:ORCL', '(DESCRIPTION=(A=1))', 'jdbc:oracle:thin:@h:1521:ORCL', 'fe80::1']) {
-    assert.equal(cs.checkHostInput(ok), undefined, ok);
-  }
-  for (const bad of ['', '  ', 'db host', 'host:ORCL', 'h:99999', 'h:99999/svc', 'jdbc:oracle:thin:@', 'jdbc:mysql://h/db', 'a=b']) {
-    assert.ok(cs.checkHostInput(bad), bad);
-  }
-});
-
 test('오류 안내: 코드별 한글 설명 + 원래 메시지 첫 줄', () => {
   const e = Object.assign(new Error('ORA-01017: invalid username/password; logon denied\nHelp: https://docs.oracle.com/error-help/db/ora-01017/'), { code: 'ORA-01017' });
   assert.equal(oc.errorCode(e), 'ORA-01017');
@@ -92,7 +83,8 @@ test('오류 안내: 코드별 한글 설명 + 원래 메시지 첫 줄', () => 
   assert.equal(oc.errorCode(new Error('NJS-503: connection to host 10.0.0.5 port 1521 could not be established.')), 'NJS-503');
   assert.match(oc.explainError(new Error('NJS-138: connections to this database server version are not supported')), /^Oracle 12\.1 보다 낮은 서버/);
   // 모르는 오류는 메시지 그대로
-  assert.equal(oc.explainError(new Error('ORA-00942: table or view does not exist')), 'ORA-00942: table or view does not exist');
+  assert.equal(oc.explainError(new Error('ORA-00942: table or view does not exist')), '테이블 또는 뷰가 없습니다 (이름·스키마·권한 확인) — ORA-00942: table or view does not exist');
+  assert.equal(oc.explainError(new Error('ORA-12899: value too large for column')), 'ORA-12899: value too large for column');
   assert.equal(oc.explainError('그냥 글자'), '그냥 글자');
 });
 

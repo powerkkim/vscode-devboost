@@ -96,15 +96,6 @@ export function parseHostInput(text: string): HostInput | undefined {
   return { host, port: port ?? DEFAULT_PORT, targetKind: a[3] === ':' ? 'sid' : 'service', target: a[4] };
 }
 
-/** 호스트 칸 확인: 읽을 수 있는 모양이고 호스트·포트·대상이 각각 맞아야 한다 */
-export function checkHostInput(v: string): string | undefined {
-  if (!v.trim()) return '호스트(서버 주소)를 넣으세요';
-  const p = parseHostInput(v);
-  if (!p) return /^\s*jdbc:/i.test(v) ? 'JDBC URL 을 읽지 못했습니다 (jdbc:oracle:thin:@//host:1521/service 모양)' : '주소를 읽지 못했습니다 (예: 10.0.0.5 , db.example.com:1521/service)';
-  if (p.targetKind === 'raw') return undefined;
-  return checkHost(p.host) ?? (p.port !== undefined ? checkPort(String(p.port)) : undefined) ?? (p.targetKind && p.target !== undefined ? checkTarget(p.targetKind, p.target) : undefined);
-}
-
 /** [//]host[:port][/service | :sid] — host 는 이름·IPv4 또는 [IPv6] */
 const HOST_TARGET = /^(?:\/\/)?(\[[^\]]+\]|[^:/\s]+)(?::(\d+))?(?:([:/])([^\s?]+))?/;
 

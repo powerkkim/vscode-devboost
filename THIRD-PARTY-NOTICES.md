@@ -16,11 +16,24 @@ DevBoost 는 아래 오픈 소스 라이브러리를 확장 파일(`dist/extensi
 | [@babel/template](https://github.com/babel/babel) | 7.29.7 | MIT |
 | [@babel/traverse](https://github.com/babel/babel) | 7.29.10 | MIT |
 | [@babel/types](https://github.com/babel/babel) | 7.29.11 | MIT |
+| [@codemirror/autocomplete](https://code.haverbeke.berlin/codemirror/autocomplete) | 6.20.4 | MIT |
+| [@codemirror/commands](https://code.haverbeke.berlin/codemirror/commands) | 6.11.1 | MIT |
+| [@codemirror/lang-sql](https://github.com/codemirror/lang-sql) | 6.10.0 | MIT |
+| [@codemirror/language](https://code.haverbeke.berlin/codemirror/language) | 6.13.1 | MIT |
+| [@codemirror/lint](https://code.haverbeke.berlin/codemirror/lint) | 6.9.7 | MIT |
+| [@codemirror/search](https://code.haverbeke.berlin/codemirror/search) | 6.7.2 | MIT |
+| [@codemirror/state](https://code.haverbeke.berlin/codemirror/state) | 6.7.6 | MIT |
+| [@codemirror/streamparser](https://code.haverbeke.berlin/codemirror/streamparser) | 6.0.0 | MIT |
+| [@codemirror/view](https://code.haverbeke.berlin/codemirror/view) | 6.43.15 | MIT |
 | [@dagrejs/dagre](https://github.com/dagrejs/dagre) | 3.1.2 | MIT |
 | [@jridgewell/gen-mapping](https://github.com/jridgewell/sourcemaps) | 0.3.13 | MIT |
 | [@jridgewell/resolve-uri](https://github.com/jridgewell/resolve-uri) | 3.1.2 | MIT |
 | [@jridgewell/sourcemap-codec](https://github.com/jridgewell/sourcemaps) | 1.6.0 | MIT |
 | [@jridgewell/trace-mapping](https://github.com/jridgewell/sourcemaps) | 0.3.31 | MIT |
+| [@lezer/common](https://code.haverbeke.berlin/lezer/common) | 1.5.5 | MIT |
+| [@lezer/highlight](https://code.haverbeke.berlin/lezer/highlight) | 1.2.5 | MIT |
+| [@lezer/lr](https://code.haverbeke.berlin/lezer/lr) | 1.4.12 | MIT |
+| [@marijn/find-cluster-break](https://code.haverbeke.berlin/marijn/find-cluster-break) | 1.0.4 | MIT |
 | [@vue-flow/background](https://github.com/bcakmakoglu/vue-flow/packages/plugins/background) | 1.3.2 | MIT |
 | [@vue-flow/controls](https://github.com/bcakmakoglu/vue-flow/packages/plugins/controls) | 1.1.3 | MIT |
 | [@vue-flow/core](https://github.com/bcakmakoglu/vue-flow) | 1.48.2 | MIT |
@@ -32,6 +45,8 @@ DevBoost 는 아래 오픈 소스 라이브러리를 확장 파일(`dist/extensi
 | [@vue/runtime-core](https://github.com/vuejs/core) | 3.5.44 | MIT |
 | [@vue/runtime-dom](https://github.com/vuejs/core) | 3.5.44 | MIT |
 | [@vue/shared](https://github.com/vuejs/core) | 3.5.44 | MIT |
+| [codemirror](https://github.com/codemirror/basic-setup) | 6.0.2 | MIT |
+| [crelt](https://code.haverbeke.berlin/marijn/crelt) | 1.0.7 | MIT |
 | [debug](https://github.com/debug-js/debug) | 4.4.3 | MIT |
 | [entities](https://github.com/fb55/entities) | 7.0.1 | BSD-2-Clause |
 | [estree-walker](https://github.com/Rich-Harris/estree-walker) | 2.0.2 | MIT |
@@ -45,8 +60,10 @@ DevBoost 는 아래 오픈 소스 라이브러리를 확장 파일(`dist/extensi
 | [picocolors](https://github.com/alexeyraspopov/picocolors) | 1.1.1 | ISC |
 | [postcss](https://github.com/postcss/postcss) | 8.5.31 | MIT |
 | [source-map-js](https://github.com/7rulnik/source-map-js) | 1.2.2 | BSD-3-Clause |
+| [style-mod](https://code.haverbeke.berlin/marijn/style-mod) | 4.1.4 | MIT |
 | [supports-color](https://github.com/chalk/supports-color) | 7.2.0 | MIT |
 | [vue](https://github.com/vuejs/core) | 3.5.44 | MIT |
+| [w3c-keyname](https://github.com/marijnh/w3c-keyname) | 2.2.8 | MIT |
 
 ---
 
@@ -87,6 +104,36 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ```text
 Copyright (C) 2012-2014 by various contributors (see AUTHORS)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
+## @codemirror/autocomplete 6.20.4, @codemirror/commands 6.11.1, @codemirror/lang-sql 6.10.0, @codemirror/language 6.13.1, @codemirror/lint 6.9.7, @codemirror/search 6.7.2, @codemirror/state 6.7.6, @codemirror/streamparser 6.0.0, @codemirror/view 6.43.15, codemirror 6.0.2
+
+라이선스: MIT
+
+```text
+MIT License
+
+Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -193,6 +240,66 @@ SOFTWARE.
 
 ---
 
+## @lezer/common 1.5.5, @lezer/highlight 1.2.5, @lezer/lr 1.4.12
+
+라이선스: MIT
+
+```text
+MIT License
+
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
+## @marijn/find-cluster-break 1.0.4
+
+라이선스: MIT
+
+```text
+MIT License
+
+Copyright (C) 2024 by Marijn Haverbeke <marijn@haverbeke.berlin>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
 ## @vue-flow/background 1.3.2
 
 라이선스: MIT
@@ -259,6 +366,34 @@ SOFTWARE.
 The MIT License (MIT)
 
 Copyright (c) 2018-present, Yuxi (Evan) You
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
+## crelt 1.0.7
+
+라이선스: MIT
+
+```text
+Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -826,4 +961,60 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+---
+
+## style-mod 4.1.4
+
+라이선스: MIT
+
+```text
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
+## w3c-keyname 2.2.8
+
+라이선스: MIT
+
+```text
+Copyright (C) 2016 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
