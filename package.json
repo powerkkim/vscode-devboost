@@ -111,6 +111,42 @@
         "command": "devBoost.caseConverter.cyclePrev",
         "title": "이전 케이스로 바꾸기",
         "category": "케이스 변환"
+      },
+      {
+        "command": "devBoost.dbConsole.addConnection",
+        "title": "연결 추가",
+        "category": "DB 콘솔",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devBoost.dbConsole.editConnection",
+        "title": "연결 수정",
+        "category": "DB 콘솔",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "devBoost.dbConsole.removeConnection",
+        "title": "연결 삭제",
+        "category": "DB 콘솔",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devBoost.dbConsole.testConnection",
+        "title": "접속 테스트",
+        "category": "DB 콘솔",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "devBoost.dbConsole.connect",
+        "title": "접속",
+        "category": "DB 콘솔",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "devBoost.dbConsole.disconnect",
+        "title": "접속 끊기",
+        "category": "DB 콘솔",
+        "icon": "$(debug-disconnect)"
       }
     ],
     "viewsContainers": {
@@ -129,6 +165,11 @@
           "id": "devBoost.searchEverywhere.sidebar",
           "name": "Search Everywhere",
           "when": "config.devBoost.searchEverywhere.enabled && devBoost.searchEverywhere.panelUi"
+        },
+        {
+          "id": "devBoost.dbConsole.connections",
+          "name": "DB 연결",
+          "when": "config.devBoost.dbConsole.enabled"
         }
       ]
     },
@@ -201,6 +242,30 @@
         {
           "command": "devBoost.caseConverter.cyclePrev",
           "when": "config.devBoost.caseConverter.enabled && editorTextFocus"
+        },
+        {
+          "command": "devBoost.dbConsole.addConnection",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.editConnection",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.removeConnection",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.testConnection",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.connect",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.disconnect",
+          "when": "config.devBoost.dbConsole.enabled"
         }
       ],
       "editor/context": [
@@ -223,6 +288,55 @@
           "command": "devBoost.caseConverter.cycleNext",
           "when": "config.devBoost.caseConverter.enabled && editorTextFocus && !editorReadonly",
           "group": "devboost@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "devBoost.dbConsole.addConnection",
+          "when": "view == devBoost.dbConsole.connections",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devBoost.dbConsole.connect",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbConnection.disconnected",
+          "group": "inline@1"
+        },
+        {
+          "command": "devBoost.dbConsole.disconnect",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbConnection.connected",
+          "group": "inline@1"
+        },
+        {
+          "command": "devBoost.dbConsole.editConnection",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection./",
+          "group": "inline@2"
+        },
+        {
+          "command": "devBoost.dbConsole.connect",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbConnection.disconnected",
+          "group": "1_session@1"
+        },
+        {
+          "command": "devBoost.dbConsole.disconnect",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbConnection.connected",
+          "group": "1_session@1"
+        },
+        {
+          "command": "devBoost.dbConsole.testConnection",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection./",
+          "group": "1_session@2"
+        },
+        {
+          "command": "devBoost.dbConsole.editConnection",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection./",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "devBoost.dbConsole.removeConnection",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection./",
+          "group": "2_edit@2"
         }
       ]
     },
@@ -291,6 +405,12 @@
             "default": true,
             "order": 4,
             "markdownDescription": "**케이스 변환** — 이름 표기법(camel·snake·kebab …) 바꾸기, SQL·컬럼 이름 → Java 필드, Java 필드 → TypeScript 인터페이스·MyBatis SQL. 명령 팔레트에서 `케이스 변환:` 으로 시작하는 명령"
+          },
+          "devBoost.dbConsole.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "markdownDescription": "**DB 콘솔** — Oracle(12.1 이상)에 직접 접속. 연결을 저장하고(비밀번호는 OS 자격 증명 저장소) 접속을 테스트. 사이드바 DevBoost → `DB 연결`"
           }
         }
       },
@@ -590,6 +710,23 @@
             "markdownDescription": "INSERT·UPDATE 의 테이블 이름 앞에 붙일 접두어 (예: `tb_`). 클래스 이름을 snake_case 로 바꾼 값이 테이블 이름 자리에 들어가며, 직접 고쳐 쓰세요"
           }
         }
+      },
+      {
+        "title": "DB 콘솔",
+        "properties": {
+          "devBoost.dbConsole.checkConnectionSeconds": {
+            "type": "number",
+            "default": 300,
+            "minimum": 0,
+            "markdownDescription": "열려 있는 DB 접속이 살아 있는지 **서버에 다녀와** 확인하는 간격(초). 기본 300초(5분). 끊긴 것을 알아채면 목록에서 접속 안 됨으로 바꾸고 알립니다. `0` 이면 서버에는 다녀오지 않습니다 (30 보다 작은 값은 30초로).\n\n이와 별개로 연결(소켓)이 닫혔는지는 30초마다 봅니다 — 서버에 요청을 보내지 않는 확인입니다.\n\n서버에 다녀오는 확인은 쉬는 접속을 끊는 방화벽이나 DB 의 쉬는 시간 제한(IDLE_TIME)에 걸리지 않고 접속이 유지되는 효과도 있습니다. 그것을 원하지 않으면 `0` 으로 두세요 (끊김은 다음에 쓸 때 알게 됩니다)."
+          }
+        }
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "devBoost.dbConsole.connections",
+        "contents": "저장한 DB 연결이 없습니다.\n[연결 추가](command:devBoost.dbConsole.addConnection)\nOracle 12.1 이상에 직접 접속합니다 (Oracle Client 설치 불필요). 호스트 칸에 JDBC URL 을 붙여 넣어도 됩니다."
       }
     ]
   },
@@ -615,6 +752,7 @@
     "@vue-flow/core": "^1.48.2",
     "@vue/compiler-sfc": "^3.5.44",
     "esbuild": "^0.28.2",
+    "oracledb": "^26.0.0",
     "typescript": "^5.4.0",
     "vue": "^3.5.44"
   },
