@@ -61,6 +61,8 @@
   let limit; // "더 보기"로 늘린 표시 개수 (검색어·탭·옵션이 바뀌면 초기화)
   let maxResults = 50;
   let pendingSelect; // "더 보기" 후 고를 결과 번호
+  let pendingPrevKeys; // "더 보기" 전에 보이던 줄들 (새로 불러온 첫 줄을 찾으려고)
+  const rowKey = (r) => `${r.kind}\u0000${r.label}\u0000${r.right || ''}`;
   let pendingKeep; // 다시 검색(rerun) 뒤에도 고를 줄
   let runId = 0;
   let shownRunId = 0;
@@ -223,6 +225,7 @@
     if (!keepLimit) {
       limit = undefined;
       pendingSelect = undefined; // "더 보기" 결과를 기다리던 중 다른 검색을 시작하면 버린다
+      pendingPrevKeys = undefined;
       pendingKeep = undefined;
     }
     const run = () => {
@@ -437,6 +440,7 @@
         const g = groups.find((x) => x.kind === v.more);
         limit = (g ? g.shown : rows.length) + maxResults;
         pendingSelect = g ? g.shown : rows.length; // 더 불러온 첫 줄로 이동
+        pendingPrevKeys = new Set(rows.map(rowKey));
         search(true, true);
       }
       return;
@@ -626,9 +630,15 @@
         if (i >= 0) want = i;
       }
       if (want < 0 && pendingSelect !== undefined) {
-        // "더 보기": 새로 불러온 첫 줄로 (먼저 온 partial 에도, 최종 결과에도 같은 자리)
-        want = Math.min(pendingSelect, rows.length - 1);
-        if (!m.partial) pendingSelect = undefined;
+        // "더 보기": 새로 불러온 첫 줄로 (먼저 온 partial 에도, 최종 결과에도 같은 자리).
+        // 새 줄이 끝이 아니라 중간에 끼어드는 탭(Mapper: 이름 → 본문 → 이름)도 있어, 전에 없던 첫 줄을 찾는다
+        const prevKeys = pendingPrevKeys;
+        const firstNew = prevKeys ? rows.findIndex((r) => !prevKeys.has(rowKey(r))) : -1;
+        want = firstNew >= 0 ? firstNew : Math.min(pendingSelect, rows.length - 1);
+        if (!m.partial) {
+          pendingSelect = undefined;
+          pendingPrevKeys = undefined;
+        }
       } else if (prev) {
         const i = rows.findIndex((r) => r.label === prev.label && r.right === prev.right && r.kind === prev.kind);
         if (i >= 0) want = i;

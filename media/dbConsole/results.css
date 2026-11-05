@@ -1,0 +1,221 @@
+/* 하단 패널 "DB 결과". VS Code 테마 변수를 써서 밝은/어두운 테마 모두 맞춘다 */
+:root {
+  --ok: var(--vscode-testing-iconPassed, #89d185);
+  --err: var(--vscode-errorForeground, #f48771);
+  --muted: var(--vscode-descriptionForeground);
+  --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  --line: rgba(128, 128, 128, 0.18);
+  --head: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.08));
+  --mono: var(--vscode-editor-font-family, Consolas, monospace);
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-foreground);
+  background: var(--vscode-panel-background, var(--vscode-editor-background));
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  font: inherit;
+  font-size: 0.92em;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--vscode-foreground);
+}
+.tab.active {
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+}
+.tab:focus-visible,
+.status button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.empty {
+  padding: 16px;
+  color: var(--muted);
+}
+
+/* 결과 표 */
+table {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: var(--vscode-editor-font-size, 13px);
+  white-space: pre;
+}
+th,
+td {
+  padding: 3px 10px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--head);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+thead th .type {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+thead th .sort {
+  margin-left: 4px;
+  color: var(--vscode-textLink-foreground);
+}
+th.num,
+td.num {
+  text-align: right;
+}
+th.rownum,
+td.rownum {
+  position: sticky;
+  left: 0;
+  background: var(--head);
+  color: var(--muted);
+  text-align: right;
+  font-weight: 400;
+  cursor: default;
+  min-width: 44px;
+}
+thead th.rownum {
+  z-index: 2;
+}
+td.null {
+  color: var(--muted);
+  font-style: italic;
+}
+tbody tr:hover td:not(.rownum) {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+}
+td.selected {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* 실행계획 (DBMS_XPLAN 의 표를 그대로) */
+.plan {
+  margin: 0;
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: var(--vscode-editor-font-size, 13px);
+  white-space: pre;
+}
+
+/* 메시지 기록 */
+.log {
+  padding: 4px 0;
+}
+.entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 3px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.entry .time,
+.entry .conn {
+  color: var(--muted);
+  flex: none;
+}
+.entry .text {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+.entry.ok .text {
+  color: var(--vscode-foreground);
+}
+.entry.error .text {
+  color: var(--err);
+}
+.entry .sql {
+  flex: 1 1 100%;
+  font-family: var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 아래 상태 줄 */
+.status {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--head);
+  font-size: 0.92em;
+  color: var(--muted);
+}
+.status:empty {
+  display: none;
+}
+.status .count {
+  color: var(--vscode-foreground);
+}
+.status .spacer {
+  flex: 1 1 auto;
+}
+.status .fail {
+  color: var(--err);
+}
+.status button {
+  font: inherit;
+  color: var(--vscode-textLink-foreground);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.status button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.status button:disabled {
+  color: var(--muted);
+  cursor: default;
+}

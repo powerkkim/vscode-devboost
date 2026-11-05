@@ -1,0 +1,368 @@
+/* DB 콘솔 화면: 실행 도구 줄 · 파라미터 줄 · SQL 편집기 · 연결 팝업. VS Code 테마 변수를 써서 밝은/어두운 테마 모두 맞춘다 */
+:root {
+  --ok: var(--vscode-testing-iconPassed, #89d185);
+  --err: var(--vscode-errorForeground, #f48771);
+  --warn: var(--vscode-editorWarning-foreground, #dcdcaa);
+  --muted: var(--vscode-descriptionForeground, #b0b0b0);
+  --border: var(--vscode-panel-border, #3c3c3c);
+  --bar: var(--vscode-sideBar-background, #252526);
+  --mono: var(--vscode-editor-font-family, Consolas, monospace);
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.5;
+}
+.hidden {
+  display: none !important;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.92em;
+}
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* 버튼·입력 칸 (도구 줄과 팝업이 같이 쓴다) */
+button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  border: 0;
+  border-radius: 3px;
+  padding: 4px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+button.primary {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+button.primary:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+input[type='text'],
+input[type='password'],
+textarea,
+select {
+  font: inherit;
+  color: var(--vscode-input-foreground, #ffffff);
+  background: var(--vscode-input-background, #3c3c3c);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  padding: 6px 10px;
+}
+input:focus,
+textarea:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+input:disabled {
+  opacity: 0.5;
+}
+a {
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+/* 실행 도구 줄 */
+.toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.toolbar svg {
+  flex: none;
+}
+.hint {
+  color: var(--muted);
+  font-size: 0.92em;
+}
+.hint.warn {
+  color: var(--warn);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-foreground);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 10px;
+}
+.chip:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+  flex: none;
+}
+.chip.on .dot {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.chip.prod {
+  color: var(--err);
+}
+.chip.prod .dot {
+  border-color: var(--err);
+}
+.chip.prod.on .dot {
+  background: var(--err);
+}
+.chip.dirty {
+  color: var(--warn);
+  font-size: 0.92em;
+  cursor: default;
+}
+.chip.dirty .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+/* 파라미터 줄 */
+.params {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bar);
+}
+.params .title {
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+#paramList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.param {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.param-name {
+  font-family: var(--mono);
+  color: var(--vscode-debugTokenExpression-name, #9cdcfe);
+}
+.param input {
+  font-family: var(--mono);
+  padding: 3px 6px;
+  border-radius: 2px;
+}
+.param-type {
+  font-size: 0.85em;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.param-type option {
+  color: var(--vscode-dropdown-foreground, #f0f0f0);
+  background: var(--vscode-dropdown-background, #3c3c3c);
+}
+#addParam {
+  font-size: 0.92em;
+  color: var(--vscode-foreground);
+  background: none;
+  border: 1px dashed var(--muted);
+  padding: 2px 10px;
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.params .check {
+  font-size: 0.92em;
+  color: var(--muted);
+}
+.check input {
+  margin: 0;
+}
+
+/* SQL 편집기 */
+#editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 연결 추가·수정 팝업 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 72px 16px 16px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.55);
+}
+.dialog {
+  width: 100%;
+  max-width: 520px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dialog-head h1 {
+  margin: 0;
+  font-size: 1.25em;
+  font-weight: 600;
+}
+.dialog-head .right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.icon-btn {
+  background: none;
+  padding: 4px;
+  color: var(--vscode-foreground);
+}
+.fld {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fld input,
+.fld select,
+.fld textarea {
+  width: 100%;
+}
+.fld select {
+  padding: 6px 8px;
+}
+.fld textarea {
+  font-family: var(--mono);
+  resize: vertical;
+}
+.cols-host {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px;
+  gap: 10px;
+}
+.cols-kind {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 10px;
+}
+.cols-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+}
+.invalid {
+  border-color: var(--err) !important;
+}
+.error {
+  color: var(--err);
+  font-size: 0.92em;
+}
+.error:empty {
+  display: none;
+}
+.dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.dialog-foot button {
+  padding: 6px 14px;
+}
+.dialog-foot button.primary {
+  padding: 6px 18px;
+}
+.test-result {
+  flex: 1 1 100%;
+  order: 9;
+  font-size: 0.92em;
+}
+.test-result:empty {
+  display: none;
+}
+.test-result.ok {
+  color: var(--ok);
+}
+.test-result.fail {
+  color: var(--err);
+}
+.test-result.busy {
+  color: var(--muted);
+}
+@media (max-width: 480px) {
+  .cols-kind,
+  .cols-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -3,6 +3,8 @@ node_modules/
 out/
 dist/
 media/sourceAtlas/
+media/dbConsole/console.js
+media/dbConsole/console.js.map
 *.vsix
 release-notes.md
 
