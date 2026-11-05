@@ -118,6 +118,27 @@ test('변경이 너무 많으면(git checkout 등) 전체를 다시 만듦', { s
   assert.equal(idx.entries().length, before);
 });
 
+test('색인 대상이 아닌 파일(.class·로그)은 많이 바뀌어도 전체를 다시 만들지 않고, 같이 바뀐 소스는 반영', { skip }, async () => {
+  const idx = new ci.ClassIndex(RG);
+  await idx.ensure([root], ['**/target/**']);
+  await idx.whenMembersDone();
+  const logs = [];
+  idx.onLog = (m) => logs.push(m);
+  fs.mkdirSync(path.join(root, 'WEB-INF/classes'), { recursive: true });
+  for (let i = 0; i <= ci.ClassIndex.MAX_BATCH + 50; i++) {
+    const f = path.join(root, `WEB-INF/classes/C${i}.${i % 2 ? 'class' : 'log'}`);
+    fs.writeFileSync(f, 'x');
+    idx.queueUpdate(f);
+  }
+  const src = path.join(root, 'src/WithBuild.java');
+  fs.writeFileSync(src, 'public class WithBuild {}\n');
+  idx.queueUpdate(src);
+  await idx.flush();
+  assert.ok(!logs.some((l) => l.includes('전체 다시 만듦')), logs.join('\n'));
+  assert.ok(idx.entries().some((e) => e.name === 'WithBuild'));
+  assert.ok(logs.some((l) => l.includes('갱신 WithBuild.java ')), '갱신 기록에는 다시 읽은 파일만: ' + logs.join('\n'));
+});
+
 test('Java 메서드·필드 (2단계): 선언만 잡고 문장(return foo( 등)·지역 변수는 뺌, 소속 클래스 기록', { skip }, async () => {
   const dir = makeProject({
     'src/main/java/a/Svc.java': [

@@ -424,8 +424,11 @@ export class ClassIndex {
     const paths = [...this.pending];
     this.pending.clear();
     const started = Date.now();
-    if (paths.length > ClassIndex.MAX_BATCH) {
-      this.onLog?.(`[색인] 바뀐 경로 ${paths.length}개 → 전체 다시 만듦`);
+    // 색인과 관계있는 경로만 센다: 색인에 있는 파일, 색인 대상 확장자, 확장자 없는 경로(폴더일 수 있음).
+    // .class·로그처럼 색인하지 않는 파일이 한꺼번에 바뀌었다고 전체를 다시 만들지 않게
+    const relevant = paths.filter((p) => this.byFile.has(p) || hasClassExt(p) || !path.extname(p));
+    if (relevant.length > ClassIndex.MAX_BATCH) {
+      this.onLog?.(`[색인] 바뀐 소스·폴더 ${relevant.length}개 (예: ${relevant[0]}) → 전체 다시 만듦`);
       this.key = '';
       await this.ensure(this.roots, this.excludes).catch(() => undefined);
       return;
@@ -488,7 +491,8 @@ export class ClassIndex {
       this.touchedDuringMembers.add(f);
     }
     this.all = undefined;
-    this.onLog?.(`[색인] 갱신 ${paths.map((p) => path.basename(p)).join(', ')} ${Date.now() - started}ms`);
+    // 실제로 다시 읽은 것만 적는다 (색인 대상이 아닌 파일은 빼고)
+    this.onLog?.(`[색인] 갱신 ${[...known, ...files, ...dirs].map((p) => path.basename(p)).join(', ')} ${Date.now() - started}ms`);
   }
 
   removeFile(file: string) {
