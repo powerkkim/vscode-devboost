@@ -193,6 +193,7 @@ export class RunnerPanel {
         }
         return;
       case 'send':
+        if (m.action === 'console') return this.runInConsole();
         return this.send(m.action === 'run' || m.action === 'explain' ? m.action : 'insert');
       case 'reveal':
         return this.reveal(m.file, m.line);
@@ -230,6 +231,19 @@ export class RunnerPanel {
     }
     const action = kind === 'insert' ? 'none' : this.last.mode === 'bind' ? 'script' : 'statement';
     await this.deps.oracle.run(text, { action, insert }, (t, k, since) => this.notice(t, k, since));
+  }
+
+  /** 값을 넣은 SQL 을 DevBoost DB 콘솔에서 실행 (바인드 변수 모드여도 값 넣기 SQL 로) */
+  private async runInConsole() {
+    if (!this.lastDoc) return;
+    const st = this.lastDoc.statements.find((s) => s.id === this.stmtId);
+    if (!st) return;
+    if (!vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('enabled', true)) {
+      return this.notice('DB 콘솔이 꺼져 있습니다 (설정 devBoost.dbConsole.enabled).', 'warn');
+    }
+    const sqlText = this.deps.store.prepare(this.lastDoc, st, this.deps.index.resolver(), 'literal').result.sql.trim();
+    if (!sqlText) return this.notice('보낼 SQL 이 비어 있습니다.', 'warn');
+    await vscode.commands.executeCommand('devBoost.dbConsole.runSql', `-- ${this.lastDoc.namespace}.${st.id}\n${sqlText}`);
   }
 
   private async reveal(file: string | undefined, line: number | undefined) {

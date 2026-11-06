@@ -49,7 +49,7 @@ export function mergeImport(input: MergeInput): MergeResult {
     const prefixes = s?.prefixes ?? [];
     const sameSchema = existing && existing.source.schema === owner;
     schema = emptySchema({
-      dbms: 'oracle',
+      dbms: main.dbms ?? 'oracle',
       database: s?.database ?? (sameSchema ? existing!.source.database : undefined),
       schema: owner,
       collectedAt: s?.collectedAt,
@@ -80,7 +80,7 @@ export function mergeImport(input: MergeInput): MergeResult {
     schema = structuredClone(existing);
     if (input.label) schema.source.label = input.label;
   } else {
-    schema = emptySchema({ dbms: 'oracle', schema: input.fallbackSchema ?? 'SCHEMA', label: input.label });
+    schema = emptySchema({ dbms: input.main?.dbms ?? 'oracle', schema: input.fallbackSchema ?? 'SCHEMA', label: input.label });
     notes.push({ level: 'error', message: '스키마 수집 결과를 먼저 가져오세요 (공통코드는 저장된 스키마에 합쳐집니다).' });
   }
 

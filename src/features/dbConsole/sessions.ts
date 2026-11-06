@@ -1,6 +1,14 @@
-import { DbConnectionConfig } from './connection/connectString';
-import { OracleSession, openSession, explainError } from './connection/oracleClient';
-import { isConnectionLost, checkAlive } from './connection/health';
+import { DbConnectionConfig } from './connection/config';
+import { checkAlive } from './connection/health';
+import { DbSession } from './driver/session';
+import { driverFor } from './driver/registry';
+
+/** 드라이버로 접속을 연다 */
+export async function openSession(cfg: DbConnectionConfig, password: string): Promise<DbSession> {
+  const driver = driverFor(cfg);
+  const { connection, info } = await driver.open(cfg, password);
+  return new DbSession(driver, connection, info);
+}
 
 /** 끊긴 접속 */
 export interface LostSession {
@@ -11,7 +19,7 @@ export interface LostSession {
 
 export interface SessionsOptions {
   /** 접속을 여는 함수 (테스트에서 바꿔 끼운다) */
-  open?: (cfg: DbConnectionConfig, password: string) => Promise<OracleSession>;
+  open?: (cfg: DbConnectionConfig, password: string) => Promise<DbSession>;
   /** 서버에 다녀와 확인하는 간격 (ms). 0 이면 서버에는 다녀오지 않는다 */
   checkEveryMs?: number;
   /** 소켓 상태만 보는(서버에 가지 않는) 확인 간격 (ms) */
@@ -56,9 +64,9 @@ class Emitter<T> {
  * vscode 모듈에 의존하지 않는다
  */
 export class Sessions {
-  private readonly open = new Map<string, OracleSession>();
+  private readonly open = new Map<string, DbSession>();
   /** 접속하는 중인 연결 (같은 연결을 두 번 열지 않게) */
-  private readonly opening = new Map<string, Promise<OracleSession>>();
+  private readonly opening = new Map<string, Promise<DbSession>>();
   private readonly changed = new Emitter<void>();
   private readonly lost = new Emitter<LostSession>();
   /** 접속이 열리거나 닫힐 때 */
@@ -66,7 +74,7 @@ export class Sessions {
   /** 접속이 끊긴 것을 알아챘을 때 (사용자가 끊은 것은 아님) */
   readonly onDidLose = this.lost.event;
 
-  private readonly openFn: (cfg: DbConnectionConfig, password: string) => Promise<OracleSession>;
+  private readonly openFn: (cfg: DbConnectionConfig, password: string) => Promise<DbSession>;
   private checkEveryMs: number;
   private readonly localCheckMs: number;
   private readonly pingTimeoutMs: number;
@@ -83,7 +91,7 @@ export class Sessions {
     this.pingTimeoutMs = options.pingTimeoutMs ?? DEFAULT_PING_TIMEOUT_MS;
   }
 
-  get(id: string): OracleSession | undefined {
+  get(id: string): DbSession | undefined {
     return this.open.get(id);
   }
 
@@ -96,7 +104,7 @@ export class Sessions {
   }
 
   /** 이미 열려 있으면 그 접속을 돌려준다 */
-  async connect(cfg: DbConnectionConfig, password: string): Promise<OracleSession> {
+  async connect(cfg: DbConnectionConfig, password: string): Promise<DbSession> {
     const have = this.open.get(cfg.id);
     if (have) return have;
     let p = this.opening.get(cfg.id);
@@ -182,7 +190,7 @@ export class Sessions {
     await Promise.all(
       [...this.open].map(async ([id, s]) => {
         if (s.busy) return; // 쿼리 실행 중 — 끊겼다면 그 쿼리의 오류로 알게 된다
-        const r = await checkAlive(s.connection, this.pingTimeoutMs);
+        const r = await checkAlive(s.connection, this.pingTimeoutMs, s.driver.errors.explain);
         // 확인하는 사이에 쿼리가 시작됐으면(답이 늦은 이유) 판정하지 않는다. 사용자가 끊었거나 다시 접속했으면 건드리지 않는다
         if (r.alive || s.busy || this.open.get(id) !== s) return;
         this.drop(id, s, r.reason);
@@ -198,12 +206,12 @@ export class Sessions {
    */
   reportError(id: string, e: unknown): boolean {
     const s = this.open.get(id);
-    if (!s || !isConnectionLost(e)) return false;
-    this.drop(id, s, explainError(e));
+    if (!s || !s.driver.errors.isConnectionLost(e)) return false;
+    this.drop(id, s, s.driver.errors.explain(e));
     return true;
   }
 
-  private drop(id: string, s: OracleSession, reason: string) {
+  private drop(id: string, s: DbSession, reason: string) {
     this.open.delete(id);
     this.schedule();
     void s.close().catch(() => undefined); // 이미 끊긴 접속이라 실패해도 된다 (드라이버 쪽 자원 정리)

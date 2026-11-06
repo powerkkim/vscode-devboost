@@ -303,7 +303,8 @@
             h(
               'div',
               { class: 'actions' },
-              h('button', { id: 'run', class: 'primary', onclick: () => post({ type: 'send', action: 'run' }) }, '▶ 워크시트에서 실행'),
+              h('button', { id: 'console', class: 'primary', onclick: () => post({ type: 'send', action: 'console' }), title: '값을 넣은 SQL 을 DevBoost DB 콘솔에서 바로 실행 (결과는 쿼리 아래)' }, '▶ DB 콘솔에서 실행'),
+              h('button', { id: 'run', onclick: () => post({ type: 'send', action: 'run' }) }, '워크시트에서 실행'),
               h('button', { onclick: () => post({ type: 'send', action: 'insert' }), title: '워크시트에 넣기만 하고 실행은 직접 (값 넣기: Ctrl+Enter / 바인드 변수: F5)' }, '워크시트에 넣기'),
               h(
                 'button',

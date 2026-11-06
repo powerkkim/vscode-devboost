@@ -10,7 +10,7 @@
 | **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
-| **DB 콘솔** — Oracle(12.1 이상)에 직접 접속해 쿼리 실행, 결과는 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
+| **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
@@ -70,9 +70,30 @@
 | `devBoost.searchEverywhere.doubleShift` | `Shift` 두 번으로 열기 |
 | `devBoost.searchEverywhere.showTiming` | 검색 창 하단에 단계별 소요 시간 표시 (출력 패널 "DevBoost"에도 기록) |
 
+### DB 콘솔
+
+1. 사이드바 DevBoost → `DB 연결` → `+` 로 연결 추가. 처음에 DB 종류(Oracle · PostgreSQL · MySQL/MariaDB)를 고름. JDBC URL 을 붙여 넣으면 DB 종류와 칸이 함께 채워짐
+2. 연결을 펼치면 테이블·뷰·시노님·칸. 연결 줄의 필터 버튼으로 이름 필터(`TB_PLM`, `*_HIST`, `!*_BAK`), 오른쪽 클릭 `스키마 바꾸기`
+3. 테이블을 `Ctrl`·`Shift` 로 여러 개 골라 오른쪽 클릭 → `SELECT 만들기/실행`, `행 수 세기`, `JOIN 만들기/실행` (참조 제약, 없으면 기본 키 칸 이름으로 이음)
+4. 콘솔에서 `Ctrl+Enter` 실행(커서 문장 또는 선택 영역 — 도구 줄에 `실행 대상` 표시), 줄 옆 `▶` 로 그 문장 실행, `Ctrl+E` 실행계획, `Shift+Alt+→` 문장 고르기. 결과·실행계획은 문장 바로 아래에 나옵니다. 하단 패널 `DB 결과`에도 쌓이니(메시지 기록 포함) 크게 보고 싶을 때 열어 보세요
+5. 결과 옆 `⋯` → 헤더 포함 복사 · INSERT 문으로 복사 · CSV 내보내기 · 패널에서 보기 (화면에 있는 결과 그대로, 정렬 순서 포함)
+6. 편집: `별칭.` 뒤에서 칸 이름 자동 완성, `Shift+Alt+F` SQL 정렬, 도구 줄 `기록`(연결별 실행 기록, 다시 실행), 테이블 오른쪽 클릭 `테이블 정보`(칸·제약·인덱스·참조하는 테이블·DDL)
+7. MyBatis mapper 의 쿼리 위 `▶ 콘솔에서 실행` — 파라미터 값을 넣은 SQL 이 콘솔 끝에 들어가 바로 실행됨
+
+DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙)은 따로 처리합니다. Oracle 의 `DBMS_OUTPUT`·`/` 구분·`q'[...]'` 는 Oracle 에서만, PostgreSQL 의 `$$` 본문·`RAISE NOTICE` 는 PostgreSQL 에서만, MySQL 의 백틱·`#` 주석은 MySQL 에서만 씁니다. PostgreSQL·MySQL 드라이버는 그 DB 에 처음 접속할 때 불러옵니다.
+
+| 설정 | 설명 |
+|---|---|
+| `devBoost.dbConsole.pageSize` | 한 번에 가져오는 행 수 (기본 500). 콘솔 도구 줄에서도 바꿈 |
+| `devBoost.dbConsole.maxRows` | 한 결과에 가져오는 최대 행 수 (기본 10,000, 200,000까지). `끝까지`도 여기까지 |
+| `devBoost.dbConsole.checkConnectionSeconds` | 접속이 살아 있는지 서버에 다녀와 확인하는 간격(초, 기본 300, `0` 이면 끔) |
+
 ### DB 스키마 · 테이블 정의서
 
-DB 에 직접 접속하지 않습니다. 화면이 알려 주는 쿼리를 실행하고 결과를 복사해 오면 됩니다.
+두 가지로 가져옵니다.
+
+- **DB 연결에서 바로 가져오기** — DB 콘솔에 등록한 연결을 골라 접두어만 넣으면 칸·제약·인덱스·주석을 바로 읽어 옴 (Oracle · PostgreSQL · MySQL)
+- **쿼리 결과 붙여 넣기** — DB 에 접속할 수 없는 환경이면 화면이 알려 주는 쿼리를 다른 도구에서 실행하고 결과를 복사해 옴 (아래 순서)
 
 1. 명령 팔레트(`Ctrl+Shift+P`) → `DB 스키마: 스키마 가져오기 · 테이블 정의서`
 2. **범위**: 테이블 접두어 (`TB_`, 여러 개는 쉼표, 비우면 전체)와 환경(개발/운영 …)

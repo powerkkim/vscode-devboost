@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const ex = require(path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole', 'connection', 'execute.js'));
+const ex = require(path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole', 'drivers', 'oracle', 'execute.js'));
 
 /** 가짜 접속: execute 가 돌려줄 값을 정해 둔다. 조회면 rows 를 ResultSet 처럼 나눠 준다 */
 function fakeConnection({ rows, meta, rowsAffected, fail } = {}) {

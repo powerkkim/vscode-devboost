@@ -1,35 +1,15 @@
 import type { Connection, ResultSet, ColumnMeta } from 'oracledb';
-import type { BindType, BindValue } from '../sql/binds';
+import type { Binds, Cell, Column, Page, RowCursor as Cursor, RunResult } from '../../driver/types';
+export { errorOffset } from './errors';
+export type { Binds, Cell, Column, Page, RunResult };
 
 /**
- * 문장 하나를 실행하고 결과를 화면에 보여 줄 모양으로 바꾼다 (vscode 모듈에 의존하지 않는다).
+ * Oracle: 문장 하나를 실행하고 결과를 화면에 보여 줄 모양으로 바꾼다 (vscode 모듈에 의존하지 않는다).
  * 조회는 처음 pageSize 행만 가져오고, 나머지는 열어 둔 커서(RowCursor)에서 이어 받는다.
  */
 
-/** 화면에 보여 줄 칸 값. null 은 DB 의 NULL */
-export type Cell = string | null;
-
-export interface Column {
-  name: string;
-  /** VARCHAR2, NUMBER, DATE … */
-  type: string;
-  /** 숫자 칸 (오른쪽 정렬) */
-  numeric: boolean;
-}
-
-export interface Page {
-  rows: Cell[][];
-  /** 더 가져올 행이 없음 */
-  done: boolean;
-}
-
-export type RunResult =
-  | { kind: 'rows'; columns: Column[]; page: Page; cursor?: RowCursor; ms: number }
-  | { kind: 'count'; rowsAffected: number; ms: number }
-  | { kind: 'ok'; ms: number };
-
 /** 열어 둔 조회 결과: 다음 행들을 이어 받는다. 다 받았거나 필요 없어지면 닫는다 */
-export class RowCursor {
+export class RowCursor implements Cursor {
   private closed = false;
   constructor(private readonly rs: ResultSet) {}
 
@@ -92,9 +72,6 @@ export function toColumn(m: ColumnMeta): Column {
  * - INSERT·UPDATE·DELETE·MERGE: 바뀐 행 수
  * - 그 밖(DDL·PL/SQL): 성공 여부만
  */
-/** 문장에 넘길 파라미터 값 (이름 → 값과 타입) */
-export type Binds = Record<string, { value: BindValue; type: BindType }>;
-
 /** 파라미터 값 → 드라이버가 받는 모양. 타입을 함께 넘겨야 NULL 이나 날짜가 뜻대로 들어간다 */
 function toDriverBinds(oracledb: typeof import('oracledb'), binds: Binds): Record<string, unknown> {
   const types = { VARCHAR2: oracledb.DB_TYPE_VARCHAR, NUMBER: oracledb.DB_TYPE_NUMBER, DATE: oracledb.DB_TYPE_DATE };
@@ -134,6 +111,8 @@ export async function runStatement(connection: Connection, sql: string, pageSize
 }
 
 let planSeq = 0;
+/** 바인드가 맞지 않는다는 오류 (값을 넘겼는데 받을 자리가 없음 등) */
+const BIND_ERRORS = /\b(ORA-01006|ORA-01036|ORA-01008|NJS-097|NJS-098)\b/;
 
 /**
  * 실행계획: EXPLAIN PLAN 으로 계획을 만들고 DBMS_XPLAN 이 그려 준 표를 줄 단위로 받는다.
@@ -143,13 +122,15 @@ export async function explainPlan(connection: Connection, sql: string, binds: Bi
   const oracledb = require('oracledb') as typeof import('oracledb');
   const started = Date.now();
   const id = `DEVBOOST_${Date.now() % 100000000}_${++planSeq}`;
-  await connection.execute(`EXPLAIN PLAN SET STATEMENT_ID = '${id}' FOR ${sql}`, toDriverBinds(oracledb, binds), { autoCommit: false });
+  const explain = `EXPLAIN PLAN SET STATEMENT_ID = '${id}' FOR ${sql}`;
+  try {
+    await connection.execute(explain, toDriverBinds(oracledb, binds), { autoCommit: false });
+  } catch (e) {
+    // EXPLAIN PLAN 은 바인드 값을 쓰지 않는다(값 없이 계획만 만든다). 값을 넘겨서 난 바인드 오류면 값 없이 다시
+    if (!Object.keys(binds).length || !BIND_ERRORS.test(String((e as Error)?.message ?? e))) throw e;
+    await connection.execute(explain, [], { autoCommit: false });
+  }
   const r = await connection.execute(`SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${id}', 'TYPICAL'))`, [], { autoCommit: false });
   return { lines: (r.rows ?? []).map((row) => String(row[0] ?? '')), ms: Date.now() - started };
 }
 
-/** 오류가 난 자리 (문장 안에서 몇 번째 글자인지). 드라이버가 알려 줄 때만 */
-export function errorOffset(e: unknown): number | undefined {
-  const off = (e as { offset?: unknown } | undefined)?.offset;
-  return typeof off === 'number' && off >= 0 ? off : undefined;
-}
