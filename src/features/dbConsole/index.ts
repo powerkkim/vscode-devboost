@@ -514,6 +514,53 @@ export const dbConsole: Feature = {
        * 다른 기능(MyBatis SQL 실행 등)이 만든 SQL 을 콘솔에 넣고 실행한다.
        * 연결: 지난번에 고른 연결(작업 폴더마다 기억), 연결이 하나면 그것, 아니면 고르게 한다
        */
+      /**
+       * 테이블 정의서용 수집 (DB 스키마 화면이 부른다): DB 연결을 고르고, 트리에서 보는 스키마의 테이블·뷰 중
+       * 접두어에 맞는 것의 정의를 읽어 정의서 규격으로 돌려준다. 취소·실패면 undefined
+       */
+      cmd('collectSchema', async (prefixes: string[] = []) => {
+        const cfg = await pick(undefined, '정의서를 가져올 DB 연결');
+        if (!cfg) return undefined;
+        if (!sessions.isConnected(cfg.id)) await connect(cfg);
+        const s = sessions.get(cfg.id);
+        if (!s) return undefined;
+        const owner = ownerOf(cfg.id) ?? s.info.schema;
+        const pre = prefixes.map((p) => p.trim().toUpperCase()).filter(Boolean);
+        try {
+          return await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `${cfg.name}: ${owner} 정의 읽는 중…`, cancellable: true },
+            async (progress, token) => {
+              const objs = await s.use((c) => c.meta.objects(owner));
+              const names = [...objs.tables, ...objs.views].filter((n) => !pre.length || pre.some((p) => n.toUpperCase().startsWith(p)));
+              const out = { tables: [], columns: [], constraints: [], indexes: [] } as Awaited<ReturnType<typeof s.connection.meta.collect>>;
+              const STEP = 300;
+              for (let i = 0; i < names.length; i += STEP) {
+                if (token.isCancellationRequested) return undefined;
+                progress.report({ message: `${Math.min(i + STEP, names.length).toLocaleString('ko-KR')} / ${names.length.toLocaleString('ko-KR')}`, increment: (STEP / Math.max(1, names.length)) * 100 });
+                const part = await s.use((c) => c.meta.collect(owner, names.slice(i, i + STEP)));
+                out.tables.push(...part.tables);
+                out.columns.push(...part.columns);
+                out.constraints.push(...part.constraints);
+                out.indexes.push(...part.indexes);
+              }
+              return {
+                kind: 'collect',
+                summary: { schema: owner, database: s.info.dbName, collectedAt: new Date().toISOString(), prefixes: pre, rows: out.columns.length },
+                rows: out.columns.length,
+                ...out,
+                codes: [],
+                problems: names.length ? [] : [{ level: 'warn', message: `${owner} 에 ${pre.length ? pre.join(', ') + ' 로 시작하는 ' : ''}테이블이 없습니다.` }],
+                dbms: s.driver.kind,
+                connectionName: cfg.name,
+              };
+            }
+          );
+        } catch (e) {
+          void vscode.window.showErrorMessage(`${cfg.name} 정의를 읽지 못했습니다: ${s.driver.errors.explain(e)}`);
+          return undefined;
+        }
+      }),
+
       cmd('runSql', async (sqlText: string, opts?: { run?: boolean; pick?: boolean }) => {
         if (!sqlText?.trim()) return;
         const list = store.list();

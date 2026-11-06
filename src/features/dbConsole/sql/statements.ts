@@ -18,6 +18,14 @@ export interface DialectRules {
   blockStart?: RegExp;
   /** 저장 프로시저를 부르는 첫 낱말 (종류 판정: plsql) */
   procedureCall?: string[];
+  /** `이름` 따옴표 (MySQL) */
+  backtick?: boolean;
+  /** # 한 줄 주석 (MySQL). #{…} 는 MyBatis 파라미터라 주석이 아니다 */
+  hashComment?: boolean;
+  /** $$ … $$, $태그$ … $태그$ 따옴표 (PostgreSQL 함수 본문 등) */
+  dollarQuote?: boolean;
+  /** 문자열 안의 \' 는 따옴표 한 글자 (MySQL) */
+  backslashEscape?: boolean;
 }
 
 /** 어느 DB에나 맞는 기본 규칙 */
@@ -48,10 +56,10 @@ export interface StatementInfo {
  * pos 에서 시작하는 "문장이 아닌 것"(공백·주석)을 건너뛴 자리.
  * 주석이 끝나지 않았으면 글 끝
  */
-function skipBlank(text: string, pos: number): number {
+function skipBlank(text: string, pos: number, rules: DialectRules = GENERIC_RULES): number {
   for (;;) {
     while (pos < text.length && /\s/.test(text[pos])) pos++;
-    if (text.startsWith('--', pos)) {
+    if (text.startsWith('--', pos) || (rules.hashComment && text[pos] === '#' && text[pos + 1] !== '{')) {
       const nl = text.indexOf('\n', pos);
       pos = nl < 0 ? text.length : nl + 1;
     } else if (text.startsWith('/*', pos)) {
@@ -66,13 +74,29 @@ function skipBlank(text: string, pos: number): number {
 /** pos 가 문자열·따옴표 이름·주석의 시작이면 그 끝 다음 자리, 아니면 -1 */
 export function skipQuoted(text: string, pos: number, rules: DialectRules = GENERIC_RULES): number {
   const c = text[pos];
-  if (c === "'" || c === '"') {
+  if (c === "'" || c === '"' || (c === '`' && rules.backtick)) {
     for (let i = pos + 1; i < text.length; i++) {
+      if (rules.backslashEscape && text[i] === '\\' && c !== '`') {
+        i++; // \' \\ 등은 글자 하나
+        continue;
+      }
       if (text[i] !== c) continue;
-      if (c === "'" && text[i + 1] === "'") i++; // '' 는 따옴표 한 글자
+      if (text[i + 1] === c) i++; // '' (또는 `` "") 는 따옴표 한 글자
       else return i + 1;
     }
     return text.length;
+  }
+  if (rules.hashComment && c === '#' && text[pos + 1] !== '{') {
+    const nl = text.indexOf('\n', pos);
+    return nl < 0 ? text.length : nl;
+  }
+  // $$ … $$ / $tag$ … $tag$ (앞이 낱말 글자면 이름의 일부, $1 같은 위치 파라미터는 태그가 아니다)
+  if (rules.dollarQuote && c === '$' && !/[\w$]/.test(text[pos - 1] ?? ' ')) {
+    const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(text.slice(pos, pos + 64));
+    if (m) {
+      const end = text.indexOf(m[0], pos + m[0].length);
+      return end < 0 ? text.length : end + m[0].length;
+    }
   }
   // q'[ … ]' — 여는 글자에 맞는 닫는 글자 + ' 에서 끝난다
   if (rules.qQuote && (c === 'q' || c === 'Q') && text[pos + 1] === "'" && pos + 2 < text.length && !/[\w$#]/.test(text[pos - 1] ?? ' ')) {
@@ -103,7 +127,7 @@ export function splitStatements(text: string, rules: DialectRules = GENERIC_RULE
   const out: Statement[] = [];
   let pos = 0;
   while (pos < text.length) {
-    const start = skipBlank(text, pos);
+    const start = skipBlank(text, pos, rules);
     if (start >= text.length) break;
     // 문장 사이에 남은 `/` 줄이나 `;` 는 건너뛴다
     if (text[start] === ';') {

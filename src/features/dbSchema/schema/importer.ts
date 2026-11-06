@@ -88,6 +88,8 @@ export interface ImportPart {
   codes: CodeInfo[];
   json?: SchemaFile;
   problems: ImportProblem[];
+  /** DB 종류 (DB 연결에서 바로 읽었을 때. 없으면 oracle) */
+  dbms?: string;
 }
 
 type Rec = Record<string, string>;

@@ -16,7 +16,7 @@ import type {
  * DbConnection.extras 로 내놓고, 화면은 그 기능이 있을 때만 보여 준다 — 다른 DB 접속에 섞이지 않게.
  */
 
-export type DbKind = 'oracle';
+export type DbKind = 'oracle' | 'postgres' | 'mysql';
 
 /** 화면에 보여 줄 칸 값. null 은 DB 의 NULL */
 export type Cell = string | null;
@@ -206,4 +206,9 @@ export interface DbDriver {
   rules: DialectRules;
   errors: ErrorInfo;
   connect: ConnectInfo;
+  /**
+   * DDL 을 실행하면 그 앞의 변경까지 저절로 커밋되는가 (Oracle·MySQL 예, PostgreSQL 아니오 — DDL 도 트랜잭션 안).
+   * 콘솔의 "커밋 안 한 변경" 수를 맞추는 데 쓴다
+   */
+  ddlCommits: boolean;
 }

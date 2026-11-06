@@ -543,15 +543,16 @@ export class DbConsole implements vscode.Disposable {
       });
       return;
     }
-    if ((info.kind === 'tx' && info.verb !== 'SAVEPOINT') || info.kind === 'ddl') {
-      this.dirty.delete(cfg.id); // 직접 친 COMMIT·ROLLBACK, 또는 DDL (오라클은 DDL 을 실행하면서 그 앞의 변경까지 커밋한다)
+    const ddlCommits = driverFor(cfg).ddlCommits;
+    if ((info.kind === 'tx' && info.verb !== 'SAVEPOINT') || (info.kind === 'ddl' && ddlCommits)) {
+      this.dirty.delete(cfg.id); // 직접 친 COMMIT·ROLLBACK, 또는 DDL (Oracle·MySQL 은 DDL 을 실행하면서 그 앞의 변경까지 커밋한다)
     } else if (!(r.kind === 'count' && r.rowsAffected === 0)) {
       addDirty(); // DML·PL/SQL·그 밖: 바뀐 것이 있을 수 있다 (0행 변경은 세지 않는다)
     }
     const what =
       r.kind === 'count'
         ? `${r.rowsAffected.toLocaleString('ko-KR')}행 ${info.verb === 'INSERT' ? '추가됨' : info.verb === 'DELETE' ? '삭제됨' : '변경됨'}`
-        : info.kind === 'ddl'
+        : info.kind === 'ddl' && ddlCommits
           ? '실행됨 (DDL — 자동으로 커밋됩니다)'
           : '실행됨';
     const pending = this.isDirty(cfg.id) && info.kind !== 'tx' ? ' · 아직 커밋하지 않음' : '';

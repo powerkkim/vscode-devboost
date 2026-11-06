@@ -144,3 +144,38 @@ export function bindValuesFor(sql: string, inputs: Record<string, BindInput>, ru
   }
   return { ok: true, values };
 }
+
+/**
+ * 이름 파라미터(:name)를 자리 표시로 바꾸고 값을 나온 순서대로 늘어놓는다.
+ * PostgreSQL 은 $1, $2 … (같은 이름은 같은 번호), MySQL 은 ? (나올 때마다 값을 다시 넣는다)
+ */
+export function toPositional(
+  sql: string,
+  binds: Record<string, { value: BindValue }>,
+  rules: DialectRules,
+  style: 'dollar' | 'question'
+): { sql: string; values: BindValue[] } {
+  const byLower = new Map(Object.entries(binds).map(([k, v]) => [k.toLowerCase(), v.value]));
+  const values: BindValue[] = [];
+  const numbers = new Map<string, number>();
+  let out = '';
+  let at = 0;
+  for (const b of findBinds(sql, rules)) {
+    const key = b.name.toLowerCase();
+    let mark: string;
+    if (style === 'dollar') {
+      let n = numbers.get(key);
+      if (n === undefined) {
+        values.push(byLower.get(key) ?? null);
+        numbers.set(key, (n = values.length));
+      }
+      mark = `$${n}`;
+    } else {
+      values.push(byLower.get(key) ?? null);
+      mark = '?';
+    }
+    out += sql.slice(at, b.start) + mark;
+    at = b.end;
+  }
+  return { sql: out + sql.slice(at), values };
+}

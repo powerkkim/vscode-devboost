@@ -115,7 +115,9 @@
     return h(
       'div',
       { class: 'btns' },
-      h('button', { class: 'primary', onclick: () => post({ type: 'send', run: true, ...currentInputs() }), title: o.target ? `보낼 곳: ${o.target}` : '접속에서 Open SQL Worksheet 로 연 워크시트가 있으면 그곳으로, 없으면 새 워크시트' }, '▶ 워크시트에서 실행'),
+      h('button', { class: 'primary', onclick: () => post({ type: 'importConnection', ...currentInputs() }), title: 'DevBoost DB 연결로 바로 읽어 옵니다 (쿼리 실행·결과 복사 없이). 트리에서 보는 스키마 기준' }, '⚡ DB 연결에서 바로 가져오기'),
+      h('span', { class: 'sep' }),
+      h('button', { onclick: () => post({ type: 'send', run: true, ...currentInputs() }), title: o.target ? `보낼 곳: ${o.target}` : '접속에서 Open SQL Worksheet 로 연 워크시트가 있으면 그곳으로, 없으면 새 워크시트' }, '▶ 워크시트에서 실행'),
       h('button', { onclick: () => post({ type: 'send', run: false, ...currentInputs() }) }, '워크시트에 넣기'),
       h('button', { onclick: () => post({ type: 'copySql', ...currentInputs() }), title: 'DBeaver 등 다른 도구에서 실행할 때' }, '쿼리 복사'),
       h('span', { class: 'sep' }),

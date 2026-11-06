@@ -12,4 +12,5 @@ export const oracleDriver: DbDriver = {
   rules: ORACLE_RULES,
   errors: oracleErrors,
   connect: oracleConnect,
+  ddlCommits: true,
 };
