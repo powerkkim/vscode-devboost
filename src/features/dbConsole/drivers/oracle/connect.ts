@@ -1,33 +1,18 @@
+import type { DbConnectionConfig, TargetKind } from '../../connection/config';
+import type { ConnectInfo, HostInput } from '../../driver/types';
+
 /**
- * DB 연결 정보와 연결 문자열 (vscode·oracledb 모듈에 의존하지 않아 단독 테스트 가능).
+ * Oracle 접속 주소 (vscode·oracledb 모듈에 의존하지 않아 단독 테스트 가능).
+ *  - 서비스 이름 → EZConnect(host:port/service), SID → TNS 설명자, 직접 입력 → 그대로
+ *  - 호스트 칸·JDBC URL(jdbc:oracle:thin:@…) 붙여 넣기 해석
  */
-
-/** 접속 대상을 적는 방식: 서비스 이름 / SID / 연결 문자열 전체(TNS 설명자·EZConnect) */
-export type TargetKind = 'service' | 'sid' | 'raw';
-
-export interface DbConnectionConfig {
-  id: string;
-  /** 목록에 보이는 이름 */
-  name: string;
-  /** targetKind 가 'raw' 면 쓰지 않는다 */
-  host: string;
-  port: number;
-  targetKind: TargetKind;
-  /** 서비스 이름 / SID / 연결 문자열 전체 */
-  target: string;
-  user: string;
-  /** 읽기 전용으로 쓸 연결 (변경 쿼리를 막는 데 쓴다) */
-  readOnly: boolean;
-  /** 운영 DB 표시 (목록에서 빨간색) */
-  production: boolean;
-  /** 비밀번호를 저장해 두는지. false 면 접속할 때 묻는다 */
-  savePassword: boolean;
-}
 
 export const DEFAULT_PORT = 1521;
 
+type Target = Pick<DbConnectionConfig, 'host' | 'port' | 'targetKind' | 'target'>;
+
 /** node-oracledb 에 넘길 연결 문자열 */
-export function buildConnectString(c: Pick<DbConnectionConfig, 'host' | 'port' | 'targetKind' | 'target'>): string {
+export function buildConnectString(c: Target): string {
   const target = c.target.trim();
   if (c.targetKind === 'raw') return target;
   const host = c.host.trim();
@@ -40,37 +25,24 @@ export function buildConnectString(c: Pick<DbConnectionConfig, 'host' | 'port' |
   return `${h}:${c.port}/${target}`;
 }
 
-/** 목록에 보여 줄 한 줄: user@host:port/service */
-export function describeConnection(c: DbConnectionConfig): string {
+/** 목록에 보여 줄 주소 부분: host:port/service, host:port:SID, 설명자(길면 줄임) */
+export function describeTarget(c: Target): string {
   if (c.targetKind === 'raw') {
     const t = c.target.trim().replace(/\s+/g, ' ');
-    return `${c.user}@${t.length > 60 ? t.slice(0, 60) + '…' : t}`;
+    return t.length > 60 ? t.slice(0, 60) + '…' : t;
   }
-  return `${c.user}@${c.host}:${c.port}${c.targetKind === 'sid' ? ':' : '/'}${c.target}`;
+  return `${c.host}:${c.port}${c.targetKind === 'sid' ? ':' : '/'}${c.target}`;
 }
 
-// ───────── 입력값 확인 (틀리면 이유, 맞으면 undefined) ─────────
-
-export function checkName(v: string): string | undefined {
-  return v.trim() ? undefined : '이름을 넣으세요';
-}
-
-export function checkHost(v: string): string | undefined {
+export function checkTarget(kind: TargetKind, v: string): string | undefined {
   const t = v.trim();
-  if (!t) return '호스트(서버 주소)를 넣으세요';
-  if (/\s/.test(t)) return '호스트에 공백이 있습니다';
-  if (/[()=/]/.test(t)) return '호스트에 쓸 수 없는 글자가 있습니다 (괄호, =, /)';
+  if (!t) return kind === 'service' ? '서비스 이름을 넣으세요' : kind === 'sid' ? 'SID 를 넣으세요' : '연결 문자열을 넣으세요';
+  if (kind !== 'raw' && /[\s()=/]/.test(t)) return '이름에 쓸 수 없는 글자가 있습니다 (공백, 괄호, =, /)';
   return undefined;
 }
 
-/** 호스트 칸에 넣은 글에서 읽어 낸 것. 호스트만 썼으면 host 만 있다 */
-export interface HostInput {
-  host: string;
-  port?: number;
-  targetKind?: TargetKind;
-  target?: string;
-  user?: string;
-}
+/** [//]host[:port][/service | :sid] — host 는 이름·IPv4 또는 [IPv6] */
+const HOST_TARGET = /^(?:\/\/)?(\[[^\]]+\]|[^:/\s]+)(?::(\d+))?(?:([:/])([^\s?]+))?/;
 
 /**
  * 호스트 칸의 입력을 읽는다. 주소만 쓰지 않고 한꺼번에 붙여 넣는 경우를 받아 준다. 읽을 수 없으면 undefined
@@ -96,29 +68,8 @@ export function parseHostInput(text: string): HostInput | undefined {
   return { host, port: port ?? DEFAULT_PORT, targetKind: a[3] === ':' ? 'sid' : 'service', target: a[4] };
 }
 
-/** [//]host[:port][/service | :sid] — host 는 이름·IPv4 또는 [IPv6] */
-const HOST_TARGET = /^(?:\/\/)?(\[[^\]]+\]|[^:/\s]+)(?::(\d+))?(?:([:/])([^\s?]+))?/;
-
-export function checkPort(v: string): string | undefined {
-  const t = v.trim();
-  if (!/^\d+$/.test(t)) return '포트는 숫자입니다 (보통 1521)';
-  const n = Number(t);
-  return n >= 1 && n <= 65535 ? undefined : '포트는 1~65535 사이입니다';
-}
-
-export function checkTarget(kind: TargetKind, v: string): string | undefined {
-  const t = v.trim();
-  if (!t) return kind === 'service' ? '서비스 이름을 넣으세요' : kind === 'sid' ? 'SID 를 넣으세요' : '연결 문자열을 넣으세요';
-  if (kind !== 'raw' && /[\s()=/]/.test(t)) return '이름에 쓸 수 없는 글자가 있습니다 (공백, 괄호, =, /)';
-  return undefined;
-}
-
-export function checkUser(v: string): string | undefined {
-  return v.trim() ? undefined : '사용자 이름을 넣으세요';
-}
-
 /**
- * JDBC URL → 접속 대상. application.yml 의 URL 을 그대로 붙여 넣을 수 있게 한다. JDBC URL 이 아니면 undefined
+ * JDBC URL → 접속 대상. application.yml 의 URL 을 그대로 붙여 넣을 수 있게 한다. Oracle JDBC URL 이 아니면 undefined
  *  - jdbc:oracle:thin:@//host:1521/service , jdbc:oracle:thin:@host:1521/service → 서비스 이름
  *  - jdbc:oracle:thin:@host:1521:SID                                             → SID
  *  - jdbc:oracle:thin:@(DESCRIPTION=…)                                           → 연결 문자열 그대로
@@ -141,3 +92,17 @@ export function parseJdbcUrl(text: string): { host: string; port: number; target
     user,
   };
 }
+
+export const oracleConnect: ConnectInfo = {
+  defaultPort: DEFAULT_PORT,
+  targetKinds: [
+    { value: 'service', label: '서비스 이름' },
+    { value: 'sid', label: 'SID' },
+    { value: 'raw', label: '연결 문자열' },
+  ],
+  jdbcExample: 'jdbc:oracle:thin:@//host:1521/service',
+  describeTarget,
+  connectString: buildConnectString,
+  checkTarget,
+  parseHostInput,
+};

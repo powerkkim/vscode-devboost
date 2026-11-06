@@ -4,8 +4,13 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole', 'connection');
-const cs = require(path.join(OUT, 'connectString.js'));
-const oc = require(path.join(OUT, 'oracleClient.js'));
+const DC = path.join(OUT, '..');
+const cs = {
+  ...require(path.join(OUT, 'config.js')),
+  ...require(path.join(DC, 'drivers', 'oracle', 'connect.js')),
+  describeConnection: require(path.join(DC, 'driver', 'registry.js')).describeConnection,
+};
+const oc = { ...require(path.join(DC, 'drivers', 'oracle', 'errors.js')), ...require(path.join(DC, 'drivers', 'oracle', 'session.js')) };
 
 const base = { id: '1', name: '개발', host: '10.0.0.5', port: 1521, targetKind: 'service', target: 'ORCLPDB1', user: 'hr', readOnly: false, production: false, savePassword: true };
 

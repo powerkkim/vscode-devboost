@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
-import { DbConnectionConfig } from '../connection/connectString';
-import { ConnectionForm, emptyForm, formFromConfig, formToConfig, validateForm, fillFromHostInput } from '../connection/form';
+import { DbConnectionConfig } from '../connection/config';
+import { driverOf } from '../driver/registry';
+import { ConnectionForm, emptyForm, formFromConfig, formToConfig, validateForm, fillFromHostInput, kindChoices, switchKind } from '../connection/form';
 
 /** 팝업이 요청하는 일 (index.ts 가 채운다) */
 export interface FormActions {
@@ -13,6 +14,7 @@ export interface FormActions {
 /** 콘솔 화면(Webview) → 확장: 연결 팝업에서 오는 메시지 */
 export type DialogMessage =
   | { type: 'dlgHostDone'; form: ConnectionForm }
+  | { type: 'dlgDb'; form: ConnectionForm; from: ConnectionForm['kind'] }
   | { type: 'dlgPaste'; text: string; form: ConnectionForm }
   | { type: 'dlgTest'; form: ConnectionForm }
   | { type: 'dlgSave'; form: ConnectionForm }
@@ -43,6 +45,7 @@ export class FormDialog {
       editing: !!this.existing,
       form: this.existing ? formFromConfig(this.existing) : emptyForm(),
       hasSavedPassword: this.hasSavedPassword,
+      kinds: kindChoices(),
     });
   }
 
@@ -63,11 +66,16 @@ export class FormDialog {
         if (filled) this.post({ type: 'dlgFill', form: filled });
         return undefined;
       }
+      case 'dlgDb': {
+        // DB 종류를 바꿨다: 기본 포트·접속 방식을 새 DB 에 맞춘다
+        this.post({ type: 'dlgFill', form: switchKind({ ...m.form, kind: m.from }, m.form.kind ?? 'oracle') });
+        return undefined;
+      }
       case 'dlgPaste': {
         // "JDBC URL로 입력" 칸: 그 글을 호스트 칸에 넣은 것처럼 읽어 나눠 채운다
         const filled = fillFromHostInput({ ...m.form, host: m.text });
         if (filled) this.post({ type: 'dlgFill', form: filled, fromUrl: true });
-        else this.post({ type: 'dlgUrlFailed', message: '읽지 못했습니다 (예: jdbc:oracle:thin:@//host:1521/service)' });
+        else this.post({ type: 'dlgUrlFailed', message: `읽지 못했습니다 (예: ${driverOf(m.form.kind).connect.jdbcExample})` });
         return undefined;
       }
       case 'dlgTest': {

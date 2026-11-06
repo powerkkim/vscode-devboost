@@ -1,94 +1,13 @@
-import type { Connection } from 'oracledb';
-import { DbConnectionConfig, buildConnectString } from './connectString';
+import type { ErrorInfo } from '../../driver/types';
 
 /**
- * Oracle 접속 (node-oracledb Thin 모드). vscode 모듈에 의존하지 않는다.
- * 드라이버는 처음 접속할 때 불러온다 (확장을 켤 때는 읽지 않음).
+ * Oracle·node-oracledb 오류 해석 (vscode·oracledb 모듈에 의존하지 않는다).
  */
 
-/** 접속에 허용할 시간 (초) */
+/** 접속에 허용할 시간 (초) — 안내 문구에도 쓴다 */
 export const CONNECT_TIMEOUT_SEC = 10;
 
-export interface ServerInfo {
-  /** 예: "19.3.0.0.0" */
-  version: string;
-  /** 현재 스키마 */
-  schema: string;
-  /** DB 이름 */
-  dbName: string;
-  /** 접속에 걸린 시간 */
-  ms: number;
-}
-
-/** 열려 있는 접속 하나 */
-export class OracleSession {
-  constructor(
-    /** 드라이버의 접속 객체 (쿼리 실행에 쓴다) */
-    readonly connection: Connection,
-    readonly info: ServerInfo
-  ) {}
-
-  private running = 0;
-
-  /** 접속으로 무언가 실행하는 중인지 (실행 중에는 끊김 확인을 건너뛴다) */
-  get busy(): boolean {
-    return this.running > 0;
-  }
-
-  /**
-   * 접속을 쓰는 작업은 이것으로 감싼다.
-   * 접속 하나는 한 번에 한 가지만 하므로, 실행 중에 끊김 확인이 끼어들면 긴 쿼리 뒤에 줄을 서서 "답 없음"으로 잘못 보인다
-   */
-  async use<T>(run: (connection: Connection) => Promise<T>): Promise<T> {
-    this.running++;
-    try {
-      return await run(this.connection);
-    } finally {
-      this.running--;
-    }
-  }
-
-  async close(): Promise<void> {
-    await this.connection.close();
-  }
-}
-
-export async function openSession(cfg: DbConnectionConfig, password: string): Promise<OracleSession> {
-  // 여기서 require: 처음 접속할 때 드라이버를 읽는다
-  const oracledb = require('oracledb') as typeof import('oracledb');
-  const started = Date.now();
-  const connection = await oracledb.getConnection({
-    user: cfg.user.trim(),
-    password,
-    connectString: buildConnectString(cfg),
-    connectTimeout: CONNECT_TIMEOUT_SEC,
-    transportConnectTimeout: CONNECT_TIMEOUT_SEC,
-  });
-  try {
-    const r = await connection.execute(
-      `select sys_context('userenv','current_schema'), sys_context('userenv','db_name') from dual`
-    );
-    const row = r.rows?.[0] ?? [];
-    return new OracleSession(connection, {
-      version: connection.oracleServerVersionString,
-      schema: String(row[0] ?? ''),
-      dbName: String(row[1] ?? ''),
-      ms: Date.now() - started,
-    });
-  } catch (e) {
-    await connection.close().catch(() => undefined);
-    throw e;
-  }
-}
-
-/** 접속해 보고 바로 닫는다 */
-export async function testConnection(cfg: DbConnectionConfig, password: string): Promise<ServerInfo> {
-  const s = await openSession(cfg, password);
-  await s.close().catch(() => undefined);
-  return s.info;
-}
-
-/** 오류 코드별 안내 (자주 만나는 접속 실패). 드라이버가 준 영어 메시지 앞에 붙인다 */
+/** 오류 코드별 안내 (자주 만나는 것). 드라이버가 준 영어 메시지 앞에 붙인다 */
 const HINTS: Record<string, string> = {
   'ORA-01017': '사용자 이름 또는 비밀번호가 틀립니다',
   'ORA-28000': '계정이 잠겨 있습니다 (DBA 에게 잠금 해제 요청)',
@@ -123,16 +42,36 @@ const HINTS: Record<string, string> = {
   'ORA-01013': '실행을 취소했습니다',
 };
 
+/**
+ * 접속이 끊겼다는 뜻의 오류 코드.
+ * 드라이버가 ORA-03113·ORA-03114·ORA-00028 등을 NJS-500 으로 바꿔 주지만, 원래 코드로 올 때도 대비해 함께 둔다
+ */
+const LOST = new Set([
+  'NJS-003', // 닫힌(쓸 수 없는) 접속
+  'NJS-500', // 접속이 닫힘
+  'NJS-501', // 서버와 연락이 끊김
+  'NJS-521', // 통신 채널이 끝남
+  'ORA-00028', // 세션이 강제 종료됨 (kill session)
+  'ORA-01012', // 로그온돼 있지 않음
+  'ORA-02396', // 쉬는 시간 한도를 넘김 (IDLE_TIME)
+  'ORA-03113', // 통신 채널이 끝남
+  'ORA-03114', // 접속돼 있지 않음
+  'ORA-03135', // 접속이 끊김
+  'ORA-12537', // 접속이 닫힘
+]);
+
+const AUTH = new Set(['ORA-01017', 'ORA-28000', 'ORA-28001', 'NJS-116']);
+
+function errorText(e: unknown): string {
+  const msg = (e as { message?: unknown } | undefined)?.message;
+  return typeof msg === 'string' ? msg : String(e);
+}
+
 /** 오류에서 코드(ORA-01017, NJS-503 …)를 꺼낸다 */
 export function errorCode(e: unknown): string | undefined {
   const code = (e as { code?: unknown } | undefined)?.code;
   if (typeof code === 'string' && /^[A-Z]{3}-\d+$/.test(code)) return code;
   return /\b([A-Z]{3}-\d{3,5})\b/.exec(errorText(e))?.[1];
-}
-
-function errorText(e: unknown): string {
-  const msg = (e as { message?: unknown } | undefined)?.message;
-  return typeof msg === 'string' ? msg : String(e);
 }
 
 /** 화면에 보여 줄 오류 한 줄: "안내 — 원래 메시지 첫 줄" */
@@ -142,3 +81,23 @@ export function explainError(e: unknown): string {
   const hint = code ? HINTS[code] : undefined;
   return hint ? `${hint} — ${first}` : first;
 }
+
+export function isConnectionLost(e: unknown): boolean {
+  const code = errorCode(e);
+  return code !== undefined && LOST.has(code);
+}
+
+/** 오류가 난 자리 (문장 안에서 몇 번째 글자인지). 드라이버가 알려 줄 때만 */
+export function errorOffset(e: unknown): number | undefined {
+  const off = (e as { offset?: unknown } | undefined)?.offset;
+  return typeof off === 'number' && off >= 0 ? off : undefined;
+}
+
+export const oracleErrors: ErrorInfo = {
+  code: errorCode,
+  explain: explainError,
+  isConnectionLost,
+  isAuthFailure: (e) => AUTH.has(errorCode(e) ?? ''),
+  isCancel: (e) => errorCode(e) === 'ORA-01013',
+  offset: errorOffset,
+};

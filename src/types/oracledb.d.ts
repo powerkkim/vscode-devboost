@@ -48,6 +48,8 @@ declare module 'oracledb' {
     resultSet?: ResultSet;
     /** INSERT·UPDATE·DELETE·MERGE 가 바꾼 행 수 */
     rowsAffected?: number;
+    /** PL/SQL 의 OUT 바인드 값 (이름 → 값) */
+    outBinds?: Record<string, unknown>;
   }
 
   export interface Connection {
@@ -81,4 +83,8 @@ declare module 'oracledb' {
   export const STRING: DbType;
   /** fetchTypeHandler 에서: 바이트(Buffer)로 받는다 */
   export const BUFFER: DbType;
+  /** 바인드 방향: 값을 받아 온다 (PL/SQL OUT) */
+  export const BIND_OUT: number;
+  /** 바인드 타입: 숫자 */
+  export const NUMBER: DbType;
 }

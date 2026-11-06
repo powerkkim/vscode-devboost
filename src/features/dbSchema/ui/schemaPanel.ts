@@ -102,7 +102,19 @@ export class SchemaPanel {
         await vscode.env.clipboard.writeText(this.sql());
         this.notice('쿼리를 복사했습니다. 다른 DB 도구에서 실행한 뒤 결과를 복사해 오세요.');
         return;
-      case 'importClipboard':
+      case 'importConnection': {
+        // DevBoost DB 콘솔의 연결로 바로 읽는다 (쿼리를 돌려 결과를 복사해 오는 단계가 없다)
+        this.applyInputs(m);
+        const part = (await vscode.commands.executeCommand('devBoost.dbConsole.collectSchema', normalizePrefixes(this.ui.prefixes))) as
+          | (ImportPart & { connectionName?: string })
+          | undefined;
+        if (!part) return;
+        this.main = part;
+        const n = part.tables.length;
+        this.notice(`${part.connectionName ?? 'DB 연결'}: 테이블·뷰 ${n.toLocaleString('ko-KR')}개, 칸 ${part.columns.length.toLocaleString('ko-KR')}개를 읽었습니다. [저장]을 누르세요.`);
+        return this.refresh();
+      }
+            case 'importClipboard':
         return this.importFrom(await vscode.env.clipboard.readText(), '클립보드');
       case 'importFile': {
         const picked = await vscode.window.showOpenDialog({

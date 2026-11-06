@@ -62,6 +62,10 @@ body {
   min-height: 0;
   overflow: auto;
 }
+/* 결과 표는 스스로 스크롤한다 (보이는 행만 그리려고) */
+.body > .grid {
+  height: 100%;
+}
 .empty {
   padding: 16px;
   color: var(--muted);
@@ -218,4 +222,8 @@ td.selected {
 .status button:disabled {
   color: var(--muted);
   cursor: default;
+}
+.entry.output .text {
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  white-space: pre-wrap;
 }

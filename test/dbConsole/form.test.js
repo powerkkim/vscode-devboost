@@ -36,7 +36,7 @@ test('확인: 연결 문자열 직접 입력이면 호스트·포트는 보지 �
 
 test('화면 → 저장할 연결: 앞뒤 공백 정리, 포트는 숫자, 직접 입력이면 호스트를 비움', () => {
   const c = fm.formToConfig({ ...filled, name: ' 개발 DB ', host: ' 10.0.0.5 ', port: ' 1522 ', user: ' hr ', readOnly: true }, 'id1');
-  assert.deepEqual(c, { id: 'id1', name: '개발 DB', host: '10.0.0.5', port: 1522, targetKind: 'service', target: 'ORCLPDB1', user: 'hr', readOnly: true, production: false, savePassword: true });
+  assert.deepEqual(c, { id: 'id1', kind: 'oracle', name: '개발 DB', host: '10.0.0.5', port: 1522, targetKind: 'service', target: 'ORCLPDB1', user: 'hr', readOnly: true, production: false, savePassword: true });
   assert.ok(!('password' in c), '비밀번호는 연결 정보에 넣지 않는다');
   const raw = fm.formToConfig({ ...filled, host: '남은 값', targetKind: 'raw', target: ' (DESCRIPTION=(A=1)) ' }, 'id2');
   assert.equal(raw.host, '');

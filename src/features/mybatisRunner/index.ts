@@ -64,17 +64,45 @@ export const mybatisRunner: Feature = {
       void vscode.window.setStatusBarMessage(`$(copy) ${st.id} SQL 복사됨${tail ? ` — ${tail}` : ''}`, 5000);
     });
 
+    /** 마지막 입력값으로 값을 넣은 SQL 을 DevBoost DB 콘솔에서 바로 실행 (콘솔이 연결을 고르고 결과는 쿼리 아래에) */
+    const runInConsole = vscode.commands.registerCommand('devBoost.mybatisRunner.runInConsole', async (uri?: vscode.Uri, id?: string) => {
+      const t = target(uri, id);
+      if (!t) return;
+      if (!vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('enabled', true)) {
+        void vscode.window.showWarningMessage('DB 콘솔이 꺼져 있습니다 (설정 devBoost.dbConsole.enabled).');
+        return;
+      }
+      const text = (await vscode.workspace.openTextDocument(t.uri)).getText();
+      const doc = parseMapper(text, t.uri.fsPath);
+      const st = doc?.statements.find((s) => s.id === t.id);
+      if (!doc || !st) return;
+      await deps.index.ensureBuilt();
+      const p = deps.store.prepare(doc, st, deps.index.resolver(), 'literal');
+      if (!p.result.sql.trim()) {
+        void vscode.window.showWarningMessage(`${st.id}: 만들어진 SQL 이 비어 있습니다.`);
+        return;
+      }
+      const empty = p.specs.filter((s) => (p.inputs[s.path]?.value ?? '') === '').length;
+      if (empty) {
+        // 값을 안 넣은 파라미터가 있으면 실행 화면을 열어 값을 넣게 한다
+        void vscode.window.setStatusBarMessage(`${st.id}: 값이 빈 파라미터 ${empty}개 — 실행 화면에서 넣으세요`, 5000);
+        RunnerPanel.show(context, deps, t.uri, t.id);
+        return;
+      }
+      await vscode.commands.executeCommand('devBoost.dbConsole.runSql', `-- ${doc.namespace}.${st.id}\n${p.result.sql.trim()}`);
+    });
+
     const lens = new MapperCodeLens();
     const lensReg = vscode.languages.registerCodeLensProvider(
       [{ language: 'xml' }, { pattern: '**/*.xml' }],
       lens
     );
     const cfgWatch = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('devBoost.mybatisRunner.codeLens')) lens.refresh();
+      if (e.affectsConfiguration('devBoost.mybatisRunner.codeLens') || e.affectsConfiguration('devBoost.dbConsole.enabled')) lens.refresh();
     });
 
     return [
-      open, copy, lensReg, lens, cfgWatch, deps.index, deps.oracle,
+      open, copy, runInConsole, lensReg, lens, cfgWatch, deps.index, deps.oracle,
       { dispose: () => RunnerPanel.closeAll() },
     ];
   },
@@ -95,6 +123,7 @@ class MapperCodeLens implements vscode.CodeLensProvider, vscode.Disposable {
     const doc = parseMapper(text, document.uri.fsPath);
     if (!doc) return [];
     const out: vscode.CodeLens[] = [];
+    const console = vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('enabled', true);
     for (const st of doc.statements) {
       const pos = document.positionAt(st.el.start);
       const range = new vscode.Range(pos, pos);
@@ -102,6 +131,10 @@ class MapperCodeLens implements vscode.CodeLensProvider, vscode.Disposable {
         new vscode.CodeLens(range, { title: '▶ SQL 실행', command: 'devBoost.mybatisRunner.open', arguments: [document.uri, st.id], tooltip: '파라미터를 넣어 SQL 을 만들고 Oracle 워크시트로 보냅니다' }),
         new vscode.CodeLens(range, { title: 'SQL 복사', command: 'devBoost.mybatisRunner.copy', arguments: [document.uri, st.id], tooltip: '마지막으로 입력한 값으로 SQL 을 만들어 클립보드에 복사' })
       );
+      if (console)
+        out.push(
+          new vscode.CodeLens(range, { title: '▶ 콘솔에서 실행', command: 'devBoost.mybatisRunner.runInConsole', arguments: [document.uri, st.id], tooltip: '마지막으로 입력한 값으로 SQL 을 만들어 DevBoost DB 콘솔에서 바로 실행 (결과는 쿼리 아래)' })
+        );
     }
     return out;
   }

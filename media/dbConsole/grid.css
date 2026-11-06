@@ -1,0 +1,80 @@
+/* 결과 표 (쿼리 아래·하단 패널 공통, webview/dbConsole/grid.ts) */
+.grid {
+  overflow: auto;
+  outline: none;
+  user-select: none;
+}
+.grid table {
+  table-layout: fixed;
+  border-collapse: collapse;
+  width: max-content;
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+.grid th,
+.grid td {
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-right: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  text-align: left;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
+  font-weight: 600;
+  cursor: pointer;
+}
+.grid thead th .type {
+  margin-left: 6px;
+  font-weight: 400;
+  opacity: 0.7;
+  font-size: 0.85em;
+}
+.grid thead th .sort {
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.grid .num {
+  text-align: right;
+}
+.grid .rownum {
+  position: sticky;
+  left: 0;
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
+  opacity: 0.85;
+  text-align: right;
+  font-weight: 400;
+  cursor: default;
+}
+.grid thead th.rownum {
+  z-index: 2;
+}
+.grid td.null {
+  opacity: 0.55;
+  font-style: italic;
+}
+.grid tbody tr:not(.grid-spacer):hover td:not(.rownum) {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+}
+.grid td.picked {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.2));
+}
+.grid tr.grid-spacer td {
+  padding: 0;
+  border: 0;
+}
+.grid-empty {
+  padding: 4px 8px;
+  opacity: 0.7;
+}
+.grid.hidden {
+  display: none;
+}
