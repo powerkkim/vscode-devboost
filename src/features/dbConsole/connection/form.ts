@@ -102,10 +102,13 @@ export function previewConnectString(f: ConnectionForm): string {
  * 나눠 채울 것이 없으면(주소만 썼거나 읽을 수 없으면) undefined
  */
 export function fillFromHostInput(f: ConnectionForm): ConnectionForm | undefined {
+  // JDBC URL 이 다른 DB 것이면 DB 종류부터 바꾼다 (jdbc:postgresql:// 를 Oracle 화면에 붙여 넣은 경우)
+  const detected = detectKind(f.host);
+  if (detected && detected !== (f.kind ?? 'oracle')) f = switchKind(f, detected);
   const p = driverOf(f.kind).connect.parseHostInput(f.host);
   if (!p) return undefined;
   const hasTarget = p.targetKind !== undefined && p.target !== undefined;
-  if (!hasTarget && p.port === undefined) return undefined;
+  if (!hasTarget && p.port === undefined) return detected ? f : undefined;
   const next = { ...f, host: p.host };
   if (p.port !== undefined) next.port = String(p.port);
   if (hasTarget) {
@@ -115,3 +118,35 @@ export function fillFromHostInput(f: ConnectionForm): ConnectionForm | undefined
   if (p.user && !f.user.trim()) next.user = p.user;
   return next;
 }
+
+/** 붙여 넣은 글이 어느 DB 의 주소인지 (JDBC URL·연결 URL 일 때만). 모르면 undefined */
+export function detectKind(text: string): DbKind | undefined {
+  const t = text.trim().toLowerCase();
+  if (/^jdbc:oracle:/.test(t)) return 'oracle';
+  if (/^(jdbc:postgresql:|postgres(ql)?:\/\/)/.test(t)) return 'postgres';
+  if (/^(jdbc:(mysql|mariadb):|mysql:\/\/|mariadb:\/\/)/.test(t)) return 'mysql';
+  return undefined;
+}
+
+/**
+ * DB 종류를 바꾼다. 포트가 비었거나 앞 DB 의 기본 포트 그대로면 새 DB 의 기본 포트로,
+ * 접속 방식이 새 DB 에 없으면(SID 등) 첫 방식으로 바꾼다. 다른 칸은 그대로 둔다
+ */
+export function switchKind(f: ConnectionForm, kind: DbKind): ConnectionForm {
+  const from = driverOf(f.kind).connect;
+  const to = driverOf(kind).connect;
+  const next = { ...f, kind };
+  const port = f.port.trim();
+  if (!port || port === String(from.defaultPort)) next.port = String(to.defaultPort);
+  if (!to.targetKinds.some((k) => k.value === f.targetKind)) next.targetKind = to.targetKinds[0].value;
+  return next;
+}
+
+/** 연결 화면이 DB 종류를 바꿀 때 쓰는 정보 (화면은 드라이버를 모른다) */
+export function kindChoices() {
+  return (Object.keys(KIND_LABELS) as DbKind[]).map((kind) => {
+    const c = driverOf(kind).connect;
+    return { value: kind, label: KIND_LABELS[kind], defaultPort: c.defaultPort, targetKinds: c.targetKinds, jdbcExample: c.jdbcExample };
+  });
+}
+const KIND_LABELS: Record<DbKind, string> = { oracle: 'Oracle', postgres: 'PostgreSQL', mysql: 'MySQL · MariaDB' };

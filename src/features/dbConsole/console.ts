@@ -176,6 +176,11 @@ export class DbConsole implements vscode.Disposable {
     for (const tab of this.tabs) this.sendStatus(tab);
   }
 
+  private kindOfTab(tab: ConsoleTab) {
+    const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
+    return cfg ? kindOf(cfg) : undefined;
+  }
+
   private sendStatus(tab: ConsoleTab) {
     const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
     const s = cfg && this.deps.sessions.get(cfg.id);
@@ -366,14 +371,14 @@ export class DbConsole implements vscode.Disposable {
         return;
       case 'toPanel':
         // 쿼리 아래 화면이 가진 데이터를 쓴다: 패널에서 지워진 앞 결과도 볼 수 있게
-        await this.deps.results.showData(m.resultId, m.data);
+        await this.deps.results.showData(m.resultId, { ...m.data, kind: this.kindOfTab(tab) });
         return;
       case 'copy':
         await vscode.env.clipboard.writeText(m.text);
         vscode.window.setStatusBarMessage('복사했습니다', 2000);
         return;
       case 'copyInsert':
-        await this.deps.results.copyAsInsert(m.data);
+        await this.deps.results.copyAsInsert({ ...m.data, kind: this.kindOfTab(tab) });
         return;
       case 'limits': {
         // 도구 줄의 행 수 칸 → 설정 (모든 콘솔·패널에 같이 적용)
@@ -524,7 +529,7 @@ export class DbConsole implements vscode.Disposable {
     const addDirty = () => this.dirty.set(cfg.id, (this.dirty.get(cfg.id) ?? 0) + 1);
     this.logOutput(cfg, output);
     if (r.kind === 'rows') {
-      const resultId = results.addRows({ sql: st.sql, connectionId: cfg.id, columns: r.columns, rows: r.page.rows, done: r.page.done, ms: r.ms, cursor: r.cursor });
+      const resultId = results.addRows({ sql: st.sql, connectionId: cfg.id, kind: kindOf(cfg), columns: r.columns, rows: r.page.rows, done: r.page.done, ms: r.ms, cursor: r.cursor });
       this.owners.set(resultId, tab);
       const n = r.page.rows.length.toLocaleString('ko-KR');
       results.addLog({ kind: 'ok', text: `${n}행${r.page.done ? '' : ' (더 있음)'} · ${seconds(r.ms)}`, sql, connectionName: cfg.name });
@@ -786,10 +791,16 @@ export class DbConsole implements vscode.Disposable {
       <input id="d-url" type="text" spellcheck="false" placeholder="jdbc:oracle:thin:@//10.0.0.5:1521/ORCLPDB1">
       <div class="error" id="d-urlError"></div>
     </div>
-    <div class="fld">
+    <div class="cols-db">
+      <div class="fld">
+        <label for="d-db">DB</label>
+        <select id="d-db"></select>
+      </div>
+      <div class="fld">
       <label for="d-name">이름</label>
       <input id="d-name" type="text" spellcheck="false">
       <div class="error" data-for="name"></div>
+      </div>
     </div>
     <div class="cols-host">
       <div class="fld"><label for="d-host">호스트</label><input id="d-host" type="text" spellcheck="false"><div class="error" data-for="host"></div></div>
@@ -798,7 +809,7 @@ export class DbConsole implements vscode.Disposable {
     <div class="cols-kind">
       <div class="fld">
         <label for="d-kind">접속 방식</label>
-        <select id="d-kind"><option value="service">서비스 이름</option><option value="sid">SID</option><option value="raw">연결 문자열</option></select>
+        <select id="d-kind"></select>
       </div>
       <div class="fld">
         <label for="d-target" id="d-targetLabel">서비스 이름</label>

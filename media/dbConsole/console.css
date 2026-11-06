@@ -304,6 +304,11 @@ a {
   grid-template-columns: minmax(0, 1fr) 88px;
   gap: 10px;
 }
+.cols-db {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+}
 .cols-kind {
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr);
@@ -361,6 +366,7 @@ a {
   color: var(--muted);
 }
 @media (max-width: 480px) {
+  .cols-db,
   .cols-kind,
   .cols-2 {
     grid-template-columns: minmax(0, 1fr);

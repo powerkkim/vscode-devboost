@@ -381,15 +381,39 @@ const FIELDS = ['name', 'host', 'port', 'user', 'password'] as const;
 const CHECKS = ['savePassword', 'readOnly', 'production'] as const;
 const d = (id: string) => $<HTMLInputElement>('d-' + id);
 const kind = () => $<HTMLSelectElement>('d-kind').value;
+const $db = $<HTMLSelectElement>('d-db');
+type KindChoice = { value: string; label: string; defaultPort: number; targetKinds: { value: string; label: string }[]; jdbcExample: string };
+let kinds: KindChoice[] = [];
+let shownDb = 'oracle';
+const choiceOf = (v: string) => kinds.find((k) => k.value === v) ?? kinds[0];
 
 function readForm() {
-  const f: Record<string, unknown> = { targetKind: kind() };
+  const f: Record<string, unknown> = { kind: $db.value || 'oracle', targetKind: kind() };
   for (const id of FIELDS) f[id] = d(id).value;
   for (const id of CHECKS) f[id] = d(id).checked;
   f.target = kind() === 'raw' ? $<HTMLTextAreaElement>('d-targetRaw').value : d('target').value;
   return f;
 }
+/** DB 종류에 맞춰 접속 방식 선택지·안내를 다시 그린다 */
+function showDb(db: string) {
+  shownDb = db;
+  $db.value = db;
+  const c = choiceOf(db);
+  if (!c) return;
+  const sel = $<HTMLSelectElement>('d-kind');
+  sel.replaceChildren(
+    ...c.targetKinds.map((k) => {
+      const o = document.createElement('option');
+      o.value = k.value;
+      o.textContent = k.label;
+      return o;
+    })
+  );
+  d('url').placeholder = c.jdbcExample;
+  $<HTMLTextAreaElement>('d-targetRaw').placeholder = db === 'oracle' ? '(DESCRIPTION=(ADDRESS=…)(CONNECT_DATA=(SERVICE_NAME=…)))' : db === 'postgres' ? 'postgresql://host:5432/database' : 'mysql://host:3306/database';
+}
 function writeForm(f: Record<string, any>) {
+  showDb(f.kind ?? 'oracle');
   for (const id of FIELDS) d(id).value = f[id] ?? '';
   for (const id of CHECKS) d(id).checked = !!f[id];
   $<HTMLSelectElement>('d-kind').value = f.targetKind;
@@ -404,7 +428,8 @@ function showKind() {
   $('d-targetRaw').classList.toggle('hidden', !raw);
   d('host').disabled = raw;
   d('port').disabled = raw;
-  $('d-targetLabel').textContent = kind() === 'sid' ? 'SID' : raw ? '연결 문자열' : '서비스 이름';
+  const label = choiceOf(shownDb)?.targetKinds.find((k) => k.value === kind())?.label;
+  $('d-targetLabel').textContent = label ?? '서비스 이름';
 }
 function showErrors(errors: Record<string, string>) {
   for (const el of Array.from(document.querySelectorAll<HTMLElement>('.error'))) el.textContent = errors[el.dataset.for ?? ''] ?? '';
@@ -426,6 +451,7 @@ function closeDialog(notify: boolean) {
   editor.focus();
 }
 $('d-kind').addEventListener('change', showKind);
+$db.addEventListener('change', () => vscode.postMessage({ type: 'dlgDb', form: readForm(), from: shownDb }));
 $('dialog').addEventListener('input', () => testResult('', '')); // 값을 바꾸면 앞의 테스트 결과는 더는 맞지 않는다
 d('host').addEventListener('change', () => vscode.postMessage({ type: 'dlgHostDone', form: readForm() }));
 $('d-urlToggle').addEventListener('click', (e) => {
@@ -552,6 +578,15 @@ window.addEventListener('message', (event) => {
       hint(m.message, 'warn');
       break;
     case 'dialog':
+      kinds = m.kinds ?? [];
+      $db.replaceChildren(
+        ...kinds.map((k) => {
+          const o = document.createElement('option');
+          o.value = k.value;
+          o.textContent = k.label;
+          return o;
+        })
+      );
       $('d-title').textContent = m.editing ? 'DB 연결 수정' : 'DB 연결 추가';
       d('password').placeholder = m.hasSavedPassword ? '저장된 비밀번호 사용' : '';
       d('url').value = '';

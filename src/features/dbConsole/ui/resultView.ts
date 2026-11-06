@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { Cell, Column, RowCursor } from '../driver/types';
+import type { Cell, Column, DbKind, RowCursor } from '../driver/types';
 import { toCsv } from '../../dbSchema/schema/csv';
 import { guessTable, toInsertSql } from '../sql/insertSql';
 
@@ -15,6 +15,8 @@ interface ResultTab {
   /** 실행한 문장 (탭에 마우스를 올리면 보인다) */
   sql: string;
   connectionId: string;
+  /** INSERT 문을 그 DB 에 맞는 글로 만든다 */
+  kind?: DbKind;
   columns: Column[];
   rows: Cell[][];
   /** 더 가져올 행이 없음 */
@@ -51,6 +53,8 @@ export interface ResultData {
   rows: Cell[][];
   /** 다 받았는가 (CSV 안내에 쓴다) */
   done: boolean;
+  /** 어느 DB 의 결과인가 (INSERT 문 글 모양) */
+  kind?: DbKind;
 }
 
 /** 이어 받기를 실제로 해 주는 쪽 (접속을 쓰는 일은 콘솔이 맡는다: 실행 중 겹침·끊김 처리) */
@@ -161,7 +165,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
   }
 
   /** 조회 결과 탭을 더한다. 탭 id 를 돌려준다 */
-  addRows(r: { sql: string; connectionId: string; columns: Column[]; rows: Cell[][]; done: boolean; ms: number; cursor?: RowCursor }): number {
+  addRows(r: { sql: string; connectionId: string; kind?: DbKind; columns: Column[]; rows: Cell[][]; done: boolean; ms: number; cursor?: RowCursor }): number {
     const id = this.nextId++;
     const n = this.tabs.filter((t) => !t.pinned).length + 1;
     const tab: ResultTab = { id, title: `결과 ${n}`, pinned: false, ...r };
@@ -248,7 +252,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
   private dataOf(id: number, order?: number[]): ResultData | undefined {
     const tab = this.tabs.find((t) => t.id === id);
     if (!tab) return undefined;
-    return { sql: tab.sql, columns: tab.columns, rows: (order ?? tab.rows.map((_, i) => i)).map((i) => tab.rows[i]).filter(Boolean), done: tab.done };
+    return { sql: tab.sql, kind: tab.kind, columns: tab.columns, rows: (order ?? tab.rows.map((_, i) => i)).map((i) => tab.rows[i]).filter(Boolean), done: tab.done };
   }
 
   /** CSV 파일로 내보낸다 (가져온 행까지) */
@@ -267,11 +271,11 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
     const table = await vscode.window.showInputBox({
       title: 'INSERT문으로 복사',
       prompt: 'INSERT 할 테이블 이름',
-      value: guessTable(d.sql) ?? '',
+      value: guessTable(d.sql, d.kind) ?? '',
       validateInput: (v) => (v.trim() ? undefined : '테이블 이름을 넣으세요'),
     });
     if (!table) return;
-    await vscode.env.clipboard.writeText(toInsertSql(table.trim(), d.columns, d.rows));
+    await vscode.env.clipboard.writeText(toInsertSql(table.trim(), d.columns, d.rows, d.kind));
     vscode.window.setStatusBarMessage(`INSERT 문 ${d.rows.length.toLocaleString('ko-KR')}개를 복사했습니다`, 4000);
   }
 
