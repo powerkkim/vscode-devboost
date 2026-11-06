@@ -6,7 +6,9 @@ import { createGrid, toTsv, type Cell, type Col, type Grid, type Sort } from './
 
 export interface InlineData {
   key: string;
-  status: 'running' | 'rows' | 'done' | 'error' | 'cancel' | 'skip';
+  status: 'running' | 'rows' | 'done' | 'error' | 'cancel' | 'skip' | 'plan';
+  /** 실행계획 표 (DBMS_XPLAN 이 그려 준 줄 그대로) */
+  lines?: string[];
   text?: string;
   resultId?: number;
   columns?: Col[];
@@ -28,6 +30,7 @@ export interface InlineActions {
   toPanel(resultId: number): void;
   copy(text: string): void;
   copyInsert(resultId: number): void;
+  csv(resultId: number): void;
   /** 한 번에 가져오는 행 수·최대 행 수 (버튼 글에 쓴다) */
   limits(): { pageSize: number; maxRows: number };
 }
@@ -100,7 +103,8 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
       head.appendChild(button('헤더 포함', '칸 이름까지 복사합니다', () => actions.copy(toTsv(gridData(d), orderOf(d), true))));
       if (!d.dropped) {
         head.appendChild(button('INSERT', 'INSERT 문으로 복사합니다', () => actions.copyInsert(d.resultId!)));
-        head.appendChild(button('패널', '하단 패널 "DB 결과"에서 봅니다', () => actions.toPanel(d.resultId!)));
+        head.appendChild(button('CSV', 'CSV 파일로 내보냅니다 (가져온 행까지)', () => actions.csv(d.resultId!)));
+        head.appendChild(button('패널', '하단 패널 "DB 결과"에서 크게 봅니다', () => actions.toPanel(d.resultId!)));
       }
       head.appendChild(
         button(d.collapsed ? '펼치기' : '접기', d.collapsed ? '표를 펼칩니다' : '표를 접습니다', () => {
@@ -113,6 +117,18 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
       if (d.failed) head.appendChild(el('span', 'ir-fail', d.failed));
       return head;
     }
+    case 'plan':
+      head.appendChild(el('span', 'ir-text', '실행계획'));
+      if (d.ms !== undefined) head.appendChild(el('span', 'ir-muted', secs(d.ms)));
+      head.appendChild(button('복사', '실행계획을 복사합니다', () => actions.copy((d.lines ?? []).join('\n'))));
+      head.appendChild(
+        button(d.collapsed ? '펼치기' : '접기', d.collapsed ? '펼칩니다' : '접습니다', () => {
+          d.collapsed = !d.collapsed;
+          refresh(view, d.key);
+        })
+      );
+      head.appendChild(button('×', '닫습니다', close));
+      return head;
     default:
       head.appendChild(el('span', 'ir-text', d.text ?? ''));
       if (d.ms !== undefined) head.appendChild(el('span', 'ir-muted', secs(d.ms)));
@@ -159,6 +175,8 @@ function fill(view: EditorView, d: InlineData, box: HTMLElement) {
   for (const g of [...box.querySelectorAll(':scope > .grid')]) if (g !== want) g.remove();
   if (want && want.parentElement !== box) head.after(want);
   box.querySelector(':scope > .ir-output')?.remove();
+  box.querySelector(':scope > .ir-plan')?.remove();
+  if (d.status === 'plan' && !d.collapsed) box.appendChild(el('pre', 'ir-plan', (d.lines ?? []).join('\n')));
   if (d.output?.length && !d.collapsed) box.appendChild(el('pre', 'ir-output', d.output.join('\n')));
 }
 

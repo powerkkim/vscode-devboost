@@ -15,9 +15,6 @@ import { FormActions, FormDialog, DialogMessage } from './ui/formDialog';
 /** 콘솔 화면(Webview 패널)의 종류 — package.json 의 단축키 조건(activeWebviewPanelId)과 같아야 한다 */
 export const CONSOLE_VIEW_TYPE = 'devBoostDbConsole';
 
-/** 결과를 어디에 보여 줄지 (설정 devBoost.dbConsole.resultsIn) */
-export type ResultsIn = 'editor' | 'panel' | 'both';
-
 const seconds = (ms: number) => `${(ms / 1000).toFixed(2)}초`;
 const firstLine = (sql: string) => {
   const one = sql.replace(/\s+/g, ' ').trim();
@@ -41,7 +38,7 @@ type FromWebview =
   | { type: 'toPanel'; resultId: number }
   | { type: 'copy'; text: string }
   | { type: 'copyInsert'; resultId: number }
-  | { type: 'resultsIn'; where: ResultsIn }
+  | { type: 'csv'; resultId: number }
   | { type: 'serverOutput'; on: boolean }
   | DialogMessage;
 
@@ -50,6 +47,7 @@ type Inline =
   | { status: 'rows'; resultId: number; columns: { name: string; type: string; numeric: boolean }[]; rows: (string | null)[][]; done: boolean; capped: boolean; ms: number; output?: string[] }
   | { status: 'done'; text: string; ms: number; output?: string[] }
   | { status: 'error'; text: string; output?: string[] }
+  | { status: 'plan'; lines: string[]; ms: number }
   | { status: 'cancel'; text: string }
   | { status: 'skip'; text: string };
 
@@ -80,14 +78,10 @@ interface ConsoleTab {
   serverOutput: boolean;
 }
 
-function resultsIn(): ResultsIn {
-  const v = vscode.workspace.getConfiguration('devBoost.dbConsole').get<string>('resultsIn', 'both');
-  return v === 'editor' || v === 'panel' ? v : 'both';
-}
-
 /**
  * 쿼리 콘솔: 실행 도구 줄 · 파라미터 줄 · SQL 편집기를 한 화면(Webview)에 그린다.
- * 결과는 실행한 문장 바로 아래(편집기 안)와 하단 패널 "DB 결과"에 낸다 (설정 resultsIn 으로 고른다).
+ * 결과·실행계획은 실행한 문장 바로 아래(편집기 안)에 낸다. 하단 패널 "DB 결과"에도 쌓아 두지만 열지는 않는다
+ * (크게 보거나 기록을 볼 때 사용자가 연다. 쿼리 아래의 "패널" 버튼은 그 결과를 패널에서 보여 준다).
  *  - 연결마다 콘솔 하나. 쓰던 SQL·파라미터 값은 연결별 파일로 기억한다
  *  - Ctrl+Enter: 선택 영역의 문장들, 없으면 커서가 있는 문장. Ctrl+E: 실행계획
  *  - 자동 커밋하지 않는다. 변경한 문장 수를 "커밋 안 한 변경 N건"으로 보여 주고 커밋·롤백으로 확정한다
@@ -140,7 +134,6 @@ export class DbConsole implements vscode.Disposable {
         for (const [tab, list] of byTab) this.post(tab, { type: 'inlineDropped', ids: list });
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('devBoost.dbConsole.resultsIn')) for (const tab of this.tabs) this.post(tab, { type: 'resultsIn', where: resultsIn() });
         if (e.affectsConfiguration('devBoost.dbConsole.pageSize') || e.affectsConfiguration('devBoost.dbConsole.maxRows')) this.sendLimits();
       })
     );
@@ -269,7 +262,6 @@ export class DbConsole implements vscode.Disposable {
       sql: saved?.sql ?? '',
       params: saved?.params ?? {},
       confirmEach: saved?.confirmEach ?? true,
-      resultsIn: resultsIn(),
       limits: { pageSize: pageSize(), maxRows: maxRows() },
     });
     this.post(tab, { type: 'tables', names: this.deps.tableNames(cfg.id) });
@@ -383,8 +375,8 @@ export class DbConsole implements vscode.Disposable {
         await cfg.update('maxRows', clamp(m.maxRows, 100, MAX_ROWS_LIMIT, 10_000), vscode.ConfigurationTarget.Global);
         return;
       }
-      case 'resultsIn':
-        await vscode.workspace.getConfiguration('devBoost.dbConsole').update('resultsIn', m.where, vscode.ConfigurationTarget.Global);
+      case 'csv':
+        await this.deps.results.exportCsv(m.resultId);
         return;
       case 'serverOutput':
         tab.serverOutput = m.on;
@@ -432,10 +424,8 @@ export class DbConsole implements vscode.Disposable {
     const { cfg, session } = ready;
 
     const { results } = this.deps;
-    const where = resultsIn();
     results.setLimits(pageSize(), maxRows());
     results.beginRun();
-    if (where !== 'editor') await results.reveal();
 
     this.running.add(cfg.id);
     this.refresh();
@@ -553,16 +543,17 @@ export class DbConsole implements vscode.Disposable {
   private async explain(tab: ConsoleTab, st: Target | undefined, params: Params) {
     if (!st) return;
     const ready = await this.prepare(tab);
-    if (!ready) return;
+    if (!ready) return this.inline(tab, st.key, { status: 'skip', text: '실행하지 않았습니다' });
     const { cfg, session } = ready;
     const { results } = this.deps;
     const rules = session.driver.rules;
     const binds = bindValuesFor(st.sql, params, rules);
     if (!binds.ok) {
-      results.addLog({ kind: 'error', text: `파라미터 값이 맞지 않습니다: ${binds.message}`, sql: firstLine(st.sql), connectionName: cfg.name });
+      const text = `파라미터 값이 맞지 않습니다: ${binds.message}`;
+      results.addLog({ kind: 'error', text, sql: firstLine(st.sql), connectionName: cfg.name });
+      this.inline(tab, st.key, { status: 'error', text });
       return;
     }
-    await results.reveal();
     this.running.add(cfg.id);
     this.refresh();
     try {
@@ -570,6 +561,7 @@ export class DbConsole implements vscode.Disposable {
       const lines = await session.use((c) => c.explain(toDriverSql(st.sql, rules), binds.values));
       const ms = Date.now() - started;
       results.setPlan({ sql: st.sql, lines, ms });
+      this.inline(tab, st.key, { status: 'plan', lines, ms });
       results.addLog({ kind: 'ok', text: `실행계획 · ${seconds(ms)}`, sql: firstLine(st.sql), connectionName: cfg.name });
     } catch (e) {
       this.runFailed(tab, cfg, st, e, false);
@@ -688,13 +680,6 @@ export class DbConsole implements vscode.Disposable {
   <span id="hint" class="hint" role="status"></span>
   <span class="spacer"></span>
   <label class="check hidden" id="outputBox" title="DBMS_OUTPUT.PUT_LINE 으로 찍은 줄을 결과와 함께 보여 줍니다"><input type="checkbox" id="serverOutput"> 서버 출력</label>
-  <label class="select" title="결과를 보여 줄 곳">결과
-    <select id="resultsIn">
-      <option value="both">쿼리 아래 + 패널</option>
-      <option value="editor">쿼리 아래</option>
-      <option value="panel">하단 패널</option>
-    </select>
-  </label>
   <button type="button" id="conn" class="chip hidden"><span class="dot" aria-hidden="true"></span><span id="connText"></span></button>
   <span id="dirty" class="chip dirty hidden"><span class="dot" aria-hidden="true"></span><span id="dirtyText"></span></span>
   <button type="button" id="commit">커밋</button>

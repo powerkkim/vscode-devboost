@@ -490,3 +490,14 @@ label.limit input {
 .cm-run-marker:hover {
   opacity: 1;
 }
+
+/* 쿼리 아래 실행계획 (DBMS_XPLAN 표 그대로) */
+.ir-plan {
+  margin: 0;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  white-space: pre;
+  overflow: auto;
+  max-height: 360px;
+}

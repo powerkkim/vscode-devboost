@@ -235,6 +235,19 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
     return this.tabs.find((t) => t.id === id);
   }
 
+  /** CSV 파일로 내보낸다 (패널·쿼리 아래 어느 쪽에서든). 가져온 행까지만 */
+  async exportCsv(id: number) {
+    const tab = this.tabs.find((t) => t.id === id);
+    if (!tab) return;
+    const uri = await vscode.window.showSaveDialog({ filters: { CSV: ['csv'] }, saveLabel: 'CSV 내보내기' });
+    if (!uri) return;
+    // NULL 은 빈 칸
+    const csv = toCsv([tab.columns.map((c) => c.name), ...tab.rows.map((r) => r.map((v) => v ?? ''))]);
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(csv, 'utf8'));
+    const more = tab.done ? '' : ' (가져온 행까지만 — 전부 내보내려면 먼저 "끝까지")';
+    void vscode.window.showInformationMessage(`${tab.rows.length.toLocaleString('ko-KR')}행을 내보냈습니다${more}: ${uri.fsPath}`);
+  }
+
   async copyAsInsert(id: number, order?: number[]) {
     const tab = this.tabs.find((t) => t.id === id);
     if (!tab) return;
@@ -283,18 +296,9 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
           this.post({ type: 'moreFailed', id: m.id, message: String((e as Error)?.message ?? e).split('\n')[0] });
         }
         break;
-      case 'csv': {
-        const tab = this.tabs.find((t) => t.id === m.id);
-        if (!tab) return;
-        const uri = await vscode.window.showSaveDialog({ filters: { CSV: ['csv'] }, saveLabel: 'CSV 내보내기' });
-        if (!uri) return;
-        // 화면에 가져온 행만 내보낸다 (NULL 은 빈 칸)
-        const csv = toCsv([tab.columns.map((c) => c.name), ...tab.rows.map((r) => r.map((v) => v ?? ''))]);
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(csv, 'utf8'));
-        const more = tab.done ? '' : ' (화면에 가져온 행까지만)';
-        void vscode.window.showInformationMessage(`${tab.rows.length.toLocaleString('ko-KR')}행을 내보냈습니다${more}: ${uri.fsPath}`);
+      case 'csv':
+        await this.exportCsv(m.id);
         break;
-      }
     }
   }
 

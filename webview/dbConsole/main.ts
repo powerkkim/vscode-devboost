@@ -19,8 +19,6 @@ const nonce = (document.querySelector('script[nonce]') as HTMLScriptElement | nu
 const light = document.body.classList.contains('vscode-light');
 /** 이 콘솔 연결의 DB 글 규칙 (문장 나누기·파라미터 찾기). init 에서 정해진다 */
 let rules: DialectRules = rulesOf(undefined);
-/** 결과를 보여 줄 곳: 쿼리 아래 + 패널 / 쿼리 아래 / 패널 */
-let resultsIn: 'both' | 'editor' | 'panel' = 'both';
 /** 한 번에 가져올 행 수·최대 행 수 (설정. 도구 줄에서 바꾼다) */
 let limits = { pageSize: 500, maxRows: 10000 };
 
@@ -92,6 +90,7 @@ const editor = new EditorView({
         toPanel: (resultId) => vscode.postMessage({ type: 'toPanel', resultId }),
         copy: (text) => vscode.postMessage({ type: 'copy', text }),
         copyInsert: (resultId) => vscode.postMessage({ type: 'copyInsert', resultId }),
+        csv: (resultId) => vscode.postMessage({ type: 'csv', resultId }),
       }),
       syntaxHighlighting(highlight),
       bindPlugin,
@@ -296,21 +295,16 @@ function start(what: 'run' | 'explain') {
   hint('');
   clearTimeout(saveTimer);
   vscode.postMessage({ type: 'save', sql: text(), params, confirmEach });
-  // 쿼리 아래에 "실행 중…" 자리를 먼저 만든다 (확장이 결과로 채운다)
-  if (what === 'run' && resultsIn !== 'panel') addRunning(editor, list.map((s) => ({ key: s.key, pos: anchorOf(editor.state, s) })));
-  vscode.postMessage({ type: what, statements: what === 'explain' ? list.slice(0, 1) : list, params });
+  // 쿼리 아래에 "실행 중…" 자리를 먼저 만든다 (확장이 결과·실행계획으로 채운다)
+  const sent = what === 'explain' ? list.slice(0, 1) : list;
+  addRunning(editor, sent.map((s) => ({ key: s.key, pos: anchorOf(editor.state, s) })));
+  vscode.postMessage({ type: what, statements: sent, params });
 }
 $('run').addEventListener('click', () => start('run'));
 $('explain').addEventListener('click', () => start('explain'));
 $('commit').addEventListener('click', () => vscode.postMessage({ type: 'commit' }));
 $('rollback').addEventListener('click', () => vscode.postMessage({ type: 'rollback' }));
 $('conn').addEventListener('click', () => vscode.postMessage({ type: 'connect' }));
-const $resultsIn = $<HTMLSelectElement>('resultsIn');
-$resultsIn.addEventListener('change', () => {
-  resultsIn = $resultsIn.value as typeof resultsIn;
-  vscode.postMessage({ type: 'resultsIn', where: resultsIn });
-  editor.focus();
-});
 const $pageSize = $<HTMLInputElement>('pageSize');
 const $maxRows = $<HTMLInputElement>('maxRows');
 const showLimits = () => {
@@ -422,8 +416,6 @@ window.addEventListener('message', (event) => {
   switch (m.type) {
     case 'init':
       rules = rulesOf(m.kind);
-      resultsIn = m.resultsIn ?? 'both';
-      $resultsIn.value = resultsIn;
       if (m.limits) limits = m.limits;
       showLimits();
       params = m.params ?? {};
@@ -459,10 +451,6 @@ window.addEventListener('message', (event) => {
       // 단축키(Ctrl+E 등)·오른쪽 클릭 메뉴가 확장을 거쳐 온다
       if (m.what === 'selectStatement') selectStatement(editor, rules);
       else start(m.what);
-      break;
-    case 'resultsIn':
-      resultsIn = m.where;
-      $resultsIn.value = resultsIn;
       break;
     case 'inline':
       setResult(editor, m.key, m.result);
