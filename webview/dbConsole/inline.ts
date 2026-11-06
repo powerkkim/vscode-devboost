@@ -1,14 +1,8 @@
 // 쿼리 아래 결과: 실행한 문장이 끝나는 줄 바로 밑에 결과 표·메시지를 끼워 넣는다 (CodeMirror 블록 위젯).
 // 글을 고쳐도 결과는 그 문장을 따라 움직이고, 같은 줄에서 다시 실행하면 새 결과로 바뀐다.
-import { EditorView, WidgetType, Decoration, type DecorationSet } from '@codemirror/view';
+import { EditorView, WidgetType, Decoration, ViewPlugin, type DecorationSet } from '@codemirror/view';
 import { StateField, StateEffect, MapMode, type EditorState, type Range } from '@codemirror/state';
-
-type Cell = string | null;
-interface Col {
-  name: string;
-  type: string;
-  numeric: boolean;
-}
+import { createGrid, toTsv, type Cell, type Col, type Grid, type Sort } from './grid';
 
 export interface InlineData {
   key: string;
@@ -26,23 +20,23 @@ export interface InlineData {
   loading?: boolean;
   failed?: string;
   collapsed?: boolean;
-  /** 정렬 (화면에서만) */
-  sort?: { col: number; dir: 1 | -1 };
+  sort?: Sort;
 }
 
-/** 쿼리 아래 표에 그리는 최대 행 수 (더 많으면 하단 패널에서) */
-const MAX_INLINE_ROWS = 1000;
-
 export interface InlineActions {
-  more(resultId: number): void;
+  more(resultId: number, all: boolean): void;
   toPanel(resultId: number): void;
   copy(text: string): void;
   copyInsert(resultId: number): void;
+  /** 한 번에 가져오는 행 수·최대 행 수 (버튼 글에 쓴다) */
+  limits(): { pageSize: number; maxRows: number };
 }
 
 const data = new Map<string, InlineData>();
 /** 결과마다 다시 그릴 때 올리는 번호 (위젯 비교에 쓴다) */
 const versions = new Map<string, number>();
+/** 그려 둔 표 (행이 붙을 때 표를 새로 만들지 않고 이어 그린다 — 스크롤 자리 유지) */
+const grids = new Map<string, { grid: Grid; rows: Cell[][] }>();
 let actions: InlineActions;
 
 const addEffect = StateEffect.define<{ key: string; pos: number }>();
@@ -58,29 +52,6 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 };
 const fmt = (n: number) => n.toLocaleString('ko-KR');
 const secs = (ms: number) => `${(ms / 1000).toFixed(2)}초`;
-
-function order(d: InlineData): number[] {
-  const rows = d.rows ?? [];
-  const idx = rows.map((_, i) => i);
-  const s = d.sort;
-  if (!s) return idx;
-  const numeric = d.columns?.[s.col]?.numeric;
-  return idx.sort((a, b) => {
-    const x = rows[a][s.col];
-    const y = rows[b][s.col];
-    if (x === y) return a - b;
-    if (x === null) return 1;
-    if (y === null) return -1;
-    const c = numeric ? Number(x) - Number(y) : x < y ? -1 : 1;
-    return (c || a - b) * s.dir;
-  });
-}
-
-function tsv(d: InlineData, header: boolean): string {
-  const lines = header ? [(d.columns ?? []).map((c) => c.name).join('\t')] : [];
-  for (const i of order(d)) lines.push((d.rows ?? [])[i].map((v) => (v === null ? '' : v.replace(/[\t\r\n]+/g, ' '))).join('\t'));
-  return lines.join('\n');
-}
 
 function button(text: string, title: string, onClick: () => void, disabled = false) {
   const b = el('button', 'ir-btn', text);
@@ -101,104 +72,32 @@ function refresh(view: EditorView, key: string) {
   view.dispatch({ effects: refreshEffect.of(key) });
 }
 
-function renderTable(view: EditorView, d: InlineData): HTMLElement {
-  const box = el('div', 'ir-table');
-  const cols = d.columns ?? [];
-  if (!cols.length) {
-    box.appendChild(el('div', 'ir-empty', '칸이 없는 결과입니다.'));
-    return box;
-  }
-  const table = el('table');
-  const head = el('tr');
-  head.appendChild(el('th', 'rownum', '#'));
-  cols.forEach((c, i) => {
-    const th = el('th', c.numeric ? 'num' : '');
-    th.appendChild(document.createTextNode(c.name));
-    if (d.sort?.col === i) th.appendChild(el('span', 'ir-sort', d.sort.dir > 0 ? ' ▲' : ' ▼'));
-    th.title = `${c.type} · 눌러서 정렬 (가져온 행 안에서)`;
-    th.addEventListener('mousedown', (e) => e.preventDefault());
-    th.addEventListener('click', () => {
-      const s = d.sort;
-      d.sort = !s || s.col !== i ? { col: i, dir: 1 } : s.dir > 0 ? { col: i, dir: -1 } : undefined;
-      refresh(view, d.key);
-    });
-    head.appendChild(th);
-  });
-  const thead = el('thead');
-  thead.appendChild(head);
-  table.appendChild(thead);
-  const tbody = el('tbody');
-  const frag = document.createDocumentFragment();
-  const rows = d.rows ?? [];
-  order(d)
-    .slice(0, MAX_INLINE_ROWS)
-    .forEach((ri, n) => {
-      const tr = el('tr');
-      tr.appendChild(el('td', 'rownum', String(n + 1)));
-      rows[ri].forEach((v, ci) => {
-        const td = el('td', (v === null ? 'null' : '') + (cols[ci]?.numeric ? ' num' : ''), v === null ? 'NULL' : v);
-        if (v !== null && v.length > 40) td.title = v;
-        td.dataset.value = v ?? '';
-        tr.appendChild(td);
-      });
-      frag.appendChild(tr);
-    });
-  tbody.appendChild(frag);
-  table.appendChild(tbody);
-  box.appendChild(table);
-  // 칸을 누르면 고르고 Ctrl+C 로 그 값을 복사한다 (편집기의 선택과 섞이지 않게 표 안에서만)
-  let picked: HTMLElement | undefined;
-  box.tabIndex = -1;
-  box.addEventListener('mousedown', (e) => {
-    const td = (e.target as HTMLElement).closest('td');
-    if (!td || td.classList.contains('rownum')) return;
-    e.preventDefault();
-    picked?.classList.remove('picked');
-    picked = td;
-    td.classList.add('picked');
-    box.focus({ preventScroll: true });
-  });
-  box.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && picked) {
-      e.preventDefault();
-      e.stopPropagation();
-      actions.copy(picked.dataset.value ?? '');
-    }
-  });
-  return box;
-}
-
-function render(view: EditorView, d: InlineData): HTMLElement {
-  // 바깥 상자는 여백만 (padding). 블록 위젯의 margin 은 편집기가 높이를 잴 때 빠져 줄 번호가 어긋난다
-  const wrap = el('div', 'ir-wrap');
-  const root = el('div', `ir ir-${d.status}`);
-  wrap.appendChild(root);
+/** 머리 줄: 상태 글 바로 옆에 버튼들 (왼쪽 정렬 — 넓은 결과에서도 스크롤 없이 보인다) */
+function renderHead(view: EditorView, d: InlineData): HTMLElement {
   const head = el('div', 'ir-head');
   const close = () => view.dispatch({ effects: removeEffect.of(d.key) });
   switch (d.status) {
     case 'running':
       head.appendChild(el('span', 'ir-text', '실행 중…'));
-      break;
+      return head;
     case 'rows': {
       const rows = d.rows?.length ?? 0;
+      const { pageSize, maxRows } = actions.limits();
       const more = !d.done && !d.capped && !d.dropped;
       head.appendChild(el('span', 'ir-text', `${fmt(rows)}행${d.done ? '' : ' (더 있음)'}`));
       if (d.ms !== undefined) head.appendChild(el('span', 'ir-muted', secs(d.ms)));
-      if (rows > MAX_INLINE_ROWS) head.appendChild(el('span', 'ir-muted', `여기에는 ${fmt(MAX_INLINE_ROWS)}행까지 · 나머지는 하단 패널`));
-      if (d.capped) head.appendChild(el('span', 'ir-muted', '더 많은 행은 조건을 좁혀 다시 실행하세요'));
-      if (d.failed) head.appendChild(el('span', 'ir-fail', d.failed));
-      head.appendChild(el('span', 'ir-spacer'));
-      if (more)
-        head.appendChild(
-          button(d.loading ? '가져오는 중…' : '더 가져오기', '다음 행들을 가져옵니다', () => {
-            d.loading = true;
-            d.failed = undefined;
-            refresh(view, d.key);
-            actions.more(d.resultId!);
-          }, d.loading)
-        );
-      head.appendChild(button('복사', '결과를 복사합니다 (엑셀에 붙여 넣기 좋은 탭 구분)', () => actions.copy(tsv(d, false))));
-      head.appendChild(button('헤더 포함', '칸 이름까지 복사합니다', () => actions.copy(tsv(d, true))));
+      if (more) {
+        const go = (all: boolean) => () => {
+          d.loading = true;
+          d.failed = undefined;
+          refresh(view, d.key);
+          actions.more(d.resultId!, all);
+        };
+        head.appendChild(button(d.loading ? '가져오는 중…' : `다음 ${fmt(pageSize)}행`, '다음 행들을 가져옵니다', go(false), d.loading));
+        head.appendChild(button('끝까지', `남은 행을 모두 가져옵니다 (최대 ${fmt(maxRows)}행)`, go(true), d.loading));
+      }
+      head.appendChild(button('복사', '결과를 복사합니다 (탭 구분 — 엑셀에 붙여 넣기)', () => actions.copy(toTsv(gridData(d), orderOf(d), false))));
+      head.appendChild(button('헤더 포함', '칸 이름까지 복사합니다', () => actions.copy(toTsv(gridData(d), orderOf(d), true))));
       if (!d.dropped) {
         head.appendChild(button('INSERT', 'INSERT 문으로 복사합니다', () => actions.copyInsert(d.resultId!)));
         head.appendChild(button('패널', '하단 패널 "DB 결과"에서 봅니다', () => actions.toPanel(d.resultId!)));
@@ -209,18 +108,58 @@ function render(view: EditorView, d: InlineData): HTMLElement {
           refresh(view, d.key);
         })
       );
-      break;
+      head.appendChild(button('×', '이 결과를 닫습니다', close));
+      if (d.capped) head.appendChild(el('span', 'ir-muted', `최대 ${fmt(maxRows)}행까지 가져왔습니다 (도구 줄의 최대 행 수로 늘릴 수 있습니다)`));
+      if (d.failed) head.appendChild(el('span', 'ir-fail', d.failed));
+      return head;
     }
     default:
       head.appendChild(el('span', 'ir-text', d.text ?? ''));
       if (d.ms !== undefined) head.appendChild(el('span', 'ir-muted', secs(d.ms)));
-      head.appendChild(el('span', 'ir-spacer'));
+      head.appendChild(button('×', '이 결과를 닫습니다', close));
+      return head;
   }
-  if (d.status !== 'running') head.appendChild(button('×', '이 결과를 닫습니다', close));
-  root.appendChild(head);
-  if (d.status === 'rows' && !d.collapsed) root.appendChild(renderTable(view, d));
-  if (d.output?.length && !d.collapsed) root.appendChild(el('pre', 'ir-output', d.output.join('\n')));
-  return wrap;
+}
+
+const gridData = (d: InlineData) => ({ columns: d.columns ?? [], rows: d.rows ?? [] });
+const orderOf = (d: InlineData) => grids.get(d.key)?.grid.order() ?? (d.rows ?? []).map((_, i) => i);
+
+/** 결과 표: 한 번 만들고, 행이 붙거나 정렬이 바뀌면 이어 그린다 */
+function gridFor(view: EditorView, d: InlineData): Grid {
+  const have = grids.get(d.key);
+  if (have && have.rows === d.rows) {
+    have.grid.refresh();
+    return have.grid;
+  }
+  const grid = createGrid(gridData(d), {
+    sort: () => d.sort,
+    onSort: (col) => {
+      const s = d.sort;
+      d.sort = !s || s.col !== col ? { col, dir: 1 } : s.dir > 0 ? { col, dir: -1 } : undefined;
+      grid.refresh();
+    },
+    onCopy: (text) => actions.copy(text),
+  });
+  grid.root.classList.add('ir-grid');
+  grids.set(d.key, { grid, rows: d.rows! });
+  return grid;
+}
+
+/**
+ * 상자 안을 그린다. 표는 떼었다 붙이지 않는다 — DOM 에서 떼면 스크롤 자리가 사라진다.
+ * 머리 줄과 서버 출력만 바꾸고, 표는 그 자리에서 이어 그린다
+ */
+function fill(view: EditorView, d: InlineData, box: HTMLElement) {
+  box.className = `ir ir-${d.status}`;
+  const head = renderHead(view, d);
+  const old = box.querySelector(':scope > .ir-head');
+  if (old) old.replaceWith(head);
+  else box.prepend(head);
+  const want = d.status === 'rows' && !d.collapsed ? gridFor(view, d).root : undefined;
+  for (const g of [...box.querySelectorAll(':scope > .grid')]) if (g !== want) g.remove();
+  if (want && want.parentElement !== box) head.after(want);
+  box.querySelector(':scope > .ir-output')?.remove();
+  if (d.output?.length && !d.collapsed) box.appendChild(el('pre', 'ir-output', d.output.join('\n')));
 }
 
 class ResultWidget extends WidgetType {
@@ -234,13 +173,26 @@ class ResultWidget extends WidgetType {
     return other.key === this.key && other.version === this.version;
   }
   toDOM(view: EditorView) {
+    // 바깥 상자는 여백만 (padding). 블록 위젯의 margin 은 편집기가 높이를 잴 때 빠져 줄 번호가 어긋난다
+    const wrap = el('div', 'ir-wrap');
+    const box = el('div');
+    wrap.appendChild(box);
     const d = data.get(this.key);
-    return d ? render(view, d) : document.createElement('div');
+    if (d) fill(view, d, box);
+    return wrap;
+  }
+  /** 같은 결과의 새 판: 상자를 그대로 두고 안만 바꾼다 (표의 스크롤 자리가 남는다) */
+  updateDOM(dom: HTMLElement, view: EditorView) {
+    const box = dom.firstElementChild as HTMLElement | null;
+    const d = data.get(this.key);
+    if (!box || !d) return false;
+    fill(view, d, box);
+    return true;
   }
   get estimatedHeight() {
     const d = data.get(this.key);
-    if (!d || d.status !== 'rows' || d.collapsed) return 28;
-    return 28 + 24 + Math.min(d.rows?.length ?? 0, 12) * 21;
+    if (!d || d.status !== 'rows' || d.collapsed) return 34;
+    return 34 + 24 + Math.min(d.rows?.length ?? 0, 12) * 22;
   }
   /** 위젯 안의 누름·키는 편집기가 가져가지 않는다 (버튼·표가 받는다) */
   ignoreEvent() {
@@ -251,6 +203,12 @@ class ResultWidget extends WidgetType {
 const widgetAt = (key: string, pos: number) =>
   Decoration.widget({ widget: new ResultWidget(key, versions.get(key) ?? 0), block: true, side: 1, inlineKey: key }).range(pos);
 
+const forget = (key: string) => {
+  data.delete(key);
+  grids.delete(key);
+  versions.delete(key);
+};
+
 const field = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(deco, tr) {
@@ -260,7 +218,7 @@ const field = StateField.define<DecorationSet>({
       const moved: Range<Decoration>[] = [];
       deco.between(0, tr.startState.doc.length, (from, _to, v) => {
         const p = tr.changes.mapPos(from, -1, MapMode.TrackBefore);
-        if (p === null) data.delete(v.spec.inlineKey);
+        if (p === null) forget(v.spec.inlineKey);
         else moved.push(v.range(tr.state.doc.lineAt(p).to));
       });
       deco = Decoration.set(moved, true);
@@ -277,7 +235,7 @@ const field = StateField.define<DecorationSet>({
           },
           add: [widgetAt(e.value.key, e.value.pos)],
         });
-        gone.forEach((k) => data.delete(k));
+        gone.forEach(forget);
       } else if (e.is(refreshEffect) || e.is(removeEffect)) {
         let at = -1;
         deco.between(0, tr.state.doc.length, (from, _to, v) => {
@@ -286,10 +244,11 @@ const field = StateField.define<DecorationSet>({
         if (at < 0) continue;
         const keep: Range<Decoration>[] = e.is(refreshEffect) ? [widgetAt(e.value, at)] : [];
         deco = deco.update({ filter: (_f, _t, v) => v.spec.inlineKey !== e.value, add: keep });
-        if (e.is(removeEffect)) data.delete(e.value);
+        if (e.is(removeEffect)) forget(e.value);
       } else if (e.is(clearEffect)) {
         deco = Decoration.none;
         data.clear();
+        grids.clear();
       }
     }
     return deco;
@@ -297,9 +256,33 @@ const field = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+/**
+ * 결과 상자의 폭을 편집기에 보이는 폭으로 묶는다: 긴 SQL 줄 때문에 편집기 글 영역이 넓어져도
+ * 결과 상자는 화면 안에 머물고(가로로 스크롤해도 왼쪽에 붙어 있다) 버튼이 보인다
+ */
+const fitWidth = ViewPlugin.fromClass(
+  class {
+    constructor(readonly view: EditorView) {
+      this.measure();
+    }
+    update() {
+      this.measure();
+    }
+    measure() {
+      this.view.requestMeasure({
+        read: (v) => ({ width: v.scrollDOM.clientWidth, gutter: (v.dom.querySelector('.cm-gutters') as HTMLElement | null)?.offsetWidth ?? 0 }),
+        write: (m, v) => {
+          v.dom.style.setProperty('--ir-max', `${Math.max(240, m.width - m.gutter - 24)}px`);
+          v.dom.style.setProperty('--ir-left', `${m.gutter}px`);
+        },
+      });
+    }
+  }
+);
+
 export function inlineResults(a: InlineActions) {
   actions = a;
-  return field;
+  return [field, fitWidth];
 }
 
 /** 문장이 끝나는 줄의 끝 (결과를 붙일 자리) */
@@ -316,18 +299,20 @@ export function addRunning(view: EditorView, items: { key: string; pos: number }
 /** 확장이 보낸 결과로 그 자리를 채운다 (자리가 이미 닫혔으면 버린다) */
 export function setResult(view: EditorView, key: string, result: Omit<InlineData, 'key'>) {
   if (!data.has(key)) return;
+  grids.delete(key);
   data.set(key, { key, ...result });
   refresh(view, key);
 }
 
-/** 다음 행이 더 왔다 */
-export function appendRows(view: EditorView, resultId: number, rows: Cell[][], done: boolean, capped: boolean) {
+/** 다음 행이 더 왔다 (표는 그대로 두고 이어 그린다) */
+export function appendRows(view: EditorView, resultId: number, rows: Cell[][], done: boolean, capped: boolean, more: boolean) {
   for (const d of data.values()) {
     if (d.resultId !== resultId) continue;
-    d.rows = [...(d.rows ?? []), ...rows];
+    d.rows!.push(...rows);
     d.done = done;
     d.capped = capped;
-    d.loading = false;
+    // "끝까지"로 이어 받는 중이면 아직 가져오는 중
+    d.loading = more && !done && !capped;
     refresh(view, d.key);
   }
 }
@@ -349,6 +334,11 @@ export function markDropped(view: EditorView, ids: number[]) {
     d.loading = false;
     refresh(view, d.key);
   }
+}
+
+/** 도구 줄에서 행 수를 바꿨다: 버튼 글을 맞춘다 */
+export function refreshAll(view: EditorView) {
+  for (const key of data.keys()) refresh(view, key);
 }
 
 export function clearResults(view: EditorView) {

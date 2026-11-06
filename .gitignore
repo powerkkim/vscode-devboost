@@ -5,6 +5,8 @@ dist/
 media/sourceAtlas/
 media/dbConsole/console.js
 media/dbConsole/console.js.map
+media/dbConsole/results.js
+media/dbConsole/results.js.map
 *.vsix
 release-notes.md
 

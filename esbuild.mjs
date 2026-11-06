@@ -66,13 +66,16 @@ const consoleOptions = {
   logLevel: 'info',
 };
 
+// DB 결과 패널(Webview) → media/dbConsole/results.js (결과 표는 콘솔과 같은 것을 쓴다)
+const resultsOptions = { ...consoleOptions, entryPoints: ['webview/dbConsole/results.ts'], outfile: 'media/dbConsole/results.js' };
+
 if (watch) {
-  for (const o of [options, webviewOptions, consoleOptions]) {
+  for (const o of [options, webviewOptions, consoleOptions, resultsOptions]) {
     const ctx = await esbuild.context(o);
     await ctx.watch();
   }
 } else {
-  const results = await Promise.all([esbuild.build(options), esbuild.build(webviewOptions), esbuild.build(consoleOptions)]);
+  const results = await Promise.all([esbuild.build(options), esbuild.build(webviewOptions), esbuild.build(consoleOptions), esbuild.build(resultsOptions)]);
   // 묶인 라이브러리의 라이선스 고지 (배포 파일에 함께 들어간다)
   writeNotices(results.flatMap((r) => Object.keys(r.metafile.inputs)));
 }

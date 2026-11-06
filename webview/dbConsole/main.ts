@@ -9,8 +9,8 @@ import { tags as t } from '@lezer/highlight';
 import { splitStatements, statementAt, type Statement, type DialectRules } from '../../src/features/dbConsole/sql/statements';
 import { bindNames, inferType, BIND_TYPES, type BindType } from '../../src/features/dbConsole/sql/binds';
 import { rulesOf } from '../../src/features/dbConsole/driver/dialects';
-import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped } from './inline';
-import { editingAssist, selectStatement } from './assist';
+import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll } from './inline';
+import { editingAssist, selectStatement, currentTargets } from './assist';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -21,6 +21,8 @@ const light = document.body.classList.contains('vscode-light');
 let rules: DialectRules = rulesOf(undefined);
 /** 결과를 보여 줄 곳: 쿼리 아래 + 패널 / 쿼리 아래 / 패널 */
 let resultsIn: 'both' | 'editor' | 'panel' = 'both';
+/** 한 번에 가져올 행 수·최대 행 수 (설정. 도구 줄에서 바꾼다) */
+let limits = { pageSize: 500, maxRows: 10000 };
 
 // ───────── SQL 편집기 ─────────
 const colors = light
@@ -78,11 +80,15 @@ const editor = new EditorView({
           { key: 'Mod-Enter', run: () => true },
         ])
       ),
-      editingAssist(() => rules),
+      editingAssist(
+        () => rules,
+        () => start('run') // ▶ 를 누르면 커서를 그 문장으로 옮긴 뒤 실행
+      ),
       basicSetup,
       sqlLang.of(sqlWith([])),
       inlineResults({
-        more: (resultId) => vscode.postMessage({ type: 'more', resultId }),
+        more: (resultId, all) => vscode.postMessage({ type: 'more', resultId, all }),
+        limits: () => limits,
         toPanel: (resultId) => vscode.postMessage({ type: 'toPanel', resultId }),
         copy: (text) => vscode.postMessage({ type: 'copy', text }),
         copyInsert: (resultId) => vscode.postMessage({ type: 'copyInsert', resultId }),
@@ -98,6 +104,7 @@ const editor = new EditorView({
           scheduleSave();
         }
         if (u.selectionSet) armed = false;
+        if (u.docChanged || u.selectionSet) scheduleTarget();
       }),
     ],
   }),
@@ -118,10 +125,15 @@ const $params = $('paramList');
 const $confirm = $<HTMLInputElement>('confirmEach');
 const $hint = $('hint');
 
+/** 지금 실행 대상 문장들이 쓰는 파라미터 (소문자). 다른 문장의 파라미터 칸은 흐리게 */
+let targetParams = new Set<string>();
+
 function renderParams() {
   const names = bindNames(text(), rules);
   const focused = (document.activeElement as HTMLElement | null)?.dataset?.param;
   $params.textContent = '';
+  // 값 확인은 파라미터가 있을 때만 뜻이 있다
+  $('confirmBox').classList.toggle('hidden', !names.length);
   if (!names.length) {
     const none = document.createElement('span');
     none.className = 'muted small';
@@ -133,7 +145,8 @@ function renderParams() {
     const key = name.toLowerCase();
     const p = (params[key] ??= { value: '' });
     const label = document.createElement('label');
-    label.className = 'param';
+    label.className = 'param' + (targetParams.has(key) ? '' : ' unused');
+    if (!targetParams.has(key)) label.title = '지금 실행할 문장에서는 쓰지 않는 파라미터';
     const nm = document.createElement('span');
     nm.className = 'param-name';
     nm.textContent = ':' + name;
@@ -206,10 +219,44 @@ $('addParam').addEventListener('click', () => {
 });
 
 // ───────── 실행 ─────────
+/** 안내 글. 비우면 지금 실행 대상(몇 번째 줄 문장인지)을 보여 준다 */
+let hintMessage = '';
 function hint(message: string, kind: '' | 'warn' = '') {
-  $hint.textContent = message || 'Ctrl+Enter 실행 · Ctrl+E 실행계획 · Shift+Alt+→ 문장 고르기';
+  hintMessage = message;
   $hint.className = 'hint' + (kind ? ' ' + kind : '');
+  if (message) $hint.textContent = message;
+  else showTarget();
 }
+
+/**
+ * 도구 줄의 실행·실행계획이 어느 문장에 해당하는지: "실행 대상: 12~15번째 줄" / "선택 영역의 문장 3개".
+ * 파라미터 칸도 그 문장들에 맞춰 흐리게·진하게
+ */
+function showTarget() {
+  const list = currentTargets(editor.state, rules);
+  const lines = (s: Statement) => {
+    const a = editor.state.doc.lineAt(s.start).number;
+    const b = editor.state.doc.lineAt(Math.max(s.start, s.start + s.sql.length - 1)).number;
+    return a === b ? `${a}번째 줄` : `${a}~${b}번째 줄`;
+  };
+  const sel = !editor.state.selection.main.empty;
+  const text = !list.length ? '실행할 문장 없음' : sel ? (list.length === 1 ? `실행 대상: 선택 영역 (${lines(list[0])})` : `실행 대상: 선택 영역의 문장 ${list.length}개`) : `실행 대상: ${lines(list[0])} 문장`;
+  if (!hintMessage) $hint.textContent = text;
+  $<HTMLButtonElement>('run').title = `${text} — Ctrl+Enter (선택 영역이 있으면 그 안의 문장들, 없으면 커서가 있는 문장)`;
+  $<HTMLButtonElement>('explain').title = `${list.length ? lines(list[0]) + ' 문장의 ' : ''}실행계획 — Ctrl+E (실제로 실행하지는 않습니다)`;
+  const next = new Set(list.flatMap((s) => bindNames(s.sql, rules).map((n) => n.toLowerCase())));
+  const changed = next.size !== targetParams.size || [...next].some((n) => !targetParams.has(n));
+  targetParams = next;
+  if (changed) renderParams();
+}
+let targetTimer: ReturnType<typeof setTimeout> | undefined;
+const scheduleTarget = () => {
+  clearTimeout(targetTimer);
+  targetTimer = setTimeout(() => {
+    if (hintMessage && hintMessage !== '') hint('');
+    else showTarget();
+  }, 120);
+};
 
 /** 실행할 문장들: 선택 영역이 있으면 그 안의 문장들, 없으면 커서가 있는 문장 */
 let runSeq = 0;
@@ -264,6 +311,30 @@ $resultsIn.addEventListener('change', () => {
   vscode.postMessage({ type: 'resultsIn', where: resultsIn });
   editor.focus();
 });
+const $pageSize = $<HTMLInputElement>('pageSize');
+const $maxRows = $<HTMLInputElement>('maxRows');
+const showLimits = () => {
+  $pageSize.value = String(limits.pageSize);
+  $maxRows.value = String(limits.maxRows);
+};
+const sendLimits = () => {
+  const ps = Math.min(5000, Math.max(10, Math.floor(Number($pageSize.value)) || limits.pageSize));
+  const mr = Math.min(200000, Math.max(100, Math.floor(Number($maxRows.value)) || limits.maxRows));
+  limits = { pageSize: ps, maxRows: Math.max(mr, ps) };
+  showLimits();
+  vscode.postMessage({ type: 'limits', ...limits });
+  refreshAll(editor);
+};
+for (const input of [$pageSize, $maxRows]) {
+  input.addEventListener('change', sendLimits);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+      editor.focus();
+    }
+  });
+}
 const $serverOutput = $<HTMLInputElement>('serverOutput');
 $serverOutput.addEventListener('change', () => vscode.postMessage({ type: 'serverOutput', on: $serverOutput.checked }));
 
@@ -353,6 +424,8 @@ window.addEventListener('message', (event) => {
       rules = rulesOf(m.kind);
       resultsIn = m.resultsIn ?? 'both';
       $resultsIn.value = resultsIn;
+      if (m.limits) limits = m.limits;
+      showLimits();
       params = m.params ?? {};
       confirmEach = m.confirmEach ?? true;
       $confirm.checked = confirmEach;
@@ -395,7 +468,12 @@ window.addEventListener('message', (event) => {
       setResult(editor, m.key, m.result);
       break;
     case 'inlineAppend':
-      appendRows(editor, m.id, m.rows, m.done, m.capped);
+      appendRows(editor, m.id, m.rows, m.done, m.capped, !!m.more);
+      break;
+    case 'limits':
+      limits = { pageSize: m.pageSize, maxRows: m.maxRows };
+      showLimits();
+      refreshAll(editor);
       break;
     case 'inlineMoreFailed':
       moreFailed(editor, m.resultId, m.message);

@@ -1,8 +1,11 @@
 // 편집을 VS Code 처럼 편하게: 지금 문장 표시, 선택 넓히기(Shift+Alt+→), 실행 취소가 두 번 되는 문제, 선택이 줄 강조에 가리는 문제.
-import { EditorView, ViewPlugin, Decoration, keymap, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import { EditorSelection, Prec, type Extension, type Range } from '@codemirror/state';
-import { undo, redo } from '@codemirror/commands';
-import { statementAt, type DialectRules, type Statement } from '../../src/features/dbConsole/sql/statements';
+import { EditorView, ViewPlugin, Decoration, keymap, gutter, GutterMarker, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { EditorSelection, Prec, StateField, RangeSet, type EditorState, type Extension, type Range } from '@codemirror/state';
+import { undo, redo, indentWithTab } from '@codemirror/commands';
+import { splitStatements, statementAt, type DialectRules, type Statement } from '../../src/features/dbConsole/sql/statements';
+
+/** 이보다 긴 글에서는 문장 표시를 하지 않는다 (키를 칠 때마다 전체를 나누므로) */
+const MAX_SCAN = 2_000_000;
 
 /** 문장의 실제 글 범위 (끝의 ; 와 / 줄은 빼고) */
 export function statementRange(doc: string, s: Statement): { from: number; to: number } {
@@ -26,15 +29,13 @@ function currentStatement(rules: () => DialectRules): Extension {
       }
       build(view: EditorView): DecorationSet {
         const sel = view.state.selection.main;
-        if (!sel.empty || view.state.doc.length > 2_000_000) return Decoration.none;
+        if (!sel.empty || view.state.doc.length > MAX_SCAN) return Decoration.none;
         const text = view.state.doc.toString();
         const s = statementAt(text, sel.head, rules());
         if (!s) return Decoration.none;
         const r = statementRange(text, s);
         const first = view.state.doc.lineAt(r.from).number;
         const last = view.state.doc.lineAt(Math.max(r.from, r.to - 1)).number;
-        // 한 줄짜리 문장은 표시할 것이 없다 (줄 강조로 충분)
-        if (first === last) return Decoration.none;
         const out: Range<Decoration>[] = [];
         for (let n = first; n <= last; n++) out.push(mark.range(view.state.doc.line(n).from));
         return Decoration.set(out);
@@ -139,6 +140,92 @@ function selectionOverActiveLine(): Extension {
   });
 }
 
-export function editingAssist(rules: () => DialectRules): Extension {
-  return [currentStatement(rules), expandSelection(rules), singleHistory(), selectionOverActiveLine()];
+// ───────── 문장마다 실행 표시 (줄 번호 옆 ▶) ─────────
+
+/** 글의 문장들 (글이 바뀔 때만 다시 나눈다) */
+const statementsField = (rules: () => DialectRules) =>
+  StateField.define<Statement[]>({
+    create: (state) => scan(state, rules()),
+    update: (list, tr) => (tr.docChanged ? scan(tr.state, rules()) : list),
+  });
+const scan = (state: EditorState, r: DialectRules) => (state.doc.length > MAX_SCAN ? [] : splitStatements(state.doc.toString(), r));
+
+class RunMarker extends GutterMarker {
+  constructor(readonly current: boolean) {
+    super();
+  }
+  eq(o: RunMarker) {
+    return o.current === this.current;
+  }
+  toDOM() {
+    const s = document.createElement('span');
+    s.className = 'cm-run-marker' + (this.current ? ' current' : '');
+    s.textContent = '▶';
+    s.title = '이 문장 실행';
+    return s;
+  }
+}
+const marker = new RunMarker(false);
+const currentMarker = new RunMarker(true);
+
+/**
+ * 문장이 시작하는 줄 옆에 ▶ — 누르면 그 문장만 실행한다. Ctrl+Enter 로 실행될 문장(커서가 있는 문장)은 진하게.
+ * 여러 쿼리가 나열돼 있을 때 어느 문장이 실행되는지 한눈에 보이게
+ */
+function runGutter(rules: () => DialectRules, onRun: (stmt: Statement) => void): Extension {
+  const field = statementsField(rules);
+  return [
+    field,
+    gutter({
+      class: 'cm-runGutter',
+      markers(view) {
+        const list = view.state.field(field);
+        const sel = view.state.selection.main;
+        const cur = sel.empty ? list.find((s) => sel.head >= s.start && sel.head <= s.end) : undefined;
+        const seen = new Set<number>();
+        const out: Range<GutterMarker>[] = [];
+        for (const s of list) {
+          const line = view.state.doc.lineAt(s.start).from;
+          if (seen.has(line)) continue; // 한 줄에 문장이 여럿이면 첫 문장만
+          seen.add(line);
+          out.push((s === cur ? currentMarker : marker).range(line));
+        }
+        return RangeSet.of(out);
+      },
+      initialSpacer: () => marker,
+      domEventHandlers: {
+        mousedown(view, line) {
+          const s = view.state.field(field).find((x) => view.state.doc.lineAt(x.start).from === line.from);
+          if (!s) return false;
+          view.dispatch({ selection: { anchor: s.start } });
+          onRun(s);
+          return true;
+        },
+      },
+    }),
+  ];
+}
+
+/** 지금 실행 대상 (선택 영역의 문장들, 없으면 커서가 있는 문장) — 도구 줄 안내·파라미터 칸에 쓴다 */
+export function currentTargets(state: EditorState, rules: DialectRules): Statement[] {
+  if (state.doc.length > MAX_SCAN) return [];
+  const text = state.doc.toString();
+  const sel = state.selection.main;
+  if (sel.empty) {
+    const s = statementAt(text, sel.head, rules);
+    return s ? [s] : [];
+  }
+  return splitStatements(text.slice(sel.from, sel.to), rules).map((s) => ({ ...s, start: s.start + sel.from, end: s.end + sel.from }));
+}
+
+export function editingAssist(rules: () => DialectRules, onRun: (stmt: Statement) => void): Extension {
+  return [
+    currentStatement(rules),
+    expandSelection(rules),
+    singleHistory(),
+    selectionOverActiveLine(),
+    runGutter(rules, onRun),
+    // Tab 은 들여쓰기 (포커스를 옮기지 않는다). Shift+Tab 은 내어쓰기. Esc 다음 Tab 은 포커스 이동
+    keymap.of([indentWithTab]),
+  ];
 }

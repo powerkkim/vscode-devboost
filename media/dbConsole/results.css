@@ -62,6 +62,10 @@ body {
   min-height: 0;
   overflow: auto;
 }
+/* 결과 표는 스스로 스크롤한다 (보이는 행만 그리려고) */
+.body > .grid {
+  height: 100%;
+}
 .empty {
   padding: 16px;
   color: var(--muted);

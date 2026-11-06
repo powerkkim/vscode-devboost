@@ -5,8 +5,8 @@ import { toCsv } from '../../dbSchema/schema/csv';
 import { guessTable, toInsertSql } from '../sql/insertSql';
 
 export const RESULTS_VIEW_ID = 'devBoost.dbConsole.results';
-/** 한 탭에 싣는 최대 행 수 (더 많으면 조건을 좁히라고 안내) */
-export const MAX_LOADED_ROWS = 5000;
+/** 한 결과에 싣는 최대 행 수의 한도 (설정 maxRows 는 이 안에서). 행은 모두 메모리에 있으므로 끝없이 두지 않는다 */
+export const MAX_ROWS_LIMIT = 200_000;
 
 /** 조회 결과 하나 = 탭 하나 */
 interface ResultTab {
@@ -36,7 +36,7 @@ export interface LogEntry {
 
 type FromWebview =
   | { type: 'ready' }
-  | { type: 'more'; id: number }
+  | { type: 'more'; id: number; all?: boolean }
   | { type: 'csv'; id: number }
   | { type: 'copy'; text: string }
   | { type: 'pin'; id: number; pinned: boolean }
@@ -53,9 +53,11 @@ export interface RowsAppended {
   rows: Cell[][];
   done: boolean;
   capped: boolean;
+  /** "끝까지"로 이어 받는 중 (아직 더 온다) */
+  more: boolean;
 }
 
-const tabView = (t: ResultTab) => ({
+const tabView = (t: ResultTab, maxRows: number) => ({
   id: t.id,
   title: t.title,
   sql: t.sql,
@@ -64,7 +66,7 @@ const tabView = (t: ResultTab) => ({
   done: t.done,
   ms: t.ms,
   pinned: t.pinned,
-  capped: !t.done && t.rows.length >= MAX_LOADED_ROWS,
+  capped: !t.done && t.rows.length >= maxRows,
 });
 
 /**
@@ -90,6 +92,10 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
 
   fetchMore: FetchMore | undefined;
   pageSize = 500;
+  /** 한 결과에 싣는 최대 행 수 (설정 maxRows) */
+  maxRows = 10_000;
+  /** "끝까지" 이어 받는 중인 탭 */
+  private readonly fetchingAll = new Set<number>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -154,7 +160,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
     // 이번 실행의 첫 결과를 보여 준다
     const first = n === 1;
     if (first) this.active = id;
-    this.post({ type: 'tabAdded', tab: tabView(tab), activate: first });
+    this.post({ type: 'tabAdded', tab: tabView(tab, this.maxRows), activate: first });
     return id;
   }
 
@@ -181,25 +187,47 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
         void t.cursor.close();
         t.cursor = undefined;
         t.done = true;
-        this.post({ type: 'append', id: t.id, rows: [], done: true, capped: false });
-        this.appended.fire({ id: t.id, rows: [], done: true, capped: false });
+        this.post({ type: 'append', id: t.id, rows: [], done: true, capped: false, more: false });
+        this.appended.fire({ id: t.id, rows: [], done: true, capped: false, more: false });
       }
     }
   }
 
-  /** 다음 행을 가져온다 (패널·콘솔 어느 쪽에서 눌러도). 실패하면 이유를 던진다 */
-  async more(id: number): Promise<void> {
+  /** 행 수 설정이 바뀌었다: 화면의 버튼 글을 맞춘다 */
+  setLimits(pageSize: number, maxRows: number) {
+    this.pageSize = pageSize;
+    this.maxRows = maxRows;
+    this.post({ type: 'limits', pageSize, maxRows });
+  }
+
+  /**
+   * 다음 행을 가져온다 (패널·콘솔 어느 쪽에서 눌러도). 실패하면 이유를 던진다.
+   * all: 다 받거나 최대 행 수에 닿을 때까지 이어서 (페이지마다 화면에 붙인다)
+   */
+  async more(id: number, all = false): Promise<void> {
     const tab = this.tabs.find((t) => t.id === id);
     if (!tab?.cursor || !this.fetchMore) throw new Error('더 가져올 수 없습니다. 쿼리를 다시 실행하세요.');
-    const room = MAX_LOADED_ROWS - tab.rows.length;
-    if (room <= 0) return;
-    const page = await this.fetchMore(tab.connectionId, tab.cursor, Math.min(this.pageSize, room));
-    tab.rows.push(...page.rows);
-    tab.done = page.done;
-    if (page.done) tab.cursor = undefined;
-    const msg: RowsAppended = { id: tab.id, rows: page.rows, done: tab.done, capped: !tab.done && tab.rows.length >= MAX_LOADED_ROWS };
-    this.post({ type: 'append', ...msg });
-    this.appended.fire(msg);
+    if (this.fetchingAll.has(id)) return; // 이미 끝까지 받는 중
+    if (all) this.fetchingAll.add(id);
+    try {
+      do {
+        const room = this.maxRows - tab.rows.length;
+        if (room <= 0 || !tab.cursor) break;
+        // 끝까지 받을 때는 한 번에 크게 (서버 왕복을 줄인다)
+        const count = Math.min(all ? Math.max(this.pageSize, 2000) : this.pageSize, room);
+        const page = await this.fetchMore(tab.connectionId, tab.cursor, count);
+        if (!this.tabs.includes(tab)) return; // 받는 사이에 탭이 지워졌다
+        tab.rows.push(...page.rows);
+        tab.done = page.done;
+        if (page.done) tab.cursor = undefined;
+        const capped = !tab.done && tab.rows.length >= this.maxRows;
+        const msg: RowsAppended = { id: tab.id, rows: page.rows, done: tab.done, capped, more: all && !tab.done && !capped };
+        this.post({ type: 'append', ...msg });
+        this.appended.fire(msg);
+      } while (all && !tab.done);
+    } finally {
+      this.fetchingAll.delete(id);
+    }
   }
 
   /** 탭의 행을 TSV·INSERT 등으로 쓸 때 */
@@ -250,7 +278,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
       }
       case 'more':
         try {
-          await this.more(m.id);
+          await this.more(m.id, !!m.all);
         } catch (e) {
           this.post({ type: 'moreFailed', id: m.id, message: String((e as Error)?.message ?? e).split('\n')[0] });
         }
@@ -278,9 +306,9 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
     this.post({
       type: 'state',
       active: this.active,
-      maxRows: MAX_LOADED_ROWS,
+      maxRows: this.maxRows,
       pageSize: this.pageSize,
-      tabs: this.tabs.map(tabView),
+      tabs: this.tabs.map((t) => tabView(t, this.maxRows)),
       plan: this.plan,
       log: this.log,
     });
@@ -289,6 +317,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
   private html(wv: vscode.Webview): string {
     const base = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'dbConsole');
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'results.js'));
+    const grid = wv.asWebviewUri(vscode.Uri.joinPath(base, 'grid.css'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'results.css'));
     const nonce = randomBytes(16).toString('base64');
     return `<!DOCTYPE html>
@@ -296,6 +325,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${wv.cspSource}; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${css}">
+<link rel="stylesheet" href="${grid}">
 <title>DB 결과</title></head>
 <body>
 <div class="tabs" id="tabs" role="tablist"></div>

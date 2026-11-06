@@ -9,7 +9,7 @@ import { ConsoleStore, ConsoleSaved } from './consoleStore';
 import { Sessions } from './sessions';
 import { Statement, StatementInfo, classify, changesData } from './sql/statements';
 import { BindInput, bindValuesFor, toDriverSql } from './sql/binds';
-import { MAX_LOADED_ROWS, ResultView } from './ui/resultView';
+import { MAX_ROWS_LIMIT, ResultView } from './ui/resultView';
 import { FormActions, FormDialog, DialogMessage } from './ui/formDialog';
 
 /** 콘솔 화면(Webview 패널)의 종류 — package.json 의 단축키 조건(activeWebviewPanelId)과 같아야 한다 */
@@ -36,7 +36,8 @@ type FromWebview =
   | { type: 'commit' }
   | { type: 'rollback' }
   | { type: 'connect' }
-  | { type: 'more'; resultId: number }
+  | { type: 'more'; resultId: number; all?: boolean }
+  | { type: 'limits'; pageSize: number; maxRows: number }
   | { type: 'toPanel'; resultId: number }
   | { type: 'copy'; text: string }
   | { type: 'copyInsert'; resultId: number }
@@ -105,6 +106,7 @@ export class DbConsole implements vscode.Disposable {
 
   constructor(private readonly deps: ConsoleDeps) {
     deps.results.fetchMore = (connectionId, cursor, count) => this.fetchMore(connectionId, cursor, count);
+    deps.results.setLimits(pageSize(), maxRows());
     this.subs.push(
       // 접속이 닫히면(끊김 포함) 그 접속의 변경은 롤백된 것이고, 열어 둔 커서도 못 쓴다
       deps.sessions.onDidChange(() => {
@@ -139,8 +141,16 @@ export class DbConsole implements vscode.Disposable {
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('devBoost.dbConsole.resultsIn')) for (const tab of this.tabs) this.post(tab, { type: 'resultsIn', where: resultsIn() });
+        if (e.affectsConfiguration('devBoost.dbConsole.pageSize') || e.affectsConfiguration('devBoost.dbConsole.maxRows')) this.sendLimits();
       })
     );
+  }
+
+  /** 한 번에 가져올 행 수·최대 행 수를 결과 패널과 모든 콘솔에 알린다 */
+  private sendLimits() {
+    const limits = { pageSize: pageSize(), maxRows: maxRows() };
+    this.deps.results.setLimits(limits.pageSize, limits.maxRows);
+    for (const tab of this.tabs) this.post(tab, { type: 'limits', ...limits });
   }
 
   dispose() {
@@ -260,6 +270,7 @@ export class DbConsole implements vscode.Disposable {
       params: saved?.params ?? {},
       confirmEach: saved?.confirmEach ?? true,
       resultsIn: resultsIn(),
+      limits: { pageSize: pageSize(), maxRows: maxRows() },
     });
     this.post(tab, { type: 'tables', names: this.deps.tableNames(cfg.id) });
     this.sendStatus(tab);
@@ -350,7 +361,7 @@ export class DbConsole implements vscode.Disposable {
       }
       case 'more':
         try {
-          await this.deps.results.more(m.resultId);
+          await this.deps.results.more(m.resultId, !!m.all);
         } catch (e) {
           this.post(tab, { type: 'inlineMoreFailed', resultId: m.resultId, message: String((e as Error)?.message ?? e).split('\n')[0] });
         }
@@ -365,6 +376,13 @@ export class DbConsole implements vscode.Disposable {
       case 'copyInsert':
         await this.deps.results.copyAsInsert(m.resultId);
         return;
+      case 'limits': {
+        // 도구 줄의 행 수 칸 → 설정 (모든 콘솔·패널에 같이 적용)
+        const cfg = vscode.workspace.getConfiguration('devBoost.dbConsole');
+        await cfg.update('pageSize', clamp(m.pageSize, 10, 5000, 500), vscode.ConfigurationTarget.Global);
+        await cfg.update('maxRows', clamp(m.maxRows, 100, MAX_ROWS_LIMIT, 10_000), vscode.ConfigurationTarget.Global);
+        return;
+      }
       case 'resultsIn':
         await vscode.workspace.getConfiguration('devBoost.dbConsole').update('resultsIn', m.where, vscode.ConfigurationTarget.Global);
         return;
@@ -415,7 +433,7 @@ export class DbConsole implements vscode.Disposable {
 
     const { results } = this.deps;
     const where = resultsIn();
-    results.pageSize = pageSize();
+    results.setLimits(pageSize(), maxRows());
     results.beginRun();
     if (where !== 'editor') await results.reveal();
 
@@ -509,7 +527,7 @@ export class DbConsole implements vscode.Disposable {
         columns: r.columns,
         rows: r.page.rows,
         done: r.page.done,
-        capped: !r.page.done && r.page.rows.length >= MAX_LOADED_ROWS,
+        capped: !r.page.done && r.page.rows.length >= results.maxRows,
         ms: r.ms,
         output,
       });
@@ -647,6 +665,7 @@ export class DbConsole implements vscode.Disposable {
   private html(wv: vscode.Webview): string {
     const base = vscode.Uri.joinPath(this.deps.context.extensionUri, 'media', 'dbConsole');
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'console.js'));
+    const grid = wv.asWebviewUri(vscode.Uri.joinPath(base, 'grid.css'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'console.css'));
     const nonce = randomBytes(16).toString('base64');
     // 편집기(CodeMirror)가 실행 중에 <style> 을 넣으므로 스타일에도 nonce 를 허용한다
@@ -656,6 +675,7 @@ export class DbConsole implements vscode.Disposable {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${wv.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${css}">
+<link rel="stylesheet" href="${grid}">
 <title>DB 콘솔</title></head>
 <body data-vscode-context='{"preventDefaultContextMenuItems": true}'>
 <div class="toolbar">
@@ -685,7 +705,9 @@ export class DbConsole implements vscode.Disposable {
   <span id="paramList"></span>
   <button type="button" id="addParam">+ 파라미터</button>
   <span class="spacer"></span>
-  <label class="check"><input type="checkbox" id="confirmEach" checked> 실행할 때마다 값 확인</label>
+  <label class="check hidden" id="confirmBox" title="파라미터가 있는 문장을 실행하면 먼저 값 칸으로 커서를 옮깁니다. 값을 보고 Enter(또는 실행을 한 번 더)를 누르면 실행합니다"><input type="checkbox" id="confirmEach" checked> 실행 전 값 확인</label>
+  <label class="limit" title="조회 결과를 한 번에 가져오는 행 수 (10~5,000)">한 번에 <input type="number" id="pageSize" min="10" max="5000" step="100">행</label>
+  <label class="limit" title="한 결과에 가져오는 최대 행 수 (100~200,000). '끝까지'도 여기까지만">최대 <input type="number" id="maxRows" min="100" max="200000" step="1000">행</label>
 </div>
 <div id="editor" data-vscode-context='{"webviewSection": "editor", "preventDefaultContextMenuItems": false}'></div>
 
@@ -749,8 +771,14 @@ export class DbConsole implements vscode.Disposable {
   }
 }
 
+const clamp = (n: unknown, min: number, max: number, fallback: number) => Math.min(max, Math.max(min, Math.floor(Number(n)) || fallback));
+
 /** 한 번에 가져올 행 수 (설정 devBoost.dbConsole.pageSize, 10~5000) */
 function pageSize(): number {
-  const n = vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('pageSize', 500);
-  return Math.min(5000, Math.max(10, Math.floor(n) || 500));
+  return clamp(vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('pageSize', 500), 10, 5000, 500);
+}
+
+/** 한 결과에 싣는 최대 행 수 (설정 devBoost.dbConsole.maxRows) */
+function maxRows(): number {
+  return clamp(vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('maxRows', 10_000), 100, MAX_ROWS_LIMIT, 10_000);
 }

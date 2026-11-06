@@ -385,6 +385,13 @@ label.select select {
   padding: 4px 0 8px 2px;
 }
 .ir {
+  /* 내용만큼만 넓게, 편집기에 보이는 폭 안에서. 가로로 스크롤해도 왼쪽에 붙어 있다 */
+  width: fit-content;
+  min-width: 320px;
+  max-width: var(--ir-max, 100%);
+  position: sticky;
+  left: var(--ir-left, 0);
+  box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 3px;
   background: var(--vscode-editorWidget-background, var(--bar));
@@ -423,9 +430,6 @@ label.select select {
 .ir-fail {
   color: var(--err);
 }
-.ir-spacer {
-  flex: 1 1 auto;
-}
 button.ir-btn {
   padding: 0 7px;
   font-size: 0.92em;
@@ -436,54 +440,9 @@ button.ir-btn {
 button.ir-btn:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
-.ir-table {
-  max-height: 280px;
-  overflow: auto;
+.ir-grid {
+  max-height: 300px;
   border-top: 1px solid var(--border);
-  outline: none;
-  user-select: none;
-}
-.ir-table table {
-  border-collapse: collapse;
-  font-family: var(--mono);
-  font-size: 1em;
-}
-.ir-table th,
-.ir-table td {
-  padding: 1px 8px;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  white-space: nowrap;
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ir-table th {
-  position: sticky;
-  top: 0;
-  background: var(--vscode-editorWidget-background, var(--bar));
-  font-weight: 600;
-  cursor: pointer;
-}
-.ir-table .num {
-  text-align: right;
-}
-.ir-table .rownum {
-  color: var(--muted);
-  text-align: right;
-}
-.ir-table td.null {
-  color: var(--muted);
-  font-style: italic;
-}
-.ir-table td.picked {
-  outline: 1px solid var(--vscode-focusBorder, #007fd4);
-  outline-offset: -1px;
-}
-.ir-empty {
-  padding: 4px 8px;
-  color: var(--muted);
 }
 .ir-output {
   margin: 0;
@@ -493,4 +452,41 @@ button.ir-btn:hover:not(:disabled) {
   white-space: pre-wrap;
   max-height: 200px;
   overflow: auto;
+}
+
+/* 행 수 칸 (파라미터 줄 오른쪽) */
+label.limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+label.limit input {
+  width: 72px;
+  padding: 1px 4px;
+  text-align: right;
+}
+
+/* 지금 문장에서 쓰지 않는 파라미터 */
+.param.unused {
+  opacity: 0.45;
+}
+
+/* 문장마다 실행 표시 (줄 번호 옆) */
+.cm-runGutter .cm-gutterElement {
+  padding: 0 2px;
+  cursor: pointer;
+}
+.cm-run-marker {
+  color: var(--vscode-debugIcon-startForeground, #89d185);
+  font-size: 0.8em;
+  opacity: 0.55;
+}
+.cm-run-marker.current {
+  opacity: 1;
+}
+.cm-run-marker:hover {
+  opacity: 1;
 }
