@@ -2,6 +2,7 @@ import { DbConnectionConfig, kindOf } from '../connection/config';
 import type { DbDriver, DbKind } from './types';
 import { oracleDriver } from '../drivers/oracle';
 import { postgresDriver } from '../drivers/postgres';
+import { mysqlDriver } from '../drivers/mysql';
 
 /**
  * DB 종류 → 드라이버. 공통 코드가 drivers/<db>/ 를 직접 부르지 않고 이곳을 거친다.
@@ -10,7 +11,7 @@ import { postgresDriver } from '../drivers/postgres';
 const DRIVERS: Record<DbKind, DbDriver> = {
   oracle: oracleDriver,
   postgres: postgresDriver,
-  mysql: postgresDriver, // 아래에서 바꾼다
+  mysql: mysqlDriver,
 };
 
 export function driverOf(kind: DbKind | undefined): DbDriver {
