@@ -56,10 +56,12 @@ DevBoost 는 아래 오픈 소스 라이브러리를 확장 파일(`dist/extensi
 | [magic-string](https://github.com/Rich-Harris/magic-string) | 0.30.21 | MIT |
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [nanoid](https://github.com/ai/nanoid) | 3.3.20 | MIT |
+| [nearley](https://github.com/hardmath123/nearley) | 2.20.1 | MIT |
 | [oracledb](https://github.com/oracle/node-oracledb) | 26.0.0 | (Apache-2.0 OR UPL-1.0) |
 | [picocolors](https://github.com/alexeyraspopov/picocolors) | 1.1.1 | ISC |
 | [postcss](https://github.com/postcss/postcss) | 8.5.31 | MIT |
 | [source-map-js](https://github.com/7rulnik/source-map-js) | 1.2.2 | BSD-3-Clause |
+| [sql-formatter](https://github.com/sql-formatter-org/sql-formatter) | 15.9.0 | MIT |
 | [style-mod](https://code.haverbeke.berlin/marijn/style-mod) | 4.1.4 | MIT |
 | [supports-color](https://github.com/chalk/supports-color) | 7.2.0 | MIT |
 | [vue](https://github.com/vuejs/core) | 3.5.44 | MIT |
@@ -632,6 +634,36 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
+## nearley 2.20.1
+
+라이선스: MIT
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014, 2015, 2016, 2017, 2018, 2019 Kartik Chandra, Tim Radvan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
 ## oracledb 26.0.0
 
 라이선스: (Apache-2.0 OR UPL-1.0)
@@ -961,6 +993,38 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+---
+
+## sql-formatter 15.9.0
+
+라이선스: MIT
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2016-2020 ZeroTurnaround LLC
+Copyright (c) 2020-2021 George Leslie-Waksman and other contributors
+Copyright (c) 2021-Present inferrinizzard and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ---

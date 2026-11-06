@@ -3,7 +3,7 @@
 import { EditorView, keymap, Decoration, MatchDecorator, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { EditorState, Prec, Compartment } from '@codemirror/state';
 import { basicSetup } from 'codemirror';
-import { sql, PLSQL } from '@codemirror/lang-sql';
+import { sql, PLSQL, PostgreSQL, MySQL, type SQLDialect } from '@codemirror/lang-sql';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { splitStatements, statementAt, type Statement, type DialectRules } from '../../src/features/dbConsole/sql/statements';
@@ -11,6 +11,8 @@ import { bindNames, inferType, BIND_TYPES, type BindType } from '../../src/featu
 import { rulesOf } from '../../src/features/dbConsole/driver/dialects';
 import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll } from './inline';
 import { editingAssist, selectStatement, currentTargets } from './assist';
+import { columnLoader, reopenIfAfterDot } from './columns';
+import { formatSql } from './format';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -63,8 +65,24 @@ const theme = EditorView.theme({
   '.cm-tooltip': { backgroundColor: 'var(--vscode-editorSuggestWidget-background, #252526)', color: 'var(--vscode-editorSuggestWidget-foreground, #d4d4d4)', border: '1px solid var(--vscode-editorSuggestWidget-border, #454545)' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--vscode-editorSuggestWidget-selectedBackground, #04395e)', color: 'inherit' },
 });
+// ───────── 자동 완성 재료: 테이블 이름과 (물어봐서 받은) 칸 ─────────
 const sqlLang = new Compartment();
-const sqlWith = (tables: string[]) => sql({ dialect: PLSQL, upperCaseKeywords: true, schema: Object.fromEntries(tables.map((n) => [n, []])) });
+const DIALECTS: Record<string, SQLDialect> = { oracle: PLSQL, postgres: PostgreSQL, mysql: MySQL };
+let dialect: SQLDialect = PLSQL;
+/** DB 종류 (oracle · postgres · mysql) */
+let dbKind = 'oracle';
+let tableNames: string[] = [];
+/** 테이블(대문자) → 칸 이름들 */
+const tableColumns = new Map<string, string[]>();
+const asking = new Set<string>();
+function schemaObject(): Record<string, string[]> {
+  const o: Record<string, string[]> = {};
+  for (const n of tableNames) o[n] = tableColumns.get(n.toUpperCase()) ?? [];
+  // 목록에 없는 이름(다른 스키마의 OWNER.TABLE 등)으로 받은 칸도 넣는다
+  for (const [k, v] of tableColumns) if (!(k in o) && !tableNames.some((n) => n.toUpperCase() === k)) o[k] = v;
+  return o;
+}
+const sqlWith = () => sql({ dialect, upperCaseKeywords: true, schema: schemaObject() });
 
 const editor = new EditorView({
   parent: $('editor'),
@@ -76,6 +94,14 @@ const editor = new EditorView({
           // Ctrl+Enter·Ctrl+E 는 VS Code 단축키가 받아 'do' 메시지로 돌려준다 (package.json). 여기서는 기본 동작(빈 줄 넣기)만 막는다.
           // 두 곳에서 다 처리하면 한 번 눌러 두 번 실행된다
           { key: 'Mod-Enter', run: () => true },
+          // SQL 정렬 (VS Code 의 문서 서식과 같은 키)
+          {
+            key: 'Shift-Alt-f',
+            run: () => {
+              format();
+              return true;
+            },
+          },
         ])
       ),
       editingAssist(
@@ -83,14 +109,23 @@ const editor = new EditorView({
         () => start('run') // ▶ 를 누르면 커서를 그 문장으로 옮긴 뒤 실행
       ),
       basicSetup,
-      sqlLang.of(sqlWith([])),
+      sqlLang.of(sqlWith()),
+      columnLoader({
+        has: (t) => tableColumns.has(t.toUpperCase()),
+        request: (t) => {
+          if (asking.has(t.toUpperCase())) return;
+          asking.add(t.toUpperCase());
+          vscode.postMessage({ type: 'needColumns', name: t });
+        },
+        rules: () => rules,
+      }),
       inlineResults({
         more: (resultId, all) => vscode.postMessage({ type: 'more', resultId, all }),
         limits: () => limits,
-        toPanel: (resultId) => vscode.postMessage({ type: 'toPanel', resultId }),
+        toPanel: (resultId, data) => vscode.postMessage({ type: 'toPanel', resultId, data }),
         copy: (text) => vscode.postMessage({ type: 'copy', text }),
-        copyInsert: (resultId) => vscode.postMessage({ type: 'copyInsert', resultId }),
-        csv: (resultId) => vscode.postMessage({ type: 'csv', resultId }),
+        copyInsert: (data) => vscode.postMessage({ type: 'copyInsert', data }),
+        csv: (data) => vscode.postMessage({ type: 'csv', data }),
       }),
       syntaxHighlighting(highlight),
       bindPlugin,
@@ -300,7 +335,15 @@ function start(what: 'run' | 'explain') {
   addRunning(editor, sent.map((s) => ({ key: s.key, pos: anchorOf(editor.state, s) })));
   vscode.postMessage({ type: what, statements: sent, params });
 }
+/** SQL 정렬: 선택 영역, 없으면 지금 문장 */
+function format() {
+  const r = formatSql(editor, dbKind, rules);
+  if (!r.done && !r.failed) hint('정렬할 SQL 문장이 없습니다', 'warn');
+  else if (r.failed) hint(`정렬하지 못한 문장 ${r.failed}개는 그대로 두었습니다 (PL/SQL 블록 등)`, 'warn');
+  editor.focus();
+}
 $('run').addEventListener('click', () => start('run'));
+$('history').addEventListener('click', () => vscode.postMessage({ type: 'history' }));
 $('explain').addEventListener('click', () => start('explain'));
 $('commit').addEventListener('click', () => vscode.postMessage({ type: 'commit' }));
 $('rollback').addEventListener('click', () => vscode.postMessage({ type: 'rollback' }));
@@ -416,6 +459,9 @@ window.addEventListener('message', (event) => {
   switch (m.type) {
     case 'init':
       rules = rulesOf(m.kind);
+      dialect = DIALECTS[m.kind] ?? PLSQL;
+      dbKind = m.kind ?? 'oracle';
+      tableColumns.clear();
       if (m.limits) limits = m.limits;
       showLimits();
       params = m.params ?? {};
@@ -445,11 +491,20 @@ window.addEventListener('message', (event) => {
       break;
     }
     case 'tables':
-      editor.dispatch({ effects: sqlLang.reconfigure(sqlWith(m.names ?? [])) });
+      tableNames = m.names ?? [];
+      editor.dispatch({ effects: sqlLang.reconfigure(sqlWith()) });
+      break;
+    case 'columns':
+      asking.delete(String(m.name).toUpperCase());
+      if (!m.columns?.length) break;
+      tableColumns.set(String(m.name).toUpperCase(), m.columns);
+      editor.dispatch({ effects: sqlLang.reconfigure(sqlWith()) });
+      reopenIfAfterDot(editor);
       break;
     case 'do':
       // 단축키(Ctrl+E 등)·오른쪽 클릭 메뉴가 확장을 거쳐 온다
       if (m.what === 'selectStatement') selectStatement(editor, rules);
+      else if (m.what === 'format') format();
       else start(m.what);
       break;
     case 'inline':

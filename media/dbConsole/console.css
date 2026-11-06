@@ -501,3 +501,37 @@ label.limit input {
   overflow: auto;
   max-height: 360px;
 }
+
+/* ⋯ 메뉴 (쿼리 아래 결과) */
+.ir-head {
+  position: relative;
+}
+.ir-menu {
+  position: relative;
+  display: inline-block;
+}
+.ir-menu-list {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  min-width: 160px;
+  padding: 4px 0;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+}
+.ir-menu.open .ir-menu-list {
+  display: flex;
+  flex-direction: column;
+}
+.ir-menu-list button.ir-btn {
+  text-align: left;
+  padding: 3px 12px;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+}
+.ir-menu-list button.ir-btn:hover {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+}

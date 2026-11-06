@@ -1,0 +1,85 @@
+/* 테이블 정보 (칸·제약·인덱스·참조·DDL) */
+body {
+  padding: 8px 20px 32px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.5;
+}
+h1 {
+  font-size: 1.4em;
+  font-weight: 600;
+  margin: 8px 0 2px;
+}
+h2 {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 22px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.count {
+  font-weight: 400;
+  opacity: 0.6;
+}
+.muted {
+  opacity: 0.7;
+  margin: 2px 0;
+}
+.mono {
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+}
+table {
+  border-collapse: collapse;
+}
+th,
+td {
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.3));
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  font-weight: 600;
+  opacity: 0.8;
+}
+td.num {
+  text-align: right;
+  opacity: 0.7;
+}
+.tag {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.8em;
+  font-family: var(--vscode-font-family);
+  background: var(--vscode-badge-background, rgba(128, 128, 128, 0.25));
+  color: var(--vscode-badge-foreground, inherit);
+}
+.tag.pk {
+  background: var(--vscode-charts-yellow, #cca700);
+  color: #1e1e1e;
+}
+.tag.fk {
+  background: var(--vscode-charts-blue, #3794ff);
+  color: #fff;
+}
+pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  white-space: pre-wrap;
+  overflow: auto;
+}
+button {
+  font: inherit;
+  font-weight: 400;
+  padding: 1px 10px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2));
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}

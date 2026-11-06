@@ -6,10 +6,11 @@ import type { DbSession } from './driver/session';
 import { driverFor } from './driver/registry';
 import { ConnectionStore } from './connectionStore';
 import { ConsoleStore, ConsoleSaved } from './consoleStore';
+import { HistoryStore } from './historyStore';
 import { Sessions } from './sessions';
 import { Statement, StatementInfo, classify, changesData } from './sql/statements';
 import { BindInput, bindValuesFor, toDriverSql } from './sql/binds';
-import { MAX_ROWS_LIMIT, ResultView } from './ui/resultView';
+import { MAX_ROWS_LIMIT, ResultData, ResultView } from './ui/resultView';
 import { FormActions, FormDialog, DialogMessage } from './ui/formDialog';
 
 /** 콘솔 화면(Webview 패널)의 종류 — package.json 의 단축키 조건(activeWebviewPanelId)과 같아야 한다 */
@@ -35,16 +36,18 @@ type FromWebview =
   | { type: 'connect' }
   | { type: 'more'; resultId: number; all?: boolean }
   | { type: 'limits'; pageSize: number; maxRows: number }
-  | { type: 'toPanel'; resultId: number }
+  | { type: 'toPanel'; resultId: number; data: ResultData }
   | { type: 'copy'; text: string }
-  | { type: 'copyInsert'; resultId: number }
-  | { type: 'csv'; resultId: number }
+  | { type: 'copyInsert'; data: ResultData }
+  | { type: 'csv'; data: ResultData }
   | { type: 'serverOutput'; on: boolean }
+  | { type: 'needColumns'; name: string }
+  | { type: 'history' }
   | DialogMessage;
 
 /** 쿼리 아래에 붙는 결과 하나 (화면이 그린다) */
 type Inline =
-  | { status: 'rows'; resultId: number; columns: { name: string; type: string; numeric: boolean }[]; rows: (string | null)[][]; done: boolean; capped: boolean; ms: number; output?: string[] }
+  | { status: 'rows'; sql: string; resultId: number; columns: { name: string; type: string; numeric: boolean }[]; rows: (string | null)[][]; done: boolean; capped: boolean; ms: number; output?: string[] }
   | { status: 'done'; text: string; ms: number; output?: string[] }
   | { status: 'error'; text: string; output?: string[] }
   | { status: 'plan'; lines: string[]; ms: number }
@@ -55,6 +58,7 @@ export interface ConsoleDeps {
   context: vscode.ExtensionContext;
   store: ConnectionStore;
   consoles: ConsoleStore;
+  history: HistoryStore;
   sessions: Sessions;
   results: ResultView;
   formActions: FormActions;
@@ -64,6 +68,8 @@ export interface ConsoleDeps {
   pickConnection(title: string): Promise<DbConnectionConfig | undefined>;
   /** 그 연결의 테이블 이름들 (자동 완성용). 모르면 [] */
   tableNames(connectionId: string): string[];
+  /** 그 테이블(이름 또는 OWNER.이름)의 칸 이름들 (자동 완성용). 모르면 [] */
+  columnNames(connectionId: string, name: string): Promise<string[]>;
 }
 
 /** 콘솔 탭 하나 (연결 하나에 하나. 연결을 아직 정하지 않은 빈 콘솔도 있다 — 연결 추가 팝업을 띄우는 자리) */
@@ -301,7 +307,7 @@ export class DbConsole implements vscode.Disposable {
   }
 
   /** 단축키·명령: 보고 있는 콘솔에서 실행 / 실행계획 / 지금 문장 고르기 */
-  trigger(what: 'run' | 'explain' | 'selectStatement') {
+  trigger(what: 'run' | 'explain' | 'selectStatement' | 'format') {
     const tab = this.activeTab();
     if (tab) this.post(tab, { type: 'do', what });
   }
@@ -359,14 +365,15 @@ export class DbConsole implements vscode.Disposable {
         }
         return;
       case 'toPanel':
-        await this.deps.results.showTab(m.resultId);
+        // 쿼리 아래 화면이 가진 데이터를 쓴다: 패널에서 지워진 앞 결과도 볼 수 있게
+        await this.deps.results.showData(m.resultId, m.data);
         return;
       case 'copy':
         await vscode.env.clipboard.writeText(m.text);
         vscode.window.setStatusBarMessage('복사했습니다', 2000);
         return;
       case 'copyInsert':
-        await this.deps.results.copyAsInsert(m.resultId);
+        await this.deps.results.copyAsInsert(m.data);
         return;
       case 'limits': {
         // 도구 줄의 행 수 칸 → 설정 (모든 콘솔·패널에 같이 적용)
@@ -376,8 +383,18 @@ export class DbConsole implements vscode.Disposable {
         return;
       }
       case 'csv':
-        await this.deps.results.exportCsv(m.resultId);
+        await this.deps.results.exportCsv(m.data);
         return;
+      case 'history': {
+        const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
+        if (cfg) await this.showHistory(cfg);
+        return;
+      }
+      case 'needColumns': {
+        const names = tab.connectionId ? await this.deps.columnNames(tab.connectionId, m.name).catch(() => []) : [];
+        this.post(tab, { type: 'columns', name: m.name, columns: names });
+        return;
+      }
       case 'serverOutput':
         tab.serverOutput = m.on;
         await this.syncServerOutput(tab);
@@ -490,6 +507,7 @@ export class DbConsole implements vscode.Disposable {
     const line = st.line + (off !== undefined ? st.sql.slice(0, off).split('\n').length - 1 : 0);
     const text = wasCancel ? '취소했습니다' : `${errors.explain(e)} (${line}번째 줄)`;
     this.deps.results.addLog({ kind: wasCancel ? 'info' : 'error', text, sql: firstLine(st.sql), connectionName: cfg.name });
+    void this.deps.history.add(cfg.id, { sql: st.sql, at: Date.now(), summary: text, ok: false });
     this.logOutput(cfg, output);
     this.inline(tab, st.key, wasCancel ? { status: 'cancel', text } : { status: 'error', text, output });
     if (!wasCancel && !lost && off !== undefined) this.post(tab, { type: 'cursor', pos: st.start + off });
@@ -510,9 +528,11 @@ export class DbConsole implements vscode.Disposable {
       this.owners.set(resultId, tab);
       const n = r.page.rows.length.toLocaleString('ko-KR');
       results.addLog({ kind: 'ok', text: `${n}행${r.page.done ? '' : ' (더 있음)'} · ${seconds(r.ms)}`, sql, connectionName: cfg.name });
+      void this.deps.history.add(cfg.id, { sql: st.sql, at: Date.now(), ms: r.ms, summary: `${n}행${r.page.done ? '' : ' 이상'}`, ok: true });
       if (info.forUpdate) addDirty(); // 행을 잠갔다 → 커밋·롤백으로 풀어야 한다
       this.inline(tab, st.key, {
         status: 'rows',
+        sql: st.sql,
         resultId,
         columns: r.columns,
         rows: r.page.rows,
@@ -536,6 +556,7 @@ export class DbConsole implements vscode.Disposable {
           : '실행됨';
     const pending = this.isDirty(cfg.id) && info.kind !== 'tx' ? ' · 아직 커밋하지 않음' : '';
     results.addLog({ kind: 'ok', text: `${what} · ${seconds(r.ms)}${pending}`, sql, connectionName: cfg.name });
+    void this.deps.history.add(cfg.id, { sql: st.sql, at: Date.now(), ms: r.ms, summary: what, ok: true });
     this.inline(tab, st.key, { status: 'done', text: `${what}${pending}`, ms: r.ms, output });
   }
 
@@ -618,6 +639,57 @@ export class DbConsole implements vscode.Disposable {
     }
   }
 
+  /**
+   * 실행 기록: 최근 것부터, 글로 찾기(SQL 전체에서). 고르면 콘솔 끝에 넣고, ▶ 버튼은 넣고 바로 실행
+   */
+  async showHistory(cfg?: DbConnectionConfig) {
+    cfg ??= this.activeConfig() ?? (await this.deps.pickConnection('실행 기록을 볼 DB 연결'));
+    if (!cfg) return;
+    const list = await this.deps.history.list(cfg.id);
+    if (!list.length) {
+      void vscode.window.showInformationMessage(`${cfg.name} 에서 실행한 기록이 아직 없습니다.`);
+      return;
+    }
+    const runBtn: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('play'), tooltip: '콘솔에 넣고 바로 실행' };
+    const clearBtn: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('clear-all'), tooltip: '기록 지우기' };
+    type Item = vscode.QuickPickItem & { sql: string };
+    const when = (at: number) => {
+      const d = new Date(at);
+      const today = new Date().toDateString() === d.toDateString();
+      return today ? d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+    const qp = vscode.window.createQuickPick<Item>();
+    qp.title = `${cfg.name} — 실행 기록 (${list.length.toLocaleString('ko-KR')}개)`;
+    qp.placeholder = 'SQL 의 글로 찾기 · Enter = 콘솔에 넣기 · ▶ = 넣고 실행';
+    qp.matchOnDetail = true;
+    qp.buttons = [clearBtn];
+    qp.items = list.map((e) => ({
+      label: `${e.ok ? '' : '$(error) '}${firstLine(e.sql)}`,
+      description: `${when(e.at)} · ${e.summary}${e.ms !== undefined ? ` · ${seconds(e.ms)}` : ''}`,
+      detail: e.sql.length > 400 ? e.sql.replace(/\s+/g, ' ').slice(0, 400) + '…' : e.sql.replace(/\s+/g, ' '),
+      sql: e.sql,
+      buttons: [runBtn],
+    }));
+    const target = cfg;
+    const put = (sql: string, run: boolean) => {
+      qp.hide();
+      this.insertText(target.id, sql.trimEnd() + ';', { asBlock: true, run });
+    };
+    qp.onDidAccept(() => {
+      const it = qp.selectedItems[0];
+      if (it) put(it.sql, false);
+    });
+    qp.onDidTriggerItemButton((e) => put(e.item.sql, true));
+    qp.onDidTriggerButton(async () => {
+      const yes = '지우기';
+      if ((await vscode.window.showWarningMessage(`${target.name} 의 실행 기록을 모두 지울까요?`, { modal: true }, yes)) !== yes) return;
+      await this.deps.history.clear(target.id);
+      qp.hide();
+    });
+    qp.onDidHide(() => qp.dispose());
+    qp.show();
+  }
+
   /** 명령 팔레트에서 부른 커밋·롤백: 보고 있는 콘솔의 연결 */
   async commit() {
     const cfg = this.activeConfig();
@@ -677,6 +749,7 @@ export class DbConsole implements vscode.Disposable {
   <button type="button" id="explain" title="커서가 있는 문장의 실행계획 (실제로 실행하지는 않습니다)">
     <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 1.5 V10.5 M2 4 H6 M2 8.5 H6"/><rect x="6.5" y="2.5" width="4" height="3"/><rect x="6.5" y="7" width="4" height="3"/></svg>실행계획
   </button>
+  <button type="button" id="history" title="이 연결에서 실행한 쿼리 기록 (찾아서 다시 넣기·실행)">기록</button>
   <span id="hint" class="hint" role="status"></span>
   <span class="spacer"></span>
   <label class="check hidden" id="outputBox" title="DBMS_OUTPUT.PUT_LINE 으로 찍은 줄을 결과와 함께 보여 줍니다"><input type="checkbox" id="serverOutput"> 서버 출력</label>

@@ -77,6 +77,11 @@
         "category": "MyBatis"
       },
       {
+        "command": "devBoost.mybatisRunner.runInConsole",
+        "title": "DB 콘솔에서 실행 (커서 위치 쿼리, 마지막 입력값)",
+        "category": "MyBatis"
+      },
+      {
         "command": "devBoost.dbSchema.open",
         "title": "스키마 가져오기 · 테이블 정의서",
         "category": "DB 스키마",
@@ -236,6 +241,28 @@
         "command": "devBoost.dbConsole.selectStatement",
         "title": "지금 문장 고르기",
         "category": "DB 콘솔"
+      },
+      {
+        "command": "devBoost.dbConsole.format",
+        "title": "SQL 정렬",
+        "category": "DB 콘솔"
+      },
+      {
+        "command": "devBoost.dbConsole.history",
+        "title": "실행 기록",
+        "category": "DB 콘솔",
+        "icon": "$(history)"
+      },
+      {
+        "command": "devBoost.dbConsole.tableInfo",
+        "title": "테이블 정보",
+        "category": "DB 콘솔",
+        "icon": "$(info)"
+      },
+      {
+        "command": "devBoost.dbConsole.runSql",
+        "title": "SQL 을 콘솔에서 실행",
+        "category": "DB 콘솔"
       }
     ],
     "viewsContainers": {
@@ -318,6 +345,10 @@
         {
           "command": "devBoost.mybatisRunner.copy",
           "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+        },
+        {
+          "command": "devBoost.mybatisRunner.runInConsole",
+          "when": "config.devBoost.mybatisRunner.enabled && config.devBoost.dbConsole.enabled && resourceExtname == .xml"
         },
         {
           "command": "devBoost.dbSchema.open",
@@ -434,6 +465,22 @@
         {
           "command": "devBoost.dbConsole.selectStatement",
           "when": "config.devBoost.dbConsole.enabled && activeWebviewPanelId == 'devBoostDbConsole'"
+        },
+        {
+          "command": "devBoost.dbConsole.format",
+          "when": "config.devBoost.dbConsole.enabled && activeWebviewPanelId == 'devBoostDbConsole'"
+        },
+        {
+          "command": "devBoost.dbConsole.history",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.tableInfo",
+          "when": "false"
+        },
+        {
+          "command": "devBoost.dbConsole.runSql",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -445,6 +492,11 @@
         {
           "command": "devBoost.mybatisRunner.open",
           "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml",
+          "group": "navigation@98"
+        },
+        {
+          "command": "devBoost.mybatisRunner.runInConsole",
+          "when": "config.devBoost.mybatisRunner.enabled && config.devBoost.dbConsole.enabled && resourceExtname == .xml",
           "group": "navigation@98"
         },
         {
@@ -570,6 +622,21 @@
           "command": "devBoost.dbConsole.joinRun",
           "when": "view == devBoost.dbConsole.connections && viewItem == dbTable && listMultiSelection",
           "group": "1_join@2"
+        },
+        {
+          "command": "devBoost.dbConsole.history",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\./",
+          "group": "3_tree@4"
+        },
+        {
+          "command": "devBoost.dbConsole.tableInfo",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbTable",
+          "group": "inline@0"
+        },
+        {
+          "command": "devBoost.dbConsole.tableInfo",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbTable",
+          "group": "2_info@1"
         }
       ],
       "webview/context": [
@@ -587,6 +654,11 @@
           "command": "devBoost.dbConsole.selectStatement",
           "when": "webviewId == 'devBoostDbConsole' && webviewSection == 'editor'",
           "group": "1_select@1"
+        },
+        {
+          "command": "devBoost.dbConsole.format",
+          "when": "webviewId == 'devBoostDbConsole' && webviewSection == 'editor'",
+          "group": "1_select@2"
         }
       ]
     },
@@ -1037,6 +1109,7 @@
     "codemirror": "^6.0.2",
     "esbuild": "^0.28.2",
     "oracledb": "^26.0.0",
+    "sql-formatter": "^15.9.0",
     "typescript": "^5.4.0",
     "vue": "^3.5.44"
   },

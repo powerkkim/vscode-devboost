@@ -6,10 +6,12 @@ import type { DbSession } from './driver/session';
 import { driverFor, describeConnection } from './driver/registry';
 import { ConnectionStore } from './connectionStore';
 import { ConsoleStore } from './consoleStore';
+import { HistoryStore } from './historyStore';
 import { Sessions } from './sessions';
 import { ConnectionItem, ConnectionTree, TableItem, TreeNode, CONNECTIONS_VIEW_ID } from './ui/connectionTree';
 import { ResultView, RESULTS_VIEW_ID } from './ui/resultView';
 import { FormActions } from './ui/formDialog';
+import { TableInfoPanel } from './ui/tableInfo';
 import { DbConsole } from './console';
 import { parseNameFilter } from './sql/nameFilter';
 import { JoinTable, buildCount, buildJoin, buildSelect } from './sql/joinBuilder';
@@ -27,6 +29,7 @@ export const dbConsole: Feature = {
   start(context) {
     const store = new ConnectionStore(context);
     const consoles = new ConsoleStore(context);
+    const history = new HistoryStore(context);
     const sessions = new Sessions();
     /** 저장하지 않는 비밀번호: VS Code 를 닫을 때까지만 기억 (접속할 때마다 다시 묻지 않게) */
     const typed = new Map<string, string>();
@@ -83,6 +86,33 @@ export const dbConsole: Feature = {
         p.catch(() => c.columns.delete(table));
       }
       return p;
+    };
+
+    /**
+     * 쿼리에 쓴 이름 → 실제 테이블 (스키마·이름). 대소문자를 가리지 않고 테이블·뷰·시노님에서 찾는다.
+     * OWNER.이름 이면 그 스키마에서. 시노님이면 가리키는 테이블로
+     */
+    const resolveTable = async (id: string, name: string): Promise<{ owner: string; name: string } | undefined> => {
+      const parts = name.replace(/"/g, '').split('.');
+      const owner = parts.length > 1 ? parts[0] : ownerOf(id);
+      const want = parts[parts.length - 1];
+      if (!owner) return undefined;
+      const findIn = async (o: string) => {
+        const objs = await objectsOf(id, o).catch(() => undefined);
+        if (!objs) return undefined;
+        const eq = (n: string) => n.toUpperCase() === want.toUpperCase();
+        const hit = [...objs.tables, ...objs.views].find(eq);
+        if (hit) return { owner: o, name: hit };
+        const syn = objs.synonyms.find((x) => eq(x.name));
+        return syn ? { owner: syn.targetOwner, name: syn.targetName } : undefined;
+      };
+      // 대소문자를 DB가 저장한 대로 맞춘다 (Oracle 대문자, PostgreSQL 소문자)
+      const owners = [owner, owner.toUpperCase(), owner.toLowerCase()].filter((o, i, a) => a.indexOf(o) === i);
+      for (const o of owners) {
+        const r = await findIn(o);
+        if (r) return r;
+      }
+      return undefined;
     };
 
     const tree = new ConnectionTree(store, sessions, {
@@ -230,6 +260,7 @@ export const dbConsole: Feature = {
       context,
       store,
       consoles,
+      history,
       sessions,
       results,
       formActions,
@@ -239,6 +270,10 @@ export const dbConsole: Feature = {
       },
       pickConnection: (title) => pick(undefined, title),
       tableNames: (id) => completion.get(id) ?? [],
+      columnNames: async (id, name) => {
+        const t = await resolveTable(id, name);
+        return t ? (await columnsOf(id, t.owner, t.name)).map((c) => c.name) : [];
+      },
     });
 
     // ── 트리에서 고른 테이블로 쿼리 만들기 ──
@@ -316,6 +351,8 @@ export const dbConsole: Feature = {
       cacheWatcher,
       results,
       queryConsole,
+      history,
+      { dispose: () => TableInfoPanel.closeAll() },
       vscode.window.registerWebviewViewProvider(RESULTS_VIEW_ID, results, { webviewOptions: { retainContextWhenHidden: true } }),
 
       // ── 연결 ──
@@ -338,6 +375,7 @@ export const dbConsole: Feature = {
         typed.delete(cfg.id);
         await store.remove(cfg.id);
         await consoles.remove(cfg.id);
+        await history.remove(cfg.id);
       }),
 
       cmd('testConnection', async (item?: TreeNode) => {
@@ -426,6 +464,38 @@ export const dbConsole: Feature = {
       cmd('joinRun', (item?: TreeNode, items?: TreeNode[]) => makeQuery(item, items, 'join', true)),
       cmd('countRun', (item?: TreeNode, items?: TreeNode[]) => makeQuery(item, items, 'count', true)),
 
+      cmd('tableInfo', async (item?: TreeNode) => {
+        if (!(item instanceof TableItem)) {
+          void vscode.window.showInformationMessage('DB 연결 목록에서 테이블을 오른쪽 클릭하세요.');
+          return;
+        }
+        const cfg = store.get(item.connectionId);
+        const s = sessions.get(item.connectionId);
+        if (!cfg || !s) return;
+        const { owner, name } = item.target;
+        try {
+          const data = await vscode.window.withProgress({ location: { viewId: CONNECTIONS_VIEW_ID } }, async () => {
+            const schema = await s.use((c) => c.meta.collect(owner, [name]));
+            const referencedBy = await s.use((c) => c.meta.referencedBy(owner, name)).catch(() => []);
+            const kind = schema.tables.find((t) => t.name === name)?.kind ?? (item.kind === 'views' ? 'view' : 'table');
+            let ddl: string | undefined;
+            let ddlError: string | undefined;
+            const get = s.connection.meta.ddl;
+            if (get) {
+              try {
+                ddl = await s.use((c) => c.meta.ddl!(owner, name, kind));
+              } catch (e) {
+                ddlError = `DDL 을 가져오지 못했습니다: ${s.driver.errors.explain(e)}`;
+              }
+            } else ddlError = '이 DB에서는 DDL 을 가져올 수 없습니다.';
+            return { connectionName: cfg.name, owner, table: name, schema, referencedBy, ddl, ddlError };
+          });
+          TableInfoPanel.show(context, `${cfg.id}/${owner}/${name}`, data);
+        } catch (e) {
+          void vscode.window.showErrorMessage(`테이블 정보를 가져오지 못했습니다: ${s.driver.errors.explain(e)}`);
+        }
+      }),
+
       // ── 콘솔 ──
       cmd('openConsole', async (item?: TreeNode) => {
         const cfg = await pick(item, '콘솔을 열 DB 연결');
@@ -434,9 +504,34 @@ export const dbConsole: Feature = {
       cmd('run', () => queryConsole.trigger('run')),
       cmd('explain', () => queryConsole.trigger('explain')),
       cmd('selectStatement', () => queryConsole.trigger('selectStatement')),
+      cmd('format', () => queryConsole.trigger('format')),
+      cmd('history', (item?: TreeNode) => queryConsole.showHistory(item instanceof ConnectionItem ? store.get(item.config.id) : undefined)),
       cmd('commit', () => queryConsole.commit()),
       cmd('rollback', () => queryConsole.rollback()),
       cmd('insertName', (connectionId: string, name: string) => queryConsole.insertText(connectionId, name)),
+
+      /**
+       * 다른 기능(MyBatis SQL 실행 등)이 만든 SQL 을 콘솔에 넣고 실행한다.
+       * 연결: 지난번에 고른 연결(작업 폴더마다 기억), 연결이 하나면 그것, 아니면 고르게 한다
+       */
+      cmd('runSql', async (sqlText: string, opts?: { run?: boolean; pick?: boolean }) => {
+        if (!sqlText?.trim()) return;
+        const list = store.list();
+        if (!list.length) {
+          await pick(undefined, '');
+          return;
+        }
+        const KEY = 'devBoost.dbConsole.runSqlTarget';
+        const last = context.workspaceState.get<string>(KEY);
+        let cfg = !opts?.pick ? (store.get(last ?? '') ?? (list.length === 1 ? list[0] : undefined)) : undefined;
+        if (!cfg) {
+          cfg = await pick(undefined, 'SQL 을 실행할 DB 연결');
+          if (!cfg) return;
+        }
+        await context.workspaceState.update(KEY, cfg.id);
+        const text = /;\s*$/.test(sqlText.trim()) ? sqlText.trim() : sqlText.trim() + ';';
+        queryConsole.insertText(cfg.id, text, { asBlock: true, run: opts?.run !== false });
+      }),
     ];
   },
 };

@@ -139,7 +139,7 @@ function renderStatus() {
   $status.appendChild(linkButton('복사', () => vscode.postMessage({ type: 'copy', text: toTsv(t, order(), false) })));
   $status.appendChild(linkButton('헤더 포함 복사', () => vscode.postMessage({ type: 'copy', text: toTsv(t, order(), true) })));
   $status.appendChild(linkButton('INSERT문으로 복사', () => vscode.postMessage({ type: 'copyInsert', id: t.id, order: order() })));
-  $status.appendChild(linkButton('CSV 내보내기', () => vscode.postMessage({ type: 'csv', id: t.id })));
+  $status.appendChild(linkButton('CSV 내보내기', () => vscode.postMessage({ type: 'csv', id: t.id, order: order() })));
   $status.appendChild(
     linkButton(t.pinned ? '고정 해제' : '탭 고정', () => {
       t.pinned = !t.pinned;

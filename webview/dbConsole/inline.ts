@@ -11,6 +11,8 @@ export interface InlineData {
   lines?: string[];
   text?: string;
   resultId?: number;
+  /** 실행한 문장 (INSERT 복사 때 테이블 이름을 짐작) */
+  sql?: string;
   columns?: Col[];
   rows?: Cell[][];
   done?: boolean;
@@ -25,12 +27,20 @@ export interface InlineData {
   sort?: Sort;
 }
 
+/** 버튼이 확장에 넘기는 결과 한 벌 (화면에 있는 데이터, 정렬한 순서대로) */
+export interface ResultData {
+  sql: string;
+  columns: Col[];
+  rows: Cell[][];
+  done: boolean;
+}
+
 export interface InlineActions {
   more(resultId: number, all: boolean): void;
-  toPanel(resultId: number): void;
+  toPanel(resultId: number | undefined, data: ResultData): void;
   copy(text: string): void;
-  copyInsert(resultId: number): void;
-  csv(resultId: number): void;
+  copyInsert(data: ResultData): void;
+  csv(data: ResultData): void;
   /** 한 번에 가져오는 행 수·최대 행 수 (버튼 글에 쓴다) */
   limits(): { pageSize: number; maxRows: number };
 }
@@ -86,6 +96,7 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
     case 'rows': {
       const rows = d.rows?.length ?? 0;
       const { pageSize, maxRows } = actions.limits();
+      // 다음 행은 DB 커서가 있어야 한다 → 가장 최근 실행 결과만 (앞 결과는 다음 실행 때 커서를 닫는다)
       const more = !d.done && !d.capped && !d.dropped;
       head.appendChild(el('span', 'ir-text', `${fmt(rows)}행${d.done ? '' : ' (더 있음)'}`));
       if (d.ms !== undefined) head.appendChild(el('span', 'ir-muted', secs(d.ms)));
@@ -100,17 +111,19 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
         head.appendChild(button('끝까지', `남은 행을 모두 가져옵니다 (최대 ${fmt(maxRows)}행)`, go(true), d.loading));
       }
       head.appendChild(button('복사', '결과를 복사합니다 (탭 구분 — 엑셀에 붙여 넣기)', () => actions.copy(toTsv(gridData(d), orderOf(d), false))));
-      head.appendChild(button('헤더 포함', '칸 이름까지 복사합니다', () => actions.copy(toTsv(gridData(d), orderOf(d), true))));
-      if (!d.dropped) {
-        head.appendChild(button('INSERT', 'INSERT 문으로 복사합니다', () => actions.copyInsert(d.resultId!)));
-        head.appendChild(button('CSV', 'CSV 파일로 내보냅니다 (가져온 행까지)', () => actions.csv(d.resultId!)));
-        head.appendChild(button('패널', '하단 패널 "DB 결과"에서 크게 봅니다', () => actions.toPanel(d.resultId!)));
-      }
       head.appendChild(
         button(d.collapsed ? '펼치기' : '접기', d.collapsed ? '표를 펼칩니다' : '표를 접습니다', () => {
           d.collapsed = !d.collapsed;
           refresh(view, d.key);
         })
+      );
+      head.appendChild(
+        menuButton([
+          ['헤더 포함 복사', () => actions.copy(toTsv(gridData(d), orderOf(d), true))],
+          ['INSERT 문으로 복사', () => actions.copyInsert(dataOf(d))],
+          ['CSV 내보내기', () => actions.csv(dataOf(d))],
+          ['패널에서 보기', () => actions.toPanel(d.resultId, dataOf(d))],
+        ])
       );
       head.appendChild(button('×', '이 결과를 닫습니다', close));
       if (d.capped) head.appendChild(el('span', 'ir-muted', `최대 ${fmt(maxRows)}행까지 가져왔습니다 (도구 줄의 최대 행 수로 늘릴 수 있습니다)`));
@@ -138,6 +151,37 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
 }
 
 const gridData = (d: InlineData) => ({ columns: d.columns ?? [], rows: d.rows ?? [] });
+/** 화면에 보이는 순서(정렬)대로의 결과 한 벌 */
+const dataOf = (d: InlineData): ResultData => {
+  const rows = d.rows ?? [];
+  return { sql: d.sql ?? '', columns: d.columns ?? [], rows: orderOf(d).map((i) => rows[i]), done: !!d.done };
+};
+
+/** ⋯ 버튼: 누르면 아래로 메뉴가 펼쳐진다. 고르거나 바깥을 누르면 닫힌다 */
+function menuButton(items: [string, () => void][]): HTMLElement {
+  const wrap = el('span', 'ir-menu');
+  const btn = button('⋯', '더 보기: 헤더 포함 복사 · INSERT 문 · CSV · 패널', () => {
+    const open = wrap.classList.toggle('open');
+    if (open) setTimeout(() => document.addEventListener('mousedown', closer, true));
+  });
+  const list = el('div', 'ir-menu-list');
+  const closer = (e: Event) => {
+    if (wrap.contains(e.target as Node)) return;
+    wrap.classList.remove('open');
+    document.removeEventListener('mousedown', closer, true);
+  };
+  for (const [label, run] of items) {
+    list.appendChild(
+      button(label, label, () => {
+        wrap.classList.remove('open');
+        document.removeEventListener('mousedown', closer, true);
+        run();
+      })
+    );
+  }
+  wrap.append(btn, list);
+  return wrap;
+}
 const orderOf = (d: InlineData) => grids.get(d.key)?.grid.order() ?? (d.rows ?? []).map((_, i) => i);
 
 /** 결과 표: 한 번 만들고, 행이 붙거나 정렬이 바뀌면 이어 그린다 */

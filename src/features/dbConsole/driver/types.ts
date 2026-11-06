@@ -1,6 +1,12 @@
 import type { DbConnectionConfig, TargetKind } from '../connection/config';
 import type { DialectRules } from '../sql/statements';
 import type { BindType, BindValue } from '../sql/binds';
+import type {
+  TableInfo as SchemaTable,
+  ColumnInfo as SchemaColumn,
+  ConstraintInfo as SchemaConstraint,
+  IndexInfo as SchemaIndex,
+} from '../../dbSchema/schema/types';
 
 /**
  * DB 콘솔이 DB 종류와 관계없이 쓰는 약속 (vscode 모듈에 의존하지 않는다).
@@ -87,6 +93,17 @@ export interface Relation {
   toColumns: string[];
 }
 
+/**
+ * 테이블들의 정의 (칸·주석·제약·인덱스). DB 스키마 기능(테이블 정의서)의 저장 규격과 같은 모양이라
+ * 테이블 정보 화면과 정의서 수집이 함께 쓴다
+ */
+export interface CollectedSchema {
+  tables: SchemaTable[];
+  columns: SchemaColumn[];
+  constraints: SchemaConstraint[];
+  indexes: SchemaIndex[];
+}
+
 /** 스키마(소유자)를 받는 딕셔너리 조회. 이름은 DB에 저장된 그대로(Oracle 은 대개 대문자) */
 export interface SchemaReader {
   /** 볼 수 있는 스키마들 (트리에서 스키마를 바꿀 때) */
@@ -97,6 +114,12 @@ export interface SchemaReader {
   primaryKeys(owner: string, tables: string[]): Promise<Record<string, string[]>>;
   /** 주어진 테이블들 사이의 참조 관계 */
   relations(owner: string, tables: string[]): Promise<Relation[]>;
+  /** 테이블·뷰들의 정의 (칸·주석·기본값·PK·UK·FK·인덱스) */
+  collect(owner: string, tables: string[]): Promise<CollectedSchema>;
+  /** 이 테이블을 참조하는 다른 테이블 (같은 스키마의 FK) */
+  referencedBy(owner: string, table: string): Promise<{ table: string; constraint: string; columns: string[] }[]>;
+  /** 테이블·뷰를 만드는 DDL (그 DB가 알려 줄 때만. 권한이 없으면 오류) */
+  ddl?(owner: string, name: string, kind: 'table' | 'view'): Promise<string>;
 }
 
 // ───────── 한 DB에만 있는 기능 ─────────
