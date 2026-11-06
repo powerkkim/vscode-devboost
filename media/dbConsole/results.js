@@ -39,7 +39,7 @@
       });
       $tabs.appendChild(b);
     };
-    for (const t of tabs) add(t.id, t.title, t.sql);
+    for (const t of tabs) add(t.id, (t.pinned ? '◆ ' : '') + t.title, t.sql + (t.pinned ? '\n\n(고정됨: 다음 실행 때 지우지 않습니다)' : ''));
     if (plan) add('plan', '실행계획', plan.sql);
     add('log', '메시지');
   }
@@ -165,6 +165,14 @@
     if (t.capped) $status.appendChild(el('span', '', `화면에는 ${fmt(t.rows.length)}행까지만 싣습니다. 조건을 좁혀 다시 실행하세요.`));
     if (failed[t.id]) $status.appendChild(el('span', 'fail', failed[t.id]));
     $status.appendChild(el('span', 'spacer'));
+    $status.appendChild(
+      linkButton(t.pinned ? '고정 해제' : '탭 고정', () => {
+        t.pinned = !t.pinned;
+        vscode.postMessage({ type: 'pin', id: t.id, pinned: t.pinned });
+        render();
+      })
+    );
+    $status.appendChild(linkButton('탭 닫기', () => vscode.postMessage({ type: 'close', id: t.id })));
     $status.appendChild(linkButton('결과 복사', () => vscode.postMessage({ type: 'copy', text: tsv(t, false) })));
     $status.appendChild(linkButton('헤더 포함 복사', () => vscode.postMessage({ type: 'copy', text: tsv(t, true) })));
     $status.appendChild(linkButton('INSERT문으로 복사', () => vscode.postMessage({ type: 'copyInsert', id: t.id, order: order(t) })));
@@ -219,6 +227,31 @@
         render();
         $body.scrollTop = top; // 보던 자리 유지
       }
+    } else if (m.type === 'tabAdded') {
+      tabs.push(m.tab);
+      if (m.activate) active = m.tab.id;
+      render();
+    } else if (m.type === 'tabsRemoved') {
+      tabs = tabs.filter((t) => !m.ids.includes(t.id));
+      for (const id of m.ids) {
+        delete sort[id];
+        delete loading[id];
+        delete failed[id];
+      }
+      render();
+    } else if (m.type === 'plan') {
+      plan = m.plan;
+      if (m.activate) active = 'plan';
+      render();
+    } else if (m.type === 'log') {
+      log.push(m.entry);
+      if (log.length > 300) log.splice(0, log.length - 300);
+      if (m.activate) active = 'log';
+      // 메시지 탭을 보고 있거나 새로 보여 줄 때만 다시 그린다 (결과 표를 보고 있으면 그대로)
+      if (active === 'log') render();
+    } else if (m.type === 'activate') {
+      active = m.active;
+      render();
     } else if (m.type === 'moreFailed') {
       delete loading[m.id];
       failed[m.id] = m.message;

@@ -6,14 +6,21 @@ import { basicSetup } from 'codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
-import { splitStatements, statementAt, type Statement } from '../../src/features/dbConsole/sql/statements';
+import { splitStatements, statementAt, type Statement, type DialectRules } from '../../src/features/dbConsole/sql/statements';
 import { bindNames, inferType, BIND_TYPES, type BindType } from '../../src/features/dbConsole/sql/binds';
+import { rulesOf } from '../../src/features/dbConsole/driver/dialects';
+import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped } from './inline';
+import { editingAssist, selectStatement } from './assist';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void };
 const vscode = acquireVsCodeApi();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const nonce = (document.querySelector('script[nonce]') as HTMLScriptElement | null)?.nonce ?? '';
 const light = document.body.classList.contains('vscode-light');
+/** 이 콘솔 연결의 DB 글 규칙 (문장 나누기·파라미터 찾기). init 에서 정해진다 */
+let rules: DialectRules = rulesOf(undefined);
+/** 결과를 보여 줄 곳: 쿼리 아래 + 패널 / 쿼리 아래 / 패널 */
+let resultsIn: 'both' | 'editor' | 'panel' = 'both';
 
 // ───────── SQL 편집기 ─────────
 const colors = light
@@ -45,6 +52,10 @@ const theme = EditorView.theme({
   '.cm-scroller': { fontFamily: 'var(--vscode-editor-font-family, Consolas, monospace)', fontSize: 'var(--vscode-editor-font-size, 14px)', lineHeight: '1.6' },
   '.cm-gutters': { backgroundColor: 'var(--vscode-editor-background)', color: 'var(--vscode-editorLineNumber-foreground, #858585)', border: 'none' },
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--vscode-editor-lineHighlightBackground, rgba(128,128,128,0.12))' },
+  // 선택 영역이 있으면 줄 강조를 끈다 (불투명한 줄 강조색이 선택을 가리지 않게)
+  '&.has-selection .cm-activeLine': { backgroundColor: 'transparent' },
+  // 커서가 있는 문장(여러 줄)의 왼쪽 띠: Ctrl+Enter 로 실행될 범위
+  '.cm-stmt': { boxShadow: 'inset 2px 0 0 var(--vscode-focusBorder, #007fd4)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-cursor': { borderLeftColor: 'var(--vscode-editorCursor-foreground, #aeafad)' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--vscode-editor-selectionBackground, #264f78)' },
@@ -67,8 +78,15 @@ const editor = new EditorView({
           { key: 'Mod-Enter', run: () => true },
         ])
       ),
+      editingAssist(() => rules),
       basicSetup,
       sqlLang.of(sqlWith([])),
+      inlineResults({
+        more: (resultId) => vscode.postMessage({ type: 'more', resultId }),
+        toPanel: (resultId) => vscode.postMessage({ type: 'toPanel', resultId }),
+        copy: (text) => vscode.postMessage({ type: 'copy', text }),
+        copyInsert: (resultId) => vscode.postMessage({ type: 'copyInsert', resultId }),
+      }),
       syntaxHighlighting(highlight),
       bindPlugin,
       theme,
@@ -101,7 +119,7 @@ const $confirm = $<HTMLInputElement>('confirmEach');
 const $hint = $('hint');
 
 function renderParams() {
-  const names = bindNames(text());
+  const names = bindNames(text(), rules);
   const focused = (document.activeElement as HTMLElement | null)?.dataset?.param;
   $params.textContent = '';
   if (!names.length) {
@@ -178,7 +196,7 @@ $confirm.addEventListener('change', () => {
 });
 $('addParam').addEventListener('click', () => {
   // 커서 자리에 :paramN 을 넣고 이름을 바로 고칠 수 있게 선택해 둔다
-  const used = new Set(bindNames(text()).map((n) => n.toLowerCase()));
+  const used = new Set(bindNames(text(), rules).map((n) => n.toLowerCase()));
   let n = 1;
   while (used.has(`param${n}`)) n++;
   const name = `param${n}`;
@@ -189,22 +207,25 @@ $('addParam').addEventListener('click', () => {
 
 // ───────── 실행 ─────────
 function hint(message: string, kind: '' | 'warn' = '') {
-  $hint.textContent = message || 'Ctrl+Enter 실행 · Ctrl+E 실행계획 · 커서가 있는 문장';
+  $hint.textContent = message || 'Ctrl+Enter 실행 · Ctrl+E 실행계획 · Shift+Alt+→ 문장 고르기';
   $hint.className = 'hint' + (kind ? ' ' + kind : '');
 }
 
 /** 실행할 문장들: 선택 영역이 있으면 그 안의 문장들, 없으면 커서가 있는 문장 */
-function targets(): (Statement & { line: number })[] {
+let runSeq = 0;
+/** 실행할 문장들: 선택 영역이 있으면 그 안의 문장들, 없으면 커서가 있는 문장. key = 쿼리 아래 결과를 붙일 표시 */
+function targets(): (Statement & { line: number; key: string })[] {
   const doc = text();
   const sel = editor.state.selection.main;
   let list: Statement[];
   if (sel.empty) {
-    const s = statementAt(doc, sel.head);
+    const s = statementAt(doc, sel.head, rules);
     list = s ? [s] : [];
   } else {
-    list = splitStatements(doc.slice(sel.from, sel.to)).map((s) => ({ ...s, start: s.start + sel.from, end: s.end + sel.from }));
+    list = splitStatements(doc.slice(sel.from, sel.to), rules).map((s) => ({ ...s, start: s.start + sel.from, end: s.end + sel.from }));
   }
-  return list.map((s) => ({ ...s, line: editor.state.doc.lineAt(s.start).number }));
+  const run = ++runSeq;
+  return list.map((s, i) => ({ ...s, line: editor.state.doc.lineAt(s.start).number, key: `${run}:${i}` }));
 }
 
 function start(what: 'run' | 'explain') {
@@ -213,7 +234,7 @@ function start(what: 'run' | 'explain') {
     hint('실행할 SQL 문장이 없습니다', 'warn');
     return;
   }
-  const names = [...new Set(list.flatMap((s) => bindNames(s.sql).map((n) => n.toLowerCase())))];
+  const names = [...new Set(list.flatMap((s) => bindNames(s.sql, rules).map((n) => n.toLowerCase())))];
   if (what === 'run' && confirmEach && names.length && !armed) {
     // 값 확인: 첫 파라미터 칸으로 보내고 한 번 더 누르면 실행
     armed = true;
@@ -228,6 +249,8 @@ function start(what: 'run' | 'explain') {
   hint('');
   clearTimeout(saveTimer);
   vscode.postMessage({ type: 'save', sql: text(), params, confirmEach });
+  // 쿼리 아래에 "실행 중…" 자리를 먼저 만든다 (확장이 결과로 채운다)
+  if (what === 'run' && resultsIn !== 'panel') addRunning(editor, list.map((s) => ({ key: s.key, pos: anchorOf(editor.state, s) })));
   vscode.postMessage({ type: what, statements: what === 'explain' ? list.slice(0, 1) : list, params });
 }
 $('run').addEventListener('click', () => start('run'));
@@ -235,6 +258,14 @@ $('explain').addEventListener('click', () => start('explain'));
 $('commit').addEventListener('click', () => vscode.postMessage({ type: 'commit' }));
 $('rollback').addEventListener('click', () => vscode.postMessage({ type: 'rollback' }));
 $('conn').addEventListener('click', () => vscode.postMessage({ type: 'connect' }));
+const $resultsIn = $<HTMLSelectElement>('resultsIn');
+$resultsIn.addEventListener('change', () => {
+  resultsIn = $resultsIn.value as typeof resultsIn;
+  vscode.postMessage({ type: 'resultsIn', where: resultsIn });
+  editor.focus();
+});
+const $serverOutput = $<HTMLInputElement>('serverOutput');
+$serverOutput.addEventListener('change', () => vscode.postMessage({ type: 'serverOutput', on: $serverOutput.checked }));
 
 // ───────── 연결 추가·수정 팝업 ─────────
 const $overlay = $('overlay');
@@ -319,6 +350,9 @@ window.addEventListener('message', (event) => {
   const m = event.data;
   switch (m.type) {
     case 'init':
+      rules = rulesOf(m.kind);
+      resultsIn = m.resultsIn ?? 'both';
+      $resultsIn.value = resultsIn;
       params = m.params ?? {};
       confirmEach = m.confirmEach ?? true;
       $confirm.checked = confirmEach;
@@ -338,6 +372,9 @@ window.addEventListener('message', (event) => {
       dirty.classList.toggle('hidden', !m.dirty);
       $('dirtyText').textContent = `커밋 안 한 변경 ${m.dirty}건`;
       for (const id of ['run', 'explain', 'commit', 'rollback']) $<HTMLButtonElement>(id).disabled = !m.name || !!m.busy;
+      // 한 DB에만 있는 기능은 그 DB 접속일 때만 보인다
+      $('outputBox').classList.toggle('hidden', !m.features?.serverOutput);
+      $serverOutput.checked = !!m.serverOutput;
       if (m.busy) hint('실행 중…');
       else if ($hint.textContent === '실행 중…') hint('');
       break;
@@ -346,13 +383,45 @@ window.addEventListener('message', (event) => {
       editor.dispatch({ effects: sqlLang.reconfigure(sqlWith(m.names ?? [])) });
       break;
     case 'do':
-      start(m.what); // 단축키(Ctrl+E 등)가 확장을 거쳐 온다
+      // 단축키(Ctrl+E 등)·오른쪽 클릭 메뉴가 확장을 거쳐 온다
+      if (m.what === 'selectStatement') selectStatement(editor, rules);
+      else start(m.what);
+      break;
+    case 'resultsIn':
+      resultsIn = m.where;
+      $resultsIn.value = resultsIn;
+      break;
+    case 'inline':
+      setResult(editor, m.key, m.result);
+      break;
+    case 'inlineAppend':
+      appendRows(editor, m.id, m.rows, m.done, m.capped);
+      break;
+    case 'inlineMoreFailed':
+      moreFailed(editor, m.resultId, m.message);
+      break;
+    case 'inlineDropped':
+      markDropped(editor, m.ids);
       break;
     case 'cursor':
       editor.dispatch({ selection: { anchor: Math.min(m.pos, editor.state.doc.length) }, scrollIntoView: true });
       editor.focus();
       break;
     case 'insert': {
+      if (m.asBlock) {
+        // 트리에서 만든 쿼리: 글 끝에 새 문단으로 넣고 골라 둔다 (run 이면 바로 실행 — 고른 영역의 문장들)
+        const doc = editor.state.doc;
+        const sep = doc.length === 0 ? '' : /\n\s*$/.test(doc.sliceString(Math.max(0, doc.length - 2))) ? '\n' : '\n\n';
+        const from = doc.length + sep.length;
+        editor.dispatch({
+          changes: { from: doc.length, insert: sep + m.text },
+          selection: { anchor: from, head: from + m.text.length },
+          scrollIntoView: true,
+        });
+        editor.focus();
+        if (m.run) start('run');
+        break;
+      }
       const { from, to } = editor.state.selection.main;
       editor.dispatch({ changes: { from, to, insert: m.text }, selection: { anchor: from + m.text.length } });
       editor.focus();

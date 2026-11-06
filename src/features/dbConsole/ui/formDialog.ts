@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
-import { DbConnectionConfig } from '../connection/connectString';
+import { DbConnectionConfig } from '../connection/config';
+import { driverOf } from '../driver/registry';
 import { ConnectionForm, emptyForm, formFromConfig, formToConfig, validateForm, fillFromHostInput } from '../connection/form';
 
 /** 팝업이 요청하는 일 (index.ts 가 채운다) */
@@ -67,7 +68,7 @@ export class FormDialog {
         // "JDBC URL로 입력" 칸: 그 글을 호스트 칸에 넣은 것처럼 읽어 나눠 채운다
         const filled = fillFromHostInput({ ...m.form, host: m.text });
         if (filled) this.post({ type: 'dlgFill', form: filled, fromUrl: true });
-        else this.post({ type: 'dlgUrlFailed', message: '읽지 못했습니다 (예: jdbc:oracle:thin:@//host:1521/service)' });
+        else this.post({ type: 'dlgUrlFailed', message: `읽지 못했습니다 (예: ${driverOf(m.form.kind).connect.jdbcExample})` });
         return undefined;
       }
       case 'dlgTest': {

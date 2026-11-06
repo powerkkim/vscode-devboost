@@ -1,4 +1,4 @@
-import { skipQuoted } from './statements';
+import { skipQuoted, DialectRules, GENERIC_RULES } from './statements';
 
 /**
  * SQL 안의 파라미터(바인드 변수)를 찾고 값을 드라이버에 넘길 모양으로 바꾼다.
@@ -26,11 +26,11 @@ const NAME_START = /[A-Za-z_]/;
 const NAME_REST = /[\w$#]/;
 const RESERVED = new Set(['new', 'old']); // 트리거 본문의 :new.col, :old.col
 
-export function findBinds(sql: string): Bind[] {
+export function findBinds(sql: string, rules: DialectRules = GENERIC_RULES): Bind[] {
   const out: Bind[] = [];
   let i = 0;
   while (i < sql.length) {
-    const q = skipQuoted(sql, i);
+    const q = skipQuoted(sql, i, rules);
     if (q >= 0) {
       i = q;
       continue;
@@ -61,10 +61,10 @@ export function findBinds(sql: string): Bind[] {
 }
 
 /** 파라미터 이름들 (나온 순서, 같은 이름은 한 번. 오라클처럼 대소문자를 구분하지 않는다) */
-export function bindNames(sql: string): string[] {
+export function bindNames(sql: string, rules: DialectRules = GENERIC_RULES): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const b of findBinds(sql)) {
+  for (const b of findBinds(sql, rules)) {
     const key = b.name.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
@@ -75,10 +75,10 @@ export function bindNames(sql: string): string[] {
 }
 
 /** 드라이버에 보낼 SQL: MyBatis 의 `#{name}` 을 `:name` 으로 바꾼다 (`:name` 은 그대로) */
-export function toDriverSql(sql: string): string {
+export function toDriverSql(sql: string, rules: DialectRules = GENERIC_RULES): string {
   let out = '';
   let at = 0;
-  for (const b of findBinds(sql)) {
+  for (const b of findBinds(sql, rules)) {
     out += sql.slice(at, b.start) + ':' + b.name;
     at = b.end;
   }
@@ -132,10 +132,10 @@ export interface BindInput {
  * 문장 하나에 넘길 파라미터 값. 그 문장에 나오는 이름만 넣는다 (드라이버는 남는 이름이 있으면 오류를 낸다).
  * 이름은 대소문자를 구분하지 않고 찾는다. 값이 없는 파라미터는 NULL
  */
-export function bindValuesFor(sql: string, inputs: Record<string, BindInput>): { ok: true; values: Record<string, { value: BindValue; type: BindType }> } | { ok: false; message: string } {
+export function bindValuesFor(sql: string, inputs: Record<string, BindInput>, rules: DialectRules = GENERIC_RULES): { ok: true; values: Record<string, { value: BindValue; type: BindType }> } | { ok: false; message: string } {
   const byLower = new Map(Object.entries(inputs).map(([k, v]) => [k.toLowerCase(), v]));
   const values: Record<string, { value: BindValue; type: BindType }> = {};
-  for (const name of bindNames(sql)) {
+  for (const name of bindNames(sql, rules)) {
     const input = byLower.get(name.toLowerCase()) ?? { value: '' };
     const type = input.type ?? inferType(input.value);
     const parsed = parseBindValue(input.value, type);

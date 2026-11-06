@@ -1,11 +1,27 @@
 /**
- * SQL 글을 문장으로 나누고 종류를 가린다 (vscode·oracledb 모듈에 의존하지 않아 단독 테스트 가능).
+ * SQL 글을 문장으로 나누고 종류를 가린다 (vscode·드라이버 모듈에 의존하지 않아 단독 테스트 가능 — 콘솔 화면에서도 쓴다).
  *
+ * DB마다 다른 규칙은 DialectRules 로 받는다 (drivers/<db>/dialect.ts). 규칙을 주지 않으면 어느 DB에나 맞는 기본만 쓴다.
  * 나누는 규칙 (SQL Developer·DataGrip 과 같은 관례):
- *  - 보통 문장은 `;` 또는 `/` 만 있는 줄에서 끝난다. 문자열·따옴표 이름·주석(한 줄 주석, 블록 주석) 안의 `;` 는 세지 않는다
- *  - PL/SQL 블록(BEGIN·DECLARE·CREATE PROCEDURE 등)은 안에 `;` 가 많으므로, `/` 만 있는 줄에서 끝난다 (없으면 글 끝까지)
- *  - DB 에 보낼 때: 보통 문장은 끝의 `;` 를 떼고, PL/SQL 블록은 `;` 를 그대로 둔다 (오라클이 그렇게 받는다)
+ *  - 보통 문장은 `;` 에서 끝난다 (slashTerminator 면 `/` 만 있는 줄에서도). 문자열·따옴표 이름·주석 안의 `;` 는 세지 않는다
+ *  - 블록(blockStart: Oracle 의 BEGIN·DECLARE·CREATE PROCEDURE 등)은 안에 `;` 가 많으므로 `/` 만 있는 줄에서 끝난다 (없으면 글 끝까지)
+ *  - DB 에 보낼 때: 보통 문장은 끝의 `;` 를 떼고, 블록은 `;` 를 그대로 둔다
  */
+
+/** DB마다 다른 SQL 글 규칙 */
+export interface DialectRules {
+  /** `/` 만 있는 줄이 문장 끝 */
+  slashTerminator: boolean;
+  /** q'[ … ]' 따옴표 (Oracle) */
+  qQuote: boolean;
+  /** 이 낱말로 시작하면 `/` 줄에서만 끝나는 블록 (소문자로 바꾼 글에 맞춘다) */
+  blockStart?: RegExp;
+  /** 저장 프로시저를 부르는 첫 낱말 (종류 판정: plsql) */
+  procedureCall?: string[];
+}
+
+/** 어느 DB에나 맞는 기본 규칙 */
+export const GENERIC_RULES: DialectRules = { slashTerminator: false, qQuote: false };
 
 export interface Statement {
   /** DB 에 보낼 글 */
@@ -28,8 +44,6 @@ export interface StatementInfo {
   forUpdate: boolean;
 }
 
-const BLOCK_START = /^(?:declare|begin)\b|^create\s+(?:or\s+replace\s+)?(?:(?:non)?editionable\s+)?(?:procedure|function|package|trigger|type|library)\b/i;
-
 /**
  * pos 에서 시작하는 "문장이 아닌 것"(공백·주석)을 건너뛴 자리.
  * 주석이 끝나지 않았으면 글 끝
@@ -50,7 +64,7 @@ function skipBlank(text: string, pos: number): number {
 }
 
 /** pos 가 문자열·따옴표 이름·주석의 시작이면 그 끝 다음 자리, 아니면 -1 */
-export function skipQuoted(text: string, pos: number): number {
+export function skipQuoted(text: string, pos: number, rules: DialectRules = GENERIC_RULES): number {
   const c = text[pos];
   if (c === "'" || c === '"') {
     for (let i = pos + 1; i < text.length; i++) {
@@ -61,7 +75,7 @@ export function skipQuoted(text: string, pos: number): number {
     return text.length;
   }
   // q'[ … ]' — 여는 글자에 맞는 닫는 글자 + ' 에서 끝난다
-  if ((c === 'q' || c === 'Q') && text[pos + 1] === "'" && pos + 2 < text.length && !/[\w$#]/.test(text[pos - 1] ?? ' ')) {
+  if (rules.qQuote && (c === 'q' || c === 'Q') && text[pos + 1] === "'" && pos + 2 < text.length && !/[\w$#]/.test(text[pos - 1] ?? ' ')) {
     const open = text[pos + 2];
     const close = { '[': ']', '(': ')', '{': '}', '<': '>' }[open] ?? open;
     const end = text.indexOf(close + "'", pos + 3);
@@ -85,7 +99,7 @@ function slashLineEnd(text: string, pos: number): number {
   return text.slice(pos, end).trim() === '/' ? (nl < 0 ? text.length : nl + 1) : -1;
 }
 
-export function splitStatements(text: string): Statement[] {
+export function splitStatements(text: string, rules: DialectRules = GENERIC_RULES): Statement[] {
   const out: Statement[] = [];
   let pos = 0;
   while (pos < text.length) {
@@ -97,7 +111,7 @@ export function splitStatements(text: string): Statement[] {
       continue;
     }
     const lineStart = text.lastIndexOf('\n', start - 1) + 1;
-    if (text[start] === '/' && text.slice(lineStart, start).trim() === '') {
+    if (rules.slashTerminator && text[start] === '/' && text.slice(lineStart, start).trim() === '') {
       const afterSlash = slashLineEnd(text, lineStart);
       if (afterSlash >= 0) {
         pos = afterSlash;
@@ -105,12 +119,12 @@ export function splitStatements(text: string): Statement[] {
       }
     }
 
-    const block = BLOCK_START.test(text.slice(start, start + 80));
+    const block = !!rules.blockStart?.test(text.slice(start, start + 80));
     let i = start;
     let end = text.length; // 끝 표시(;, /) 다음 자리
     let bodyEnd = text.length; // 보낼 글의 끝
     while (i < text.length) {
-      const q = skipQuoted(text, i);
+      const q = skipQuoted(text, i, rules);
       if (q >= 0) {
         i = q;
         continue;
@@ -129,7 +143,7 @@ export function splitStatements(text: string): Statement[] {
         bodyEnd = i;
         end = i + 1;
         break;
-      } else if (text[i] === '\n') {
+      } else if (rules.slashTerminator && text[i] === '\n') {
         // SQL*Plus 식으로 `;` 없이 `/` 줄로 끝낸 문장
         const after = slashLineEnd(text, i + 1);
         if (after >= 0) {
@@ -151,8 +165,8 @@ export function splitStatements(text: string): Statement[] {
  * 커서가 있는 문장. 문장 사이(공백·빈 줄)에 있으면: 같은 줄에서 끝난 앞 문장, 아니면 다음 문장, 그것도 없으면 마지막 문장.
  * 문장이 하나도 없으면 undefined
  */
-export function statementAt(text: string, offset: number): Statement | undefined {
-  const list = splitStatements(text);
+export function statementAt(text: string, offset: number, rules: DialectRules = GENERIC_RULES): Statement | undefined {
+  const list = splitStatements(text, rules);
   if (!list.length) return undefined;
   const inside = list.find((s) => offset >= s.start && offset <= s.end);
   if (inside) return inside;
@@ -162,11 +176,11 @@ export function statementAt(text: string, offset: number): Statement | undefined
 }
 
 /** 문자열·주석을 빼고 낱말만 남긴 글 (종류 판정용, 소문자) */
-function bare(sql: string): string {
+function bare(sql: string, rules: DialectRules): string {
   let out = '';
   let i = 0;
   while (i < sql.length) {
-    const q = skipQuoted(sql, i);
+    const q = skipQuoted(sql, i, rules);
     if (q >= 0) {
       out += ' ';
       i = q;
@@ -182,11 +196,23 @@ const DML = new Set(['insert', 'update', 'delete', 'merge']);
 const TX = new Set(['commit', 'rollback', 'savepoint']);
 const DDL = new Set(['create', 'alter', 'drop', 'truncate', 'rename', 'grant', 'revoke', 'comment', 'purge', 'flashback', 'analyze', 'audit', 'noaudit']);
 
-export function classify(sql: string): StatementInfo {
-  const text = bare(sql).trim();
+/** 괄호 밖(깊이 0)의 글만 남긴다 — 서브쿼리 안의 WHERE 를 바깥 문장의 WHERE 로 보지 않게 */
+function topLevel(text: string): string {
+  let depth = 0;
+  let out = '';
+  for (const ch of text) {
+    if (ch === '(') depth++;
+    out += depth > 0 ? ' ' : ch;
+    if (ch === ')' && depth > 0) depth--;
+  }
+  return out;
+}
+
+export function classify(sql: string, rules: DialectRules = GENERIC_RULES): StatementInfo {
+  const text = bare(sql, rules).trim();
   const verb = /^[a-z]+/.exec(text)?.[0] ?? '';
   const info: StatementInfo = { kind: 'other', verb: verb.toUpperCase(), noWhere: false, forUpdate: false };
-  if (BLOCK_START.test(text) || verb === 'call') {
+  if (rules.blockStart?.test(text) || (rules.procedureCall ?? ['call']).includes(verb)) {
     info.kind = 'plsql';
   } else if (QUERY.has(verb)) {
     // WITH … 로 시작해도 본문이 INSERT·UPDATE·DELETE·MERGE 일 수는 없다(오라클). 괄호로 시작한 SELECT 는 아래 other 로 가지 않게 따로 본다
@@ -194,7 +220,8 @@ export function classify(sql: string): StatementInfo {
     info.forUpdate = /\bfor\s+update\b/.test(text);
   } else if (DML.has(verb)) {
     info.kind = 'dml';
-    info.noWhere = (verb === 'update' || verb === 'delete') && !/\bwhere\b/.test(text);
+    // WHERE 는 괄호 밖에 있어야 한다: UPDATE t SET a = (SELECT … WHERE …) 는 테이블 전체를 바꾼다
+    info.noWhere = (verb === 'update' || verb === 'delete') && !/\bwhere\b/.test(topLevel(text));
   } else if (TX.has(verb)) {
     info.kind = 'tx';
   } else if (DDL.has(verb)) {

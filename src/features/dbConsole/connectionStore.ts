@@ -1,8 +1,17 @@
 import * as vscode from 'vscode';
-import { DbConnectionConfig } from './connection/connectString';
+import { DbConnectionConfig } from './connection/config';
 
 const LIST_KEY = 'devBoost.dbConsole.connections';
 const secretKey = (id: string) => `devBoost.dbConsole.password.${id}`;
+const viewKey = (id: string) => `devBoost.dbConsole.view.${id}`;
+
+/** 트리에서 보는 방법 (연결마다) */
+export interface TreeView {
+  /** 보는 스키마. 없으면 접속한 계정의 스키마 */
+  schema?: string;
+  /** 테이블 이름 필터 (sql/nameFilter.ts 의 글) */
+  filter?: string;
+}
 
 /**
  * 저장한 DB 연결 목록.
@@ -51,7 +60,16 @@ export class ConnectionStore implements vscode.Disposable {
       this.list().filter((c) => c.id !== id)
     );
     await this.context.secrets.delete(secretKey(id));
+    await this.context.globalState.update(viewKey(id), undefined);
     this.changed.fire();
+  }
+
+  view(id: string): TreeView {
+    return this.context.globalState.get<TreeView>(viewKey(id)) ?? {};
+  }
+
+  async setView(id: string, view: TreeView): Promise<void> {
+    await this.context.globalState.update(viewKey(id), view);
   }
 
   /** 저장된 비밀번호 (없으면 undefined) */

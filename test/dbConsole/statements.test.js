@@ -3,7 +3,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const st = require(path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole', 'sql', 'statements.js'));
+const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole');
+const st0 = require(path.join(OUT, 'sql', 'statements.js'));
+const { ORACLE_RULES } = require(path.join(OUT, 'drivers', 'oracle', 'dialect.js'));
+// Oracle 규칙으로 (/ 줄, PL/SQL 블록, q'[…]')
+const st = {
+  splitStatements: (t) => st0.splitStatements(t, ORACLE_RULES),
+  statementAt: (t, o) => st0.statementAt(t, o, ORACLE_RULES),
+  classify: (s) => st0.classify(s, ORACLE_RULES),
+  changesData: st0.changesData,
+};
 const sqls = (text) => st.splitStatements(text).map((s) => s.sql);
 
 test('; 로 나누고 끝의 ; 는 뗀다. 빈 문장·남은 ; 는 버린다', () => {
@@ -85,4 +94,20 @@ test('읽기 전용에서 막을 문장: 조회가 아닌 것과 SELECT FOR UPDA
   const blocked = (sql) => st.changesData(st.classify(sql));
   assert.equal(blocked('select * from t'), false);
   for (const s of ['update t set a=1 where b=2', 'drop table t', 'begin null; end;', 'commit', 'select * from t for update', 'explain plan for select 1 from dual']) assert.equal(blocked(s), true, s);
+});
+
+test('WHERE 확인: 괄호(서브쿼리) 안의 WHERE 는 바깥 문장의 WHERE 가 아니다', () => {
+  assert.equal(st.classify("update t set a = (select x from y where y.id = 1)").noWhere, true);
+  assert.equal(st.classify("delete from t where id in (select id from y)").noWhere, false);
+  assert.equal(st.classify("update t set a = (select max(x) from y where y.k = t.k) where t.k = 1").noWhere, false);
+  assert.equal(st.classify("update t set a = 'where'").noWhere, true); // 문자열 안의 where 도 아니다
+  assert.equal(st.classify("delete from t -- where id = 1").noWhere, true); // 주석 안의 where 도 아니다
+});
+
+test('규칙을 주지 않으면 어느 DB에나 맞는 기본만: / 줄·PL/SQL 블록·q 따옴표를 모른다', () => {
+  const plain = (t) => st0.splitStatements(t).map((s) => s.sql);
+  assert.deepEqual(plain('select 1;\n/\nselect 2'), ['select 1', '/\nselect 2']);
+  assert.deepEqual(plain('begin x; y; end;'), ['begin x', 'y', 'end']);
+  assert.equal(st0.classify('begin null; end;').kind, 'other');
+  assert.equal(st0.classify('call p()').kind, 'plsql');
 });

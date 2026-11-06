@@ -366,3 +366,131 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 결과 위치 고르기 (도구 줄) */
+label.select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.92em;
+}
+label.select select {
+  font-size: 1em;
+  padding: 1px 4px;
+}
+
+/* 쿼리 아래 결과 (편집기 안의 블록) */
+.ir-wrap {
+  padding: 4px 0 8px 2px;
+}
+.ir {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background, var(--bar));
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--vscode-editor-font-size, 14px) - 1px);
+  line-height: 1.45;
+  cursor: default;
+  white-space: normal;
+}
+.ir-error {
+  border-color: var(--err);
+}
+.ir-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  min-height: 24px;
+  flex-wrap: wrap;
+}
+.ir-text {
+  color: var(--vscode-foreground);
+}
+.ir-error .ir-text {
+  color: var(--err);
+}
+.ir-running .ir-text,
+.ir-skip .ir-text,
+.ir-cancel .ir-text,
+.ir-muted {
+  color: var(--muted);
+}
+.ir-done .ir-text {
+  color: var(--ok);
+}
+.ir-fail {
+  color: var(--err);
+}
+.ir-spacer {
+  flex: 1 1 auto;
+}
+button.ir-btn {
+  padding: 0 7px;
+  font-size: 0.92em;
+  line-height: 18px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+button.ir-btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.ir-table {
+  max-height: 280px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  outline: none;
+  user-select: none;
+}
+.ir-table table {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 1em;
+}
+.ir-table th,
+.ir-table td {
+  padding: 1px 8px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ir-table th {
+  position: sticky;
+  top: 0;
+  background: var(--vscode-editorWidget-background, var(--bar));
+  font-weight: 600;
+  cursor: pointer;
+}
+.ir-table .num {
+  text-align: right;
+}
+.ir-table .rownum {
+  color: var(--muted);
+  text-align: right;
+}
+.ir-table td.null {
+  color: var(--muted);
+  font-style: italic;
+}
+.ir-table td.picked {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+.ir-empty {
+  padding: 4px 8px;
+  color: var(--muted);
+}
+.ir-output {
+  margin: 0;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}

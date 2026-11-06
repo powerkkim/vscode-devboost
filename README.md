@@ -10,7 +10,7 @@
 | **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
-| **DB 콘솔** — Oracle(12.1 이상)에 직접 접속해 쿼리 실행, 결과는 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
+| **DB 콘솔** — Oracle(12.1 이상)에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
@@ -69,6 +69,19 @@
 | `devBoost.searchEverywhere.fileMasks` | 파일 타입 드롭다운 목록 |
 | `devBoost.searchEverywhere.doubleShift` | `Shift` 두 번으로 열기 |
 | `devBoost.searchEverywhere.showTiming` | 검색 창 하단에 단계별 소요 시간 표시 (출력 패널 "DevBoost"에도 기록) |
+
+### DB 콘솔
+
+1. 사이드바 DevBoost → `DB 연결` → `+` 로 연결 추가 (JDBC URL 을 붙여 넣으면 칸이 채워짐)
+2. 연결을 펼치면 테이블·뷰·시노님·칸. 연결 줄의 필터 버튼으로 이름 필터(`TB_PLM`, `*_HIST`, `!*_BAK`), 오른쪽 클릭 `스키마 바꾸기`
+3. 테이블을 `Ctrl`·`Shift` 로 여러 개 골라 오른쪽 클릭 → `SELECT 만들기/실행`, `행 수 세기`, `JOIN 만들기/실행` (참조 제약, 없으면 기본 키 칸 이름으로 이음)
+4. 콘솔에서 `Ctrl+Enter` 실행(커서 문장 또는 선택 영역), `Ctrl+E` 실행계획, `Shift+Alt+→` 문장 고르기. 결과는 문장 바로 아래와 하단 패널 `DB 결과` (도구 줄 `결과`에서 고름)
+
+| 설정 | 설명 |
+|---|---|
+| `devBoost.dbConsole.resultsIn` | 결과를 보여 줄 곳: `both`(쿼리 아래 + 패널, 기본) / `editor`(쿼리 아래) / `panel`(하단 패널) |
+| `devBoost.dbConsole.pageSize` | 한 번에 가져오는 행 수 (기본 500, 한 결과에 5,000행까지) |
+| `devBoost.dbConsole.checkConnectionSeconds` | 접속이 살아 있는지 서버에 다녀와 확인하는 간격(초, 기본 300, `0` 이면 끔) |
 
 ### DB 스키마 · 테이블 정의서
 

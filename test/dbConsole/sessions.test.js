@@ -5,8 +5,12 @@ const path = require('path');
 
 const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole');
 const { Sessions } = require(path.join(OUT, 'sessions.js'));
-const { OracleSession } = require(path.join(OUT, 'connection', 'oracleClient.js'));
-const health = require(path.join(OUT, 'connection', 'health.js'));
+const { DbSession } = require(path.join(OUT, 'driver', 'session.js'));
+const { oracleDriver } = require(path.join(OUT, 'drivers', 'oracle', 'index.js'));
+const health0 = require(path.join(OUT, 'connection', 'health.js'));
+const oerr = require(path.join(OUT, 'drivers', 'oracle', 'errors.js'));
+// 끊김 판정·이유는 드라이버(Oracle) 것을 쓴다
+const health = { checkAlive: (c, ms) => health0.checkAlive(c, ms, oerr.explainError), isConnectionLost: oerr.isConnectionLost };
 
 const cfg = (id) => ({ id, name: id, host: 'h', port: 1521, targetKind: 'service', target: 's', user: 'u', readOnly: false, production: false, savePassword: false });
 const err = (code, msg = 'x') => Object.assign(new Error(`${code}: ${msg}`), { code });
@@ -34,7 +38,7 @@ function make(options = {}) {
     ...options,
     open: async (c) => {
       conns[c.id] = fakeConnection();
-      return new OracleSession(conns[c.id], { version: '19', schema: 'U', dbName: 'D', ms: 1 });
+      return new DbSession(oracleDriver, conns[c.id], { product: 'Oracle', version: '19', schema: 'U', dbName: 'D', ms: 1 });
     },
   });
   const lost = [];

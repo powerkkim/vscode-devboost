@@ -4,7 +4,10 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole', 'sql');
-const b = require(path.join(OUT, 'binds.js'));
+const b0 = require(path.join(OUT, 'binds.js'));
+const { ORACLE_RULES } = require(path.join(OUT, '..', 'drivers', 'oracle', 'dialect.js'));
+// Oracle 규칙으로 (q'[…]' 안의 :이름 은 파라미터가 아니다)
+const b = { ...b0, bindNames: (s) => b0.bindNames(s, ORACLE_RULES), findBinds: (s) => b0.findBinds(s, ORACLE_RULES), toDriverSql: (s) => b0.toDriverSql(s, ORACLE_RULES), bindValuesFor: (s, i) => b0.bindValuesFor(s, i, ORACLE_RULES) };
 const ins = require(path.join(OUT, 'insertSql.js'));
 
 test('파라미터 찾기: :name 과 MyBatis #{name}, 나온 순서대로 한 번씩', () => {

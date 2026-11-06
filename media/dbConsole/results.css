@@ -219,3 +219,7 @@ td.selected {
   color: var(--muted);
   cursor: default;
 }
+.entry.output .text {
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  white-space: pre-wrap;
+}
