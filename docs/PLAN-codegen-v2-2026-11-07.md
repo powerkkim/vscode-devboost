@@ -1,9 +1,9 @@
-# 코드 생성 계획 v1 (2026-11-07)
+# 코드 생성 계획 v2 (2026-11-07)
 
 테이블 정의에서 Java(DTO·Mapper·Service·Controller) + MyBatis XML + Vue(API·화면)를 만든다.
 한 번에 전부(한 통) 또는 필요한 조각만.
 
-> 이 문서는 **계획**이다. 아래 "정할 것"에 답을 받은 뒤 1단계부터 만든다.
+> v2: Power 의 답(9절)을 반영. 남은 확인 2가지(9-2)에 답을 받으면 1단계부터 만든다.
 
 ---
 
@@ -96,22 +96,46 @@ interface FieldModel {
 
 ## 4. 만드는 조각
 
-`{base}` = 기본 패키지 (예: `com.example.plm`), `{Entity}` = `PlmPart`.
+`{root}` = 기본 패키지 (예: `com.example`), `{biz}` = 업무 (처음 값 `base`, 화면에서 바꿈), `{Entity}` = `PlmPart`, `{path}` = `plm-part`.
+패키지는 **업무별, 업무 안에서 계층별**: `{root}.{biz}.dto` · `.mapper` · `.service` · `.controller`.
+
+### 백엔드 (Java 17+, Spring Boot, MyBatis)
 
 | 조각 | 파일 | 내용 |
 |---|---|---|
-| DTO | `{base}/dto/{Entity}Dto.java` | 칸마다 필드, 주석은 Javadoc, `@NotNull`(NOT NULL)·`@Size(max)` 선택. Lombok(`@Getter @Setter` 또는 `@Data`) 또는 getter/setter 직접, Java 17 이면 record 선택 |
-| 검색 DTO | `{base}/dto/{Entity}SearchDto.java` | 고른 검색 칸 + `page`·`size`(·`sort`) |
-| Mapper 인터페이스 | `{base}/mapper/{Entity}Mapper.java` | `@Mapper`. `selectList`·`selectCount`·`selectByKey`·`insert`·`update`·`delete` |
-| Mapper XML | `resources/mapper/{...}/{Entity}Mapper.xml` | 아래 5절 |
-| Service | `{base}/service/{Entity}Service.java` (+ `impl/…ServiceImpl.java` 선택) | `@Transactional(readOnly = true)` 조회, 쓰기 메서드 `@Transactional`, 없는 키 조회·수정은 예외 |
-| Controller | `{base}/controller/{Entity}Controller.java` | `@RestController @RequestMapping("/api/{path}")`. `GET`(목록+건수), `GET /{key}`, `POST`, `PUT /{key}`, `DELETE /{key}`. 복합 키는 `/{k1}/{k2}`. 응답 감싸기(`ResponseEntity` 또는 프로젝트의 공통 응답 클래스) |
-| Vue API | `src/api/{path}.(js\|ts)` | 프로젝트의 axios 인스턴스를 import 해서 함수 5개 |
-| Vue 목록 화면 | `src/views/{path}/{Entity}List.vue` | `<script setup>`. 검색 폼 + 표 + 페이지 + 등록·수정·삭제 버튼 |
-| Vue 입력 화면 | `src/views/{path}/{Entity}Form.vue` | 칸 형에 맞는 입력(글·숫자·날짜·Y/N), 필수·길이 검사 |
-| 라우터 조각 | (파일 안 씀) | 붙여 넣을 route 객체를 복사 / 미리 보기에 보여 줌 |
+| DTO | `{root}/{biz}/dto/{Entity}Dto.java` | Lombok `@Getter @Setter`. 칸마다 필드, 칸 주석은 Javadoc. `@NotNull`(NOT NULL)·`@Size(max)` 는 선택 |
+| 검색 DTO | `{root}/{biz}/dto/{Entity}SearchDto.java` | 고른 검색 칸 + `page`(1부터)·`size` + `getOffset()` |
+| 페이지 응답 | `{root}/{biz}/dto/PageResult.java` (프로젝트에 이미 있으면 그것을 씀) | `List<T> list`, `long total`, `int page`, `int size` |
+| Mapper 인터페이스 | `{root}/{biz}/mapper/{Entity}Mapper.java` | `@Mapper`. `selectList`·`selectCount`·`selectByKey`·`insert`·`update`·`delete` |
+| Mapper XML | `resources/mapper/{biz}/{Entity}Mapper.xml` | 5절 |
+| Service | `{root}/{biz}/service/{Entity}Service.java` | 클래스 하나(인터페이스 없음). `@Service @RequiredArgsConstructor`, 조회 `@Transactional(readOnly = true)`, 쓰기 `@Transactional`. 없는 키 조회·수정·삭제는 예외 |
+| Controller | `{root}/{biz}/controller/{Entity}Controller.java` | `@RestController @RequestMapping("/api/{biz}/{path}")`. 반환은 `ResponseEntity<T>` |
 
-"전체"는 위를 다, "부분"은 아무 조합이나. 이미 있는 Mapper XML 에 **쿼리 하나만 더하기**(예: 검색 조건 추가한 selectList)는 3단계.
+Controller 끝점:
+
+| 메서드 | 주소 | 반환 |
+|---|---|---|
+| GET | `/api/{biz}/{path}?page=1&size=20&검색칸=…` | `ResponseEntity<PageResult<{Entity}Dto>>` |
+| GET | `/api/{biz}/{path}/{key}` | `ResponseEntity<{Entity}Dto>` (없으면 404) |
+| POST | `/api/{biz}/{path}` | `ResponseEntity<{Entity}Dto>` (201) |
+| PUT | `/api/{biz}/{path}/{key}` | `ResponseEntity<{Entity}Dto>` |
+| DELETE | `/api/{biz}/{path}/{key}` | `ResponseEntity<Void>` (204) |
+
+복합 키는 `/{k1}/{k2}`. 키가 없는 테이블은 목록·등록만 만들고 알린다.
+
+### 프런트 (Vue 3 + TypeScript, Naive UI, AG Grid, axios)
+
+| 조각 | 파일 | 내용 |
+|---|---|---|
+| 형 | `src/api/{biz}/{entity}.types.ts` | `{Entity}`·`{Entity}Search`·`PageResult<T>` interface (Java DTO 와 같은 이름·형) |
+| API | `src/api/{biz}/{entity}.ts` | 프로젝트의 axios 인스턴스를 import. `fetch{Entity}List`·`fetch{Entity}`·`create{Entity}`·`update{Entity}`·`delete{Entity}` |
+| 목록 | `src/views/{biz}/{path}/{Entity}SearchPage.vue` | Naive UI 검색 폼(`n-form` inline) + AG Grid(칸 주석을 머리글로, 행 더블클릭 → 상세 보기) + `n-pagination`(서버 페이지). `등록` 버튼 → 상세 create |
+| 상세 | `src/views/{biz}/{path}/{Entity}DetailPage.vue` | 모드 3가지: **create**(빈 폼, 키 입력 가능) · **view**(읽기 전용, `수정`·`삭제` 버튼) · **edit**(키는 잠금, `저장`·`취소`). 칸 형에 맞는 입력(`n-input`·`n-input-number`·`n-date-picker`·Y/N 은 `n-switch`), 필수·길이 검사(`n-form` rules) |
+| 라우터 조각 | (파일 안 씀, 미리 보기·복사) | `/{biz}/{path}` → SearchPage, `/{biz}/{path}/new` → Detail(create), `/{biz}/{path}/:key` → Detail(view), `/{biz}/{path}/:key/edit` → Detail(edit) |
+
+상세 페이지의 모드는 라우트로 정한다 (`meta.mode` 또는 경로). 저장 뒤 create → view(새 키), edit → view.
+
+"전체"는 위를 다, "부분"은 아무 조합이나 (예: DTO + Mapper 만, 프런트만). 이미 있는 Mapper XML 에 **쿼리 하나만 더하기**는 5단계.
 
 ---
 
@@ -147,13 +171,13 @@ DB 마다 다른 것:
 
 | | Oracle | PostgreSQL | MySQL |
 |---|---|---|---|
-| 페이지 | `OFFSET #{offset} ROWS FETCH NEXT #{size} ROWS ONLY` (12c+), 11g 는 `ROWNUM` 감싸기 선택 | `LIMIT #{size} OFFSET #{offset}` | `LIMIT #{offset}, #{size}` |
+| 페이지 | `OFFSET #{offset} ROWS FETCH NEXT #{size} ROWS ONLY` (12c 이상) | `LIMIT #{size} OFFSET #{offset}` | `LIMIT #{offset}, #{size}` |
 | LIKE 잇기 | `'%' \|\| #{x} \|\| '%'` | `'%' \|\| #{x} \|\| '%'` | `CONCAT('%', #{x}, '%')` |
 | 새 키 | `<selectKey order="BEFORE">SELECT {SEQ}.NEXTVAL FROM DUAL</selectKey>` (시퀀스 이름 규칙 설정, 12c identity 면 `useGeneratedKeys`) | `useGeneratedKeys keyProperty` (serial·identity) | `useGeneratedKeys keyProperty` (AUTO_INCREMENT) |
 | 날짜 기본값 | `SYSDATE` | `now()` | `NOW()` |
 
 - NULL 이 될 수 있는 파라미터에는 `jdbcType` 을 붙인다 (Oracle 에서 `#{x}` 가 null 이면 오류 나는 문제)
-- 등록자·등록일 같은 공통 칸은 이름 규칙(설정)으로 알아보고 INSERT 때는 `SYSDATE`/`now()`, UPDATE 의 `<set>` 에서는 빼거나 수정일만 넣는다
+- 등록자·등록일 같은 공통 칸(9-2 의 이름)은 SQL 에서 채운다: INSERT 때 등록일·수정일 = `SYSDATE`/`now()`, 등록자·수정자 = `#{regId}`·`#{updId}` (로그인 사용자는 SQL 이 모르므로 Java 에서 DTO 에 넣어 넘긴다). UPDATE 의 `<set>` 에서는 등록 칸을 빼고 수정 칸만. 설정을 `java` 로 바꾸면 날짜도 `#{regDt}` 로 받아 Java 에서 채운다
 - 만든 XML 은 MyBatis Runner 의 파서로 다시 읽어 `#{}`·`<if>` 가 맞는지 확인하고, `▶ 콘솔에서 실행` 으로 바로 돌려 볼 수 있다
 
 ---
@@ -195,17 +219,27 @@ DB 마다 다른 것:
 | 4 | 프로젝트 설정 읽기, 템플릿 꺼내기 | 프로젝트마다 정확하게 |
 | 5 | 기존 파일에 더하기 (Mapper XML 에 쿼리 하나, DTO 에 칸 추가 — 테이블 칸이 바뀌었을 때 차이만) | 유지 보수 |
 
-1·4 를 먼저 하는 방법도 있다(처음부터 프로젝트 관례로). 정할 것 1~3 의 답에 따라 정한다.
+정한 관례(9절)를 내장 템플릿으로 삼아 1단계부터 간다. 4단계(프로젝트 설정 읽기)는 패키지 이름·axios 인스턴스 위치 같은 자리만 읽는다.
 
 ---
 
-## 9. 정할 것 (Power 확인)
+## 9. 정한 것 (2026-11-07 Power)
 
-1. Java 버전과 Lombok — Java 17 + Lombok `@Getter @Setter`? `@Data`? record?
-2. 응답 형식 — `ResponseEntity<T>` 그대로인가, 회사 공통 응답 클래스가 있는가 (있으면 이름·생성 방법)
-3. Service — 인터페이스 + Impl 인가, 클래스 하나인가
-4. 패키지 — 계층별(`dto/`·`mapper/`·`service/`·`controller/`) 인가, 업무별인가
-5. Vue — JS/TS, UI 라이브러리(Element Plus 등), axios 인스턴스 위치, 목록·입력을 한 화면(다이얼로그)으로 할지 두 화면으로 할지
-6. 페이지 방식 — 페이지 번호(page/size)인가, 화면이 전부 받아 나누는가
-7. Oracle 키 — 시퀀스 이름 규칙(`SEQ_{테이블}` 등) 또는 identity
-8. 공통 칸 — 등록자·등록일·수정자·수정일 칸 이름 (예: `REG_ID`, `REG_DT`, `UPD_ID`, `UPD_DT`)과 값 채우는 곳(SQL 에서 `SYSDATE`, 또는 Java 에서 세팅)
+| | 정한 것 |
+|---|---|
+| Java | 17 이상, Lombok `@Getter @Setter` |
+| 응답 | `ResponseEntity<T>` |
+| Service | 클래스 하나 (인터페이스 없음) |
+| 패키지 | 업무별 → 업무 안에서 계층별. 처음 업무 `base` (`com.example.base.dto` …) |
+| Vue | TypeScript, Naive UI, AG Grid, axios. 목록 = SearchPage, 입력·수정·보기 = DetailPage(create·edit·view 모드) |
+| 페이지 | 서버 페이지 (page/size, 목록 + 전체 건수) |
+| 공통 칸 | SQL 에서 채움(기본). 설정으로 Java 에서 채우게 바꿀 수 있음 |
+
+## 9-2. 남은 확인
+
+1. **새 행의 키(PK) 값을 어디서 만드는가** — 테이블마다 다를 수 있어 생성 화면에서 고르되, 기본을 정한다
+   - 화면에서 입력 (부품번호처럼 업무 키) → INSERT 에 그대로
+   - 시퀀스 (`SEQ_{테이블}` 같은 이름 규칙) → `<selectKey>` 로 먼저 받아 넣음
+   - DB 가 자동으로 (Oracle 12c identity, PostgreSQL serial·identity, MySQL AUTO_INCREMENT) → `useGeneratedKeys`
+   - 제안: 키 칸이 숫자 하나면 시퀀스(이름 규칙은 설정), 아니면 화면 입력. PostgreSQL·MySQL 은 DB 정의에 자동 증가가 있으면 그것
+2. **공통 칸 이름** — 등록자·등록일·수정자·수정일 (예: `REG_ID`, `REG_DT`, `UPD_ID`, `UPD_DT`). 설정으로 여러 이름을 줄 수 있음

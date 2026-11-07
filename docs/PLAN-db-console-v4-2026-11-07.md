@@ -85,4 +85,4 @@ PostgreSQL · MySQL (사내 서버로):
 
 ## 4. 남은 것
 
-- 코드 생성 → [PLAN-codegen-v1-2026-11-07.md](PLAN-codegen-v1-2026-11-07.md)
+- 코드 생성 → [PLAN-codegen-v2-2026-11-07.md](PLAN-codegen-v2-2026-11-07.md)
