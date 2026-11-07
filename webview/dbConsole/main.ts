@@ -125,7 +125,7 @@ const editor = new EditorView({
         toPanel: (resultId, data) => vscode.postMessage({ type: 'toPanel', resultId, data }),
         copy: (text) => vscode.postMessage({ type: 'copy', text }),
         copyInsert: (data) => vscode.postMessage({ type: 'copyInsert', data }),
-        csv: (data) => vscode.postMessage({ type: 'csv', data }),
+        csv: (data) => vscode.postMessage({ type: 'csv', data, params }),
       }),
       syntaxHighlighting(highlight),
       bindPlugin,

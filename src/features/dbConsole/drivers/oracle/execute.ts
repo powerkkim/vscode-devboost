@@ -1,5 +1,5 @@
 import type { Connection, ResultSet, ColumnMeta } from 'oracledb';
-import type { Binds, Cell, Column, Page, RowCursor as Cursor, RunResult } from '../../driver/types';
+import type { Binds, Cell, Column, ExecuteOptions, Page, RowCursor as Cursor, RunResult } from '../../driver/types';
 export { errorOffset } from './errors';
 export type { Binds, Cell, Column, Page, RunResult };
 
@@ -11,14 +11,25 @@ export type { Binds, Cell, Column, Page, RunResult };
 /** 열어 둔 조회 결과: 다음 행들을 이어 받는다. 다 받았거나 필요 없어지면 닫는다 */
 export class RowCursor implements Cursor {
   private closed = false;
-  constructor(private readonly rs: ResultSet) {}
+  constructor(
+    private readonly rs: ResultSet,
+    private readonly fullText = false
+  ) {}
 
   async next(count: number): Promise<Page> {
     if (this.closed) return { rows: [], done: true };
     const raw = await this.rs.getRows(count);
     const done = raw.length < count;
+    try {
+      // LOB 은 칸마다 앞부분만 읽고 바로 놓는다 (다 받지 않는다)
+      for (const r of raw) for (let i = 0; i < r.length; i++) if (isLob(r[i])) r[i] = await readLob(r[i] as LobLike, this.fullText);
+    } catch (e) {
+      releaseLobs(raw);
+      await this.close();
+      throw e;
+    }
     if (done) await this.close();
-    return { rows: raw.map((r) => r.map(formatCell)), done };
+    return { rows: raw.map((r) => r.map((v) => (v instanceof LobCell ? v.text : this.fullText && typeof v === 'string' ? v : formatCell(v)))), done };
   }
 
   async close(): Promise<void> {
@@ -42,6 +53,51 @@ export function formatDate(d: Date): string {
 /** 화면에 다 싣지 않는 길이 (긴 글·바이너리) */
 export const MAX_CELL_CHARS = 4000;
 const MAX_HEX_BYTES = 32;
+
+/** LOB 객체 중 쓰는 것만 (테스트에서 흉내 내기 쉽게) */
+export interface LobLike {
+  readonly length: number;
+  readonly type: unknown;
+  getData(offset?: number, amount?: number): Promise<string | Buffer | null>;
+  destroy(): void;
+}
+
+/** 읽어서 화면 글자가 된 LOB (formatCell 을 다시 거치지 않게 표시) */
+class LobCell {
+  constructor(readonly text: Cell) {}
+}
+
+const isLob = (v: unknown): boolean => !!v && typeof v === 'object' && typeof (v as LobLike).getData === 'function' && typeof (v as LobLike).length === 'number';
+
+function releaseLobs(rows: unknown[][]) {
+  for (const r of rows) for (const v of r) if (isLob(v)) (v as LobLike).destroy();
+}
+
+/**
+ * LOB 하나 → 화면 글자. 길이는 받은 LOB 정보에 있어 서버에 묻지 않는다.
+ * CLOB 은 MAX_CELL_CHARS 자까지만, BLOB 은 MAX_HEX_BYTES 바이트까지만 읽는다 (fullText 면 CLOB 은 전부).
+ * 다 읽으면 놓는다 (임시 LOB 이 서버에 쌓이지 않게)
+ */
+export async function readLob(lob: LobLike, fullText: boolean): Promise<LobCell> {
+  try {
+    const len = lob.length;
+    const sample = await (len === 0 ? Promise.resolve(null) : lob.getData(1, fullText && !isBinaryLob(lob) ? len : Math.min(len, isBinaryLob(lob) ? MAX_HEX_BYTES : MAX_CELL_CHARS)));
+    if (isBinaryLob(lob)) {
+      const hex = (Buffer.isBuffer(sample) ? sample : Buffer.alloc(0)).toString('hex').toUpperCase();
+      return new LobCell(len > MAX_HEX_BYTES ? `${hex}… (${len.toLocaleString('en-US')}바이트)` : hex);
+    }
+    const text = typeof sample === 'string' ? sample : '';
+    return new LobCell(!fullText && len > MAX_CELL_CHARS ? `${text}… (${len.toLocaleString('en-US')}자)` : text);
+  } finally {
+    lob.destroy();
+  }
+}
+
+/** BLOB·BFILE 인가 (CLOB·NCLOB 은 글) */
+function isBinaryLob(lob: LobLike): boolean {
+  const name = String((lob.type as { name?: string; columnTypeName?: string } | undefined)?.columnTypeName ?? (lob.type as { name?: string } | undefined)?.name ?? lob.type);
+  return /BLOB|BFILE/i.test(name);
+}
 
 /** 드라이버가 준 값 → 화면 글자 */
 export function formatCell(v: unknown): Cell {
@@ -80,23 +136,22 @@ function toDriverBinds(oracledb: typeof import('oracledb'), binds: Binds): Recor
   return out;
 }
 
-export async function runStatement(connection: Connection, sql: string, pageSize: number, binds: Binds = {}): Promise<RunResult> {
+export async function runStatement(connection: Connection, sql: string, pageSize: number, binds: Binds = {}, opts: ExecuteOptions = {}): Promise<RunResult> {
   // 여기서 require: 드라이버는 처음 접속할 때 이미 읽혀 있다
   const oracledb = require('oracledb') as typeof import('oracledb');
   const started = Date.now();
   const r = await connection.execute(sql, toDriverBinds(oracledb, binds), {
     resultSet: true,
     autoCommit: false,
-    // 숫자는 글자로 받는다: JS 숫자로 바꾸면 16자리를 넘는 값·소수가 달라진다. CLOB 은 글자로, BLOB 은 바이트로 (LOB 객체로 받지 않게)
+    // 숫자는 글자로 받는다: JS 숫자로 바꾸면 16자리를 넘는 값·소수가 달라진다.
+    // CLOB·BLOB 은 LOB 객체로 받아 앞부분만 읽는다 (글자로 받으면 몇 MB 짜리도 전부 내려온다)
     fetchTypeHandler: (meta: ColumnMeta) => {
       if (meta.dbType === oracledb.DB_TYPE_NUMBER) return { type: oracledb.STRING };
-      if (meta.dbType === oracledb.DB_TYPE_CLOB || meta.dbType === oracledb.DB_TYPE_NCLOB) return { type: oracledb.STRING };
-      if (meta.dbType === oracledb.DB_TYPE_BLOB) return { type: oracledb.BUFFER };
       return undefined;
     },
   });
   if (r.resultSet) {
-    const cursor = new RowCursor(r.resultSet);
+    const cursor = new RowCursor(r.resultSet, !!opts.fullText);
     try {
       const columns = (r.metaData ?? r.resultSet.metaData ?? []).map(toColumn);
       const page = await cursor.next(pageSize);

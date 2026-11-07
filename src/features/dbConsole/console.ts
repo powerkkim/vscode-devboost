@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { randomBytes } from 'crypto';
 import { DbConnectionConfig, kindOf } from './connection/config';
 import type { RowCursor, RunResult } from './driver/types';
@@ -11,6 +12,7 @@ import { Sessions } from './sessions';
 import { Statement, StatementInfo, classify, changesData } from './sql/statements';
 import { BindInput, bindValuesFor, toDriverSql } from './sql/binds';
 import { MAX_ROWS_LIMIT, ResultData, ResultView } from './ui/resultView';
+import { CsvSink, streamCsv } from './csvExport';
 import { FormActions, FormDialog, DialogMessage } from './ui/formDialog';
 
 /** 콘솔 화면(Webview 패널)의 종류 — package.json 의 단축키 조건(activeWebviewPanelId)과 같아야 한다 */
@@ -39,7 +41,7 @@ type FromWebview =
   | { type: 'toPanel'; resultId: number; data: ResultData }
   | { type: 'copy'; text: string }
   | { type: 'copyInsert'; data: ResultData }
-  | { type: 'csv'; data: ResultData }
+  | { type: 'csv'; data: ResultData; params?: Params }
   | { type: 'serverOutput'; on: boolean }
   | { type: 'needColumns'; name: string }
   | { type: 'history' }
@@ -388,8 +390,7 @@ export class DbConsole implements vscode.Disposable {
         return;
       }
       case 'csv':
-        await this.deps.results.exportCsv(m.data);
-        return;
+        return this.exportCsv(tab, m.data, m.params);
       case 'history': {
         const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
         if (cfg) await this.showHistory(cfg);
@@ -488,6 +489,91 @@ export class DbConsole implements vscode.Disposable {
           }
         }
       );
+    } finally {
+      this.running.delete(cfg.id);
+      this.refresh();
+    }
+  }
+
+  /**
+   * CSV 내보내기. 다 받은 결과면 화면 데이터 그대로. 아직 받지 않은 행이 있는 조회면
+   * 화면 행만 쓸지, 쿼리를 다시 실행해 끝까지 파일로 쓸지 고르게 한다
+   */
+  private async exportCsv(tab: ConsoleTab, data: ResultData, params: Params | undefined) {
+    const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
+    const info = cfg ? classify(data.sql, driverFor(cfg).rules) : undefined;
+    // 다시 실행해도 되는 것은 순수 조회만 (FOR UPDATE 는 잠금을 다시 건다)
+    const canRerun = !!cfg && !!params && info?.kind === 'query' && !info.forUpdate;
+    if (data.done || !canRerun) return this.deps.results.exportCsv(data);
+    const n = data.rows.length.toLocaleString('ko-KR');
+    const pick = await vscode.window.showQuickPick(
+      [
+        { label: '전체 결과', description: '쿼리를 다시 실행해 끝까지 파일로 씁니다', detail: '지금 파라미터 값으로 실행합니다. 화면의 최대 행 수와 관계없고, 긴 글(CLOB·TEXT)도 자르지 않습니다', all: true },
+        { label: `화면에 있는 ${n}행만`, description: '가져온 행 그대로 (정렬 순서 포함)', all: false },
+      ],
+      { title: 'CSV 내보내기', placeHolder: '아직 받지 않은 행이 있습니다' }
+    );
+    if (!pick) return;
+    if (!pick.all) return this.deps.results.exportCsv(data);
+    await this.exportAll(tab, data.sql, params!);
+  }
+
+  /** 쿼리를 다시 실행해 결과 전체를 CSV 로 흘려 쓴다 (메모리에 다 싣지 않는다) */
+  private async exportAll(tab: ConsoleTab, sql: string, params: Params) {
+    const ready = await this.prepare(tab);
+    if (!ready) return;
+    const { cfg, session } = ready;
+    const rules = driverFor(cfg).rules;
+    const binds = bindValuesFor(sql, params, rules);
+    if (!binds.ok) return void vscode.window.showErrorMessage(`파라미터 값이 맞지 않습니다: ${binds.message}`);
+    const uri = await vscode.window.showSaveDialog({ filters: { CSV: ['csv'] }, saveLabel: '전체 내보내기' });
+    if (!uri) return;
+
+    // 로컬 파일이면 흘려 쓴다. 원격 작업 공간 등이면 모아서 한 번에
+    const parts: string[] = [];
+    const out = uri.scheme === 'file' ? fs.createWriteStream(uri.fsPath, { encoding: 'utf8' }) : undefined;
+    const sink: CsvSink = {
+      write: (text) => (out ? new Promise((res, rej) => out.write(text, (err) => (err ? rej(err) : res()))) : (parts.push(text), Promise.resolve())),
+    };
+    const BATCH = 1000;
+    this.running.add(cfg.id);
+    this.refresh();
+    try {
+      const r = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `${cfg.name}: 전체 내보내는 중…`, cancellable: true },
+        async (progress, token) => {
+          let cancelled = false;
+          let streaming = false;
+          token.onCancellationRequested(() => {
+            cancelled = true;
+            // 쿼리가 아직 도는 중이면 서버에서 멈춘다. 행을 받는 중이면 다음 묶음 전에 멈춘다
+            if (!streaming) void session.connection.cancel().catch(() => undefined);
+          });
+          return session.use(async (c) => {
+            const res = await c.execute(toDriverSql(sql, rules), binds.values, BATCH, { fullText: true });
+            if (res.kind !== 'rows') throw new Error('행을 돌려주는 문장이 아닙니다');
+            streaming = true;
+            return streamCsv(res.columns, res.page, res.cursor, sink, {
+              batch: BATCH,
+              progress: (rows) => progress.report({ message: `${rows.toLocaleString('ko-KR')}행` }),
+              cancelled: () => cancelled,
+            });
+          });
+        }
+      );
+      if (out) await new Promise<void>((res) => out.end(res));
+      else await vscode.workspace.fs.writeFile(uri, Buffer.from(parts.join(''), 'utf8'));
+      const rows = r.rows.toLocaleString('ko-KR');
+      if (r.complete) void vscode.window.showInformationMessage(`${rows}행을 모두 내보냈습니다: ${uri.fsPath}`);
+      else void vscode.window.showWarningMessage(`멈췄습니다. 그때까지 받은 ${rows}행만 파일에 있습니다: ${uri.fsPath}`);
+    } catch (e) {
+      if (out) {
+        await new Promise<void>((res) => out.end(res));
+        await fs.promises.unlink(uri.fsPath).catch(() => undefined);
+      }
+      this.deps.sessions.reportError(cfg.id, e);
+      const errors = driverFor(cfg).errors;
+      void vscode.window.showErrorMessage(errors.isCancel(e) ? '내보내기를 취소했습니다' : `내보내지 못했습니다: ${errors.explain(e)}`);
     } finally {
       this.running.delete(cfg.id);
       this.refresh();

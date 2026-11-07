@@ -1,6 +1,6 @@
-# DB 콘솔 계획·진행 v3 (2026-11-07)
+# DB 콘솔 계획·진행 v4 (2026-11-07)
 
-DevBoost 0.17.0 (`feature/db-drivers` 브랜치, develop 기준)
+DevBoost 0.17.1 (develop)
 
 ## 1. 구조: DB별 처리 분리
 
@@ -57,14 +57,26 @@ v2 에서는 처음 접속할 때 내려받으려 했으나, 회사망(프록시
 - `dist/drivers/pg.js` 87KB, `dist/drivers/mysql.js` 504KB (압축 154KB) — 확장이 켜질 때는 읽지 않음
 - mysql2 의 쓰지 않는 문자 집합 표(CJK 일부)·AWS SSL 프로필은 빌드에서 뺌 (CP949 는 둠)
 
+## 2-1. v4 에서 한 것 (0.17.1, 2026-11-07)
+
+| 내용 | 확인 |
+|---|---|
+| Oracle CLOB·BLOB: LOB 객체로 받아 칸마다 4,000자(BLOB 32바이트)까지만 읽고 놓음. 전체 길이 표시 | 단위 테스트 (가짜 LOB) — **실제 Oracle 확인 필요** |
+| 결과 전체 CSV: 쿼리를 다시 실행(지금 파라미터 값)해 1,000행씩 흘려 씀, 긴 글 안 자름, 취소하면 받은 데까지 남김, 실패하면 파일 지움. 순수 조회(FOR UPDATE 아님)만 | 단위 + 실제 PG·MariaDB (3,000행, 2만 자 글, 취소 후 다음 문장) |
+| MySQL `DELIMITER` (문장 나누기 규칙 `delimiterCommand`, MySQL 에만) | 단위 + 실제 MariaDB (프로시저 만들기 → CALL) |
+| MySQL `CALL` 결과 집합 여러 개 → 첫 결과 | 실제 MariaDB |
+
+LOB 앞부분 읽기는 칸 하나에 서버 왕복 한 번이 든다 (값이 NULL·빈 LOB 이면 없음). 행이 많고 서버가 멀면(VPN) 한 쪽(기본 500행) 받는 데 시간이 늘 수 있다 — 실제 Oracle 에서 확인하고, 느리면 한 쪽 행 수를 줄이거나 짧은 CLOB 은 글자로 받는 방식을 함께 쓴다.
+
 ## 3. 실제 DB 에서 확인할 것
 
-Oracle (v2 와 같음):
+Oracle:
 1. 서버 출력 켜고 `BEGIN DBMS_OUTPUT.PUT_LINE('x'); END;` → 쿼리 아래와 메시지에 `x`
 2. `:param` 이 있는 SELECT 에 Ctrl+E → 실행계획
 3. `스키마 바꾸기`, 다른 스키마 테이블의 칸·JOIN, 시노님
 4. 테이블 정보의 DDL (`DBMS_METADATA` 권한이 없는 계정이면 안내가 나오는지)
 5. DB 스키마 `DB 연결에서 바로 가져오기` — 테이블이 1,000개 넘을 때 (IN 목록 나눠 읽기)
+6. CLOB 칸이 있는 테이블 조회: 긴 글이 `… (n자)` 로, 한 쪽 받는 시간이 괜찮은지. `⋯ → CSV 내보내기 → 전체 결과` 에서 CLOB 이 다 들어가는지
 
 PostgreSQL · MySQL (사내 서버로):
 1. JDBC URL 붙여 넣기 → DB 종류·칸이 채워지는지
@@ -73,7 +85,4 @@ PostgreSQL · MySQL (사내 서버로):
 
 ## 4. 남은 것
 
-- CLOB 을 다 받은 뒤 4,000자로 자르는 문제 → 앞부분만 읽기
-- 결과 전체 내보내기 (커서로 끝까지 받아 파일로)
-- MySQL `DELIMITER` (프로시저 만들기 스크립트)
 - 코드 생성 → [PLAN-codegen-v1-2026-11-07.md](PLAN-codegen-v1-2026-11-07.md)

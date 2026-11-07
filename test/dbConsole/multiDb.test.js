@@ -170,3 +170,28 @@ test('INSERT 복사: MySQL 은 백슬래시를 두 번, 이진 값은 0x 그대�
   assert.equal(toInsertSql('t', myCols, [['C:\\tmp', '0xCAFE', null]], 'mysql'), "INSERT INTO t (path, img, `my col`) VALUES ('C:\\\\tmp', 0xCAFE, NULL);");
   assert.equal(guessTable('select * from `plm`.`tb_part` where 1=1', 'mysql'), '`plm`.`tb_part`');
 });
+
+test('MySQL: DELIMITER 로 끝 표시를 바꾼 프로시저 스크립트', () => {
+  const sql = [
+    'DELIMITER //',
+    'CREATE PROCEDURE p_cnt(IN v INT)',
+    'BEGIN',
+    '  SELECT COUNT(*) FROM t WHERE no > v;',
+    "  SELECT 'a;b';",
+    'END //',
+    'DELIMITER ;',
+    'CALL p_cnt(1);',
+    'select 2;',
+  ].join('\n');
+  const st = splitStatements(sql, rulesOf('mysql'));
+  assert.deepEqual(
+    st.map((s) => s.sql),
+    ["CREATE PROCEDURE p_cnt(IN v INT)\nBEGIN\n  SELECT COUNT(*) FROM t WHERE no > v;\n  SELECT 'a;b';\nEND", 'CALL p_cnt(1)', 'select 2']
+  );
+  // 자리: 첫 문장은 CREATE 부터, 끝은 // 다음
+  assert.equal(sql.slice(st[0].start, st[0].end).endsWith('END //'), true);
+  // $$ 를 끝 표시로 써도
+  assert.equal(splitStatements('delimiter $$\ncreate function f() returns int begin return 1; end$$\ndelimiter ;\nselect f();', rulesOf('mysql')).length, 2);
+  // 다른 DB 에서는 DELIMITER 를 따로 보지 않는다
+  assert.equal(rulesOf('postgres').delimiterCommand, undefined);
+});

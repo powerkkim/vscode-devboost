@@ -1,6 +1,6 @@
 import type { Client, ClientConfig, FieldDef } from 'pg';
 import type { DbConnectionConfig } from '../../connection/config';
-import type { Binds, Cell, Column, DbConnection, DriverExtras, Page, RowCursor, RunResult, SchemaReader, ServerInfo, ServerOutput } from '../../driver/types';
+import type { Binds, ExecuteOptions, Cell, Column, DbConnection, DriverExtras, Page, RowCursor, RunResult, SchemaReader, ServerInfo, ServerOutput } from '../../driver/types';
 import { classify } from '../../sql/statements';
 import { toPositional, type BindValue } from '../../sql/binds';
 import { loadLib } from '../lib';
@@ -48,13 +48,13 @@ export function toColumns(fields: FieldDef[]): Column[] {
 }
 
 /** 서버가 보낸 글 그대로 (형 변환 없이 받는다) → 화면 칸. bool 은 true/false 로 */
-export function toCells(fields: FieldDef[], rows: unknown[][]): Cell[][] {
+export function toCells(fields: FieldDef[], rows: unknown[][], limit = MAX_CELL_CHARS): Cell[][] {
   return rows.map((r) =>
     r.map((v, i) => {
       if (v === null || v === undefined) return null;
       let s = String(v);
       if (fields[i]?.dataTypeID === BOOL) s = s === 't' ? 'true' : s === 'f' ? 'false' : s;
-      return s.length > MAX_CELL_CHARS ? s.slice(0, MAX_CELL_CHARS) + '…' : s;
+      return s.length > limit ? s.slice(0, limit) + '…' : s;
     })
   );
 }
@@ -125,8 +125,9 @@ export class PgConnection implements DbConnection {
     this.inTx = true;
   }
 
-  async execute(sql: string, binds: Binds, pageSize: number): Promise<RunResult> {
+  async execute(sql: string, binds: Binds, pageSize: number, opts?: ExecuteOptions): Promise<RunResult> {
     await this.closeCursor();
+    const limit = opts?.fullText ? Infinity : MAX_CELL_CHARS;
     const info = classify(sql, POSTGRES_RULES);
     const { sql: text, values } = toPositional(sql, binds, POSTGRES_RULES, 'dollar');
     const params = values.map(toPgValue);
@@ -148,12 +149,12 @@ export class PgConnection implements DbConnection {
     try {
       let result: RunResult;
       if (isQuery) {
-        result = await this.openCursor(text, params, pageSize, started);
+        result = await this.openCursor(text, params, pageSize, started, limit);
       } else {
         const r = await this.raw.query({ text, values: params, rowMode: 'array' });
         if (r.fields?.length) {
           // INSERT … RETURNING 등: 행이 온다 (다 받았다)
-          result = { kind: 'rows', columns: toColumns(r.fields), page: { rows: toCells(r.fields, r.rows as unknown[][]), done: true }, ms: Date.now() - started };
+          result = { kind: 'rows', columns: toColumns(r.fields), page: { rows: toCells(r.fields, r.rows as unknown[][], limit), done: true }, ms: Date.now() - started };
         } else if (r.rowCount !== null && /^(INSERT|UPDATE|DELETE|MERGE|COPY)$/.test(r.command)) {
           result = { kind: 'count', rowsAffected: r.rowCount, ms: Date.now() - started };
         } else {
@@ -169,7 +170,7 @@ export class PgConnection implements DbConnection {
     }
   }
 
-  private openCursor(text: string, values: unknown[], pageSize: number, started: number): Promise<RunResult> {
+  private openCursor(text: string, values: unknown[], pageSize: number, started: number, limit: number): Promise<RunResult> {
     const cur = new this.lib.Cursor(text, values, { rowMode: 'array' });
     this.raw.query(cur as never);
     const state = { cur, done: false };
@@ -191,7 +192,7 @@ export class PgConnection implements DbConnection {
             if (this.cursor === state) this.cursor = undefined;
             cur.close(() => undefined);
           }
-          resolve({ rows: toCells(fields, rows), done });
+          resolve({ rows: toCells(fields, rows, limit), done });
         });
       });
     const self = this;
