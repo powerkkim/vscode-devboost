@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -254,6 +254,27 @@
         "icon": "$(history)"
       },
       {
+        "command": "devBoost.dbConsole.queryBook",
+        "title": "쿼리 사전",
+        "category": "DB 콘솔",
+        "icon": "$(book)"
+      },
+      {
+        "command": "devBoost.dbConsole.queryBookPick",
+        "title": "쿼리 사전에서 찾아 넣기",
+        "category": "DB 콘솔"
+      },
+      {
+        "command": "devBoost.dbConsole.queryBookForTable",
+        "title": "사전에서 쿼리…",
+        "category": "DB 콘솔"
+      },
+      {
+        "command": "devBoost.dbConsole.addToQueryBook",
+        "title": "사전에 추가",
+        "category": "DB 콘솔"
+      },
+      {
         "command": "devBoost.dbConsole.tableInfo",
         "title": "테이블 정보",
         "category": "DB 콘솔",
@@ -479,6 +500,22 @@
           "when": "false"
         },
         {
+          "command": "devBoost.dbConsole.queryBook",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.queryBookPick",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.queryBookForTable",
+          "when": "false"
+        },
+        {
+          "command": "devBoost.dbConsole.addToQueryBook",
+          "when": "config.devBoost.dbConsole.enabled && activeWebviewPanelId == 'devBoostDbConsole'"
+        },
+        {
           "command": "devBoost.dbConsole.runSql",
           "when": "false"
         }
@@ -634,6 +671,11 @@
           "group": "inline@0"
         },
         {
+          "command": "devBoost.dbConsole.queryBookForTable",
+          "when": "view == devBoost.dbConsole.connections && viewItem == dbTable",
+          "group": "2_info@2"
+        },
+        {
           "command": "devBoost.dbConsole.tableInfo",
           "when": "view == devBoost.dbConsole.connections && viewItem == dbTable",
           "group": "2_info@1"
@@ -659,6 +701,16 @@
           "command": "devBoost.dbConsole.format",
           "when": "webviewId == 'devBoostDbConsole' && webviewSection == 'editor'",
           "group": "1_select@2"
+        },
+        {
+          "command": "devBoost.dbConsole.addToQueryBook",
+          "when": "webviewId == 'devBoostDbConsole' && webviewSection == 'editor'",
+          "group": "2_book@1"
+        },
+        {
+          "command": "devBoost.dbConsole.queryBookPick",
+          "when": "webviewId == 'devBoostDbConsole' && webviewSection == 'editor'",
+          "group": "2_book@2"
         }
       ]
     },
@@ -698,6 +750,12 @@
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "activeWebviewPanelId == 'devBoostDbConsole' && config.devBoost.dbConsole.enabled"
+      },
+      {
+        "command": "devBoost.dbConsole.queryBookPick",
+        "key": "ctrl+alt+q",
+        "mac": "cmd+alt+q",
+        "when": "config.devBoost.dbConsole.enabled && (activeWebviewPanelId == 'devBoostDbConsole' || activeWebviewPanelId == 'devBoostQueryBook')"
       },
       {
         "command": "devBoost.dbConsole.explain",

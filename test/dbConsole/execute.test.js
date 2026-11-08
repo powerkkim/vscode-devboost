@@ -86,7 +86,7 @@ test('변경: 바뀐 행 수 / DDL·PL/SQL: 성공만', async () => {
   assert.equal(ddl.kind, 'ok');
 });
 
-test('자동 커밋하지 않고, 숫자·CLOB 은 글자로 받도록 드라이버에 요청한다', async () => {
+test('자동 커밋하지 않고, 숫자는 글자로, LOB 은 객체로 받도록 드라이버에 요청한다', async () => {
   const oracledb = require('oracledb');
   const c = fakeConnection({ rowsAffected: 1 });
   await ex.runStatement(c, 'insert into t values (1)', 10);
@@ -94,8 +94,8 @@ test('자동 커밋하지 않고, 숫자·CLOB 은 글자로 받도록 드라이
   assert.equal(options.autoCommit, false);
   assert.equal(options.resultSet, true);
   assert.deepEqual(options.fetchTypeHandler({ name: 'N', dbType: oracledb.DB_TYPE_NUMBER }), { type: oracledb.STRING }, '숫자는 글자로 (자릿수 보존)');
-  assert.deepEqual(options.fetchTypeHandler({ name: 'C', dbType: oracledb.DB_TYPE_CLOB }), { type: oracledb.STRING });
-  assert.deepEqual(options.fetchTypeHandler({ name: 'B', dbType: oracledb.DB_TYPE_BLOB }), { type: oracledb.BUFFER });
+  assert.equal(options.fetchTypeHandler({ name: 'C', dbType: oracledb.DB_TYPE_CLOB }), undefined, 'CLOB 은 LOB 객체로 (앞부분만 읽으려고)');
+  assert.equal(options.fetchTypeHandler({ name: 'B', dbType: oracledb.DB_TYPE_BLOB }), undefined);
   assert.equal(options.fetchTypeHandler({ name: 'V', dbType: oracledb.DB_TYPE_VARCHAR }), undefined, '그 밖은 기본');
 });
 
@@ -105,4 +105,72 @@ test('오류: 그대로 던지고, 난 자리를 알 수 있으면 꺼낸다', a
   assert.equal(ex.errorOffset(fail), 14);
   assert.equal(ex.errorOffset(new Error('x')), undefined);
   assert.equal(ex.errorOffset('글자'), undefined);
+});
+
+// ───────── LOB: 앞부분만 읽기 ─────────
+function fakeLob(data, type) {
+  const calls = [];
+  return {
+    calls,
+    destroyed: false,
+    length: data.length,
+    type: { columnTypeName: type },
+    async getData(offset, amount) {
+      calls.push([offset, amount]);
+      return data.slice(offset - 1, offset - 1 + amount);
+    },
+    destroy() {
+      this.destroyed = true;
+    },
+  };
+}
+
+test('CLOB: 4,000자까지만 서버에서 읽고, 전체 길이를 붙인다', async () => {
+  const lob = fakeLob('가'.repeat(10_000), 'CLOB');
+  const c = await ex.readLob(lob, false);
+  assert.equal(c.text, '가'.repeat(4000) + '… (10,000자)');
+  assert.deepEqual(lob.calls, [[1, 4000]]);
+  assert.ok(lob.destroyed, '다 읽으면 놓는다');
+});
+
+test('CLOB: 짧으면 그대로, 빈 LOB 은 서버에 묻지 않음, 내보내기(fullText)는 전부', async () => {
+  assert.equal((await ex.readLob(fakeLob('abc', 'CLOB'), false)).text, 'abc');
+  const empty = fakeLob('', 'NCLOB');
+  assert.equal((await ex.readLob(empty, false)).text, '');
+  assert.equal(empty.calls.length, 0);
+  const big = fakeLob('x'.repeat(9000), 'CLOB');
+  assert.equal((await ex.readLob(big, true)).text.length, 9000);
+});
+
+test('BLOB: 32바이트만 읽어 16진수 + 바이트 수', async () => {
+  const lob = fakeLob(Buffer.alloc(100, 0xab), 'BLOB');
+  const c = await ex.readLob(lob, false);
+  assert.equal(c.text, 'AB'.repeat(32) + '… (100바이트)');
+  assert.deepEqual(lob.calls, [[1, 32]]);
+});
+
+test('RowCursor: 행 속 LOB 을 읽어 칸 글자로, 읽다 실패하면 남은 LOB 을 놓고 결과 집합을 닫는다', async () => {
+  const rows = [
+    ['1', fakeLob('긴 글', 'CLOB'), null],
+    ['2', fakeLob(Buffer.from([1, 2]), 'BLOB'), 'x'],
+  ];
+  let closed = false;
+  const rs = { getRows: async () => rows, close: async () => (closed = true) };
+  const page = await new ex.RowCursor(rs).next(10);
+  assert.deepEqual(page.rows, [
+    ['1', '긴 글', null],
+    ['2', '0102', 'x'],
+  ]);
+  assert.equal(page.done, true);
+
+  const bad = fakeLob('a', 'CLOB');
+  bad.getData = async () => {
+    throw new Error('ORA-22922');
+  };
+  const later = fakeLob('b', 'CLOB');
+  closed = false;
+  const rs2 = { getRows: async () => [[bad], [later]], close: async () => (closed = true) };
+  await assert.rejects(new ex.RowCursor(rs2).next(1), /ORA-22922/);
+  assert.ok(bad.destroyed && later.destroyed, 'LOB 을 다 놓는다');
+  assert.ok(closed);
 });

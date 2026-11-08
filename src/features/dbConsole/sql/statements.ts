@@ -6,6 +6,7 @@
  *  - 보통 문장은 `;` 에서 끝난다 (slashTerminator 면 `/` 만 있는 줄에서도). 문자열·따옴표 이름·주석 안의 `;` 는 세지 않는다
  *  - 블록(blockStart: Oracle 의 BEGIN·DECLARE·CREATE PROCEDURE 등)은 안에 `;` 가 많으므로 `/` 만 있는 줄에서 끝난다 (없으면 글 끝까지)
  *  - DB 에 보낼 때: 보통 문장은 끝의 `;` 를 떼고, 블록은 `;` 를 그대로 둔다
+ *  - delimiterCommand 면 `DELIMITER $$` 줄 뒤로는 `$$` 가 문장 끝 (DELIMITER 줄 자체는 문장이 아니다)
  */
 
 /** DB마다 다른 SQL 글 규칙 */
@@ -26,6 +27,8 @@ export interface DialectRules {
   dollarQuote?: boolean;
   /** 문자열 안의 \' 는 따옴표 한 글자 (MySQL) */
   backslashEscape?: boolean;
+  /** `DELIMITER //` 줄로 문장 끝 표시를 바꾼다 (MySQL 클라이언트 관례 — 프로시저 본문의 ; 를 넘기려고) */
+  delimiterCommand?: boolean;
 }
 
 /** 어느 DB에나 맞는 기본 규칙 */
@@ -126,15 +129,26 @@ function slashLineEnd(text: string, pos: number): number {
 export function splitStatements(text: string, rules: DialectRules = GENERIC_RULES): Statement[] {
   const out: Statement[] = [];
   let pos = 0;
+  let delim = ';';
   while (pos < text.length) {
     const start = skipBlank(text, pos, rules);
     if (start >= text.length) break;
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+    // DELIMITER 줄: 끝 표시만 바꾸고 넘어간다
+    if (rules.delimiterCommand && text.slice(lineStart, start).trim() === '') {
+      const nl = text.indexOf('\n', start);
+      const m = /^delimiter[ \t]+(\S+)[ \t]*$/i.exec(text.slice(start, nl < 0 ? text.length : nl).replace(/\r$/, ''));
+      if (m) {
+        delim = m[1];
+        pos = nl < 0 ? text.length : nl + 1;
+        continue;
+      }
+    }
     // 문장 사이에 남은 `/` 줄이나 `;` 는 건너뛴다
-    if (text[start] === ';') {
-      pos = start + 1;
+    if (text.startsWith(delim, start)) {
+      pos = start + delim.length;
       continue;
     }
-    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
     if (rules.slashTerminator && text[start] === '/' && text.slice(lineStart, start).trim() === '') {
       const afterSlash = slashLineEnd(text, lineStart);
       if (afterSlash >= 0) {
@@ -163,9 +177,9 @@ export function splitStatements(text: string, rules: DialectRules = GENERIC_RULE
             break;
           }
         }
-      } else if (text[i] === ';') {
+      } else if (text.startsWith(delim, i)) {
         bodyEnd = i;
-        end = i + 1;
+        end = i + delim.length;
         break;
       } else if (rules.slashTerminator && text[i] === '\n') {
         // SQL*Plus 식으로 `;` 없이 `/` 줄로 끝낸 문장

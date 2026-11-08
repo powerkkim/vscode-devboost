@@ -140,8 +140,14 @@ export interface DriverExtras {
 // ───────── 접속 ─────────
 
 /** 드라이버가 연 접속 하나. 한 번에 한 가지만 한다 (줄 세우기는 DbSession 이 맡는다) */
+/** 실행 선택 사항 */
+export interface ExecuteOptions {
+  /** 긴 글(CLOB·TEXT)을 4,000자로 자르지 않는다 — 파일로 내보낼 때 */
+  fullText?: boolean;
+}
+
 export interface DbConnection {
-  execute(sql: string, binds: Binds, pageSize: number): Promise<RunResult>;
+  execute(sql: string, binds: Binds, pageSize: number, opts?: ExecuteOptions): Promise<RunResult>;
   /** 실행계획 표 (문장을 실제로 실행하지는 않는다) */
   explain(sql: string, binds: Binds): Promise<string[]>;
   commit(): Promise<void>;

@@ -78,3 +78,23 @@
 .grid.hidden {
   display: none;
 }
+
+/* 여러 테이블 JOIN 결과: 칸을 테이블별 색으로 (머리글은 위쪽 색 띠 + 옅은 바탕, 칸은 더 옅게).
+   :where() 로 우선순위를 낮춰 고른 칸(.picked)·NULL 표시가 그대로 이기게 */
+.grid :where(th, td).tg0 { --tg: var(--vscode-charts-blue, #3794ff); }
+.grid :where(th, td).tg1 { --tg: var(--vscode-charts-orange, #d18616); }
+.grid :where(th, td).tg2 { --tg: var(--vscode-charts-green, #89d185); }
+.grid :where(th, td).tg3 { --tg: var(--vscode-charts-purple, #b180d7); }
+.grid :where(th, td).tg4 { --tg: var(--vscode-charts-yellow, #cca700); }
+.grid :where(th, td).tg5 { --tg: var(--vscode-charts-red, #f14c4c); }
+.grid thead th:where(.tg) {
+  background-image: linear-gradient(color-mix(in srgb, var(--tg) 20%, transparent), color-mix(in srgb, var(--tg) 20%, transparent));
+  box-shadow: inset 0 3px 0 var(--tg);
+}
+.grid tbody td:where(.tg) {
+  background-color: color-mix(in srgb, var(--tg) 7%, transparent);
+}
+/* 테이블이 바뀌는 칸의 왼쪽 경계선 */
+.grid :where(th, td).tgb {
+  border-left: 2px solid color-mix(in srgb, var(--vscode-foreground, #ccc) 45%, transparent);
+}

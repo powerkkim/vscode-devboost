@@ -9,7 +9,11 @@ import { tags as t } from '@lezer/highlight';
 import { splitStatements, statementAt, type Statement, type DialectRules } from '../../src/features/dbConsole/sql/statements';
 import { bindNames, inferType, BIND_TYPES, type BindType } from '../../src/features/dbConsole/sql/binds';
 import { rulesOf } from '../../src/features/dbConsole/driver/dialects';
-import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll } from './inline';
+import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll, regroup } from './inline';
+import { tableNames as tableNameMarks, tableNamesTheme } from './tables';
+import { columnSources, tableRefs } from '../../src/features/dbConsole/sql/tableRefs';
+import { toSnippet } from '../../src/features/dbConsole/querybook/entry';
+import { snippet } from '@codemirror/autocomplete';
 import { editingAssist, selectStatement, currentTargets } from './assist';
 import { columnLoader, reopenIfAfterDot } from './columns';
 import { formatSql } from './format';
@@ -74,6 +78,14 @@ let dbKind = 'oracle';
 let tableNames: string[] = [];
 /** 테이블(대문자) → 칸 이름들 */
 const tableColumns = new Map<string, string[]>();
+/** 물어봤는데 칸이 없던 이름 (없는 테이블·뷰를 계속 묻지 않게) */
+const noColumns = new Set<string>();
+function askColumns(t: string) {
+  const k = t.toUpperCase();
+  if (asking.has(k) || noColumns.has(k) || tableColumns.has(k)) return;
+  asking.add(k);
+  vscode.postMessage({ type: 'needColumns', name: t });
+}
 const asking = new Set<string>();
 function schemaObject(): Record<string, string[]> {
   const o: Record<string, string[]> = {};
@@ -112,20 +124,23 @@ const editor = new EditorView({
       sqlLang.of(sqlWith()),
       columnLoader({
         has: (t) => tableColumns.has(t.toUpperCase()),
-        request: (t) => {
-          if (asking.has(t.toUpperCase())) return;
-          asking.add(t.toUpperCase());
-          vscode.postMessage({ type: 'needColumns', name: t });
-        },
+        request: askColumns,
         rules: () => rules,
       }),
+      tableNameMarks(() => rules),
+      tableNamesTheme,
       inlineResults({
         more: (resultId, all) => vscode.postMessage({ type: 'more', resultId, all }),
         limits: () => limits,
         toPanel: (resultId, data) => vscode.postMessage({ type: 'toPanel', resultId, data }),
         copy: (text) => vscode.postMessage({ type: 'copy', text }),
         copyInsert: (data) => vscode.postMessage({ type: 'copyInsert', data }),
-        csv: (data) => vscode.postMessage({ type: 'csv', data }),
+        csv: (data) => vscode.postMessage({ type: 'csv', data, params }),
+        groups: (sqlText, columns) => {
+          const r = columnSources(sqlText, columns.map((c) => c.name), (t) => tableColumns.get(t.toUpperCase()), rules);
+          for (const t of r.need) askColumns(t);
+          return r.result && { groups: r.result.groups, labels: r.result.sources.map((x) => x.label) };
+        },
       }),
       syntaxHighlighting(highlight),
       bindPlugin,
@@ -296,15 +311,8 @@ const scheduleTarget = () => {
 let runSeq = 0;
 /** 실행할 문장들: 선택 영역이 있으면 그 안의 문장들, 없으면 커서가 있는 문장. key = 쿼리 아래 결과를 붙일 표시 */
 function targets(): (Statement & { line: number; key: string })[] {
-  const doc = text();
-  const sel = editor.state.selection.main;
-  let list: Statement[];
-  if (sel.empty) {
-    const s = statementAt(doc, sel.head, rules);
-    list = s ? [s] : [];
-  } else {
-    list = splitStatements(doc.slice(sel.from, sel.to), rules).map((s) => ({ ...s, start: s.start + sel.from, end: s.end + sel.from }));
-  }
+  // 커서 문장 / 고른 영역의 문장들 (사전 틀을 채우는 중이면 그 문장 전체) — 화면의 "실행 대상" 과 같은 규칙
+  const list: Statement[] = currentTargets(editor.state, rules, true);
   const run = ++runSeq;
   return list.map((s, i) => ({ ...s, line: editor.state.doc.lineAt(s.start).number, key: `${run}:${i}` }));
 }
@@ -344,6 +352,42 @@ function format() {
 }
 $('run').addEventListener('click', () => start('run'));
 $('history').addEventListener('click', () => vscode.postMessage({ type: 'history' }));
+$('book').addEventListener('click', () => vscode.postMessage({ type: 'book' }));
+
+/** 고른 영역, 없으면 커서가 있는 문장 (사전에 추가할 글) */
+function pickedSql(): string {
+  const { from, to } = editor.state.selection.main;
+  if (from !== to) return editor.state.sliceDoc(from, to);
+  return statementAt(editor.state.doc.toString(), from, rules)?.sql ?? '';
+}
+
+/**
+ * 쿼리 사전 항목 넣기: 커서 줄이 비었으면 그 자리, 아니면 글 끝에 새 문단으로.
+ * 바꿀 자리는 Tab 으로 옮겨 다닌다 (같은 이름은 함께 바뀜). "테이블" 자리는 커서 문장의 테이블로 미리 채운다
+ */
+function insertBookSnippet(query: string, values: Record<string, string>, title: string) {
+  const state = editor.state;
+  const head = state.selection.main.head;
+  const v = { ...values };
+  if (!v['테이블']) {
+    const st = statementAt(state.doc.toString(), head, rules);
+    const t = st && tableRefs(st.sql, rules)[0];
+    if (t) v['테이블'] = t.name;
+  }
+  if (!v['테이블명'] && v['테이블']) v['테이블명'] = v['테이블'].split('.').pop()!.replace(/["`]/g, '');
+  const body = `-- ${title.replace(/[{}]/g, '')} (사전)\n${toSnippet(query, v).replace(/;?\s*$/, ';')}`;
+  const line = state.doc.lineAt(head);
+  let from: number;
+  if (!line.text.trim()) from = line.from;
+  else {
+    const doc = state.doc;
+    const sep = /\n\s*$/.test(doc.sliceString(Math.max(0, doc.length - 2))) ? '\n' : '\n\n';
+    editor.dispatch({ changes: { from: doc.length, insert: sep } });
+    from = editor.state.doc.length;
+  }
+  snippet(body)(editor, null as never, from, from);
+  editor.focus();
+}
 $('explain').addEventListener('click', () => start('explain'));
 $('commit').addEventListener('click', () => vscode.postMessage({ type: 'commit' }));
 $('rollback').addEventListener('click', () => vscode.postMessage({ type: 'rollback' }));
@@ -488,6 +532,7 @@ window.addEventListener('message', (event) => {
       dialect = DIALECTS[m.kind] ?? PLSQL;
       dbKind = m.kind ?? 'oracle';
       tableColumns.clear();
+      noColumns.clear();
       if (m.limits) limits = m.limits;
       showLimits();
       params = m.params ?? {};
@@ -522,15 +567,20 @@ window.addEventListener('message', (event) => {
       break;
     case 'columns':
       asking.delete(String(m.name).toUpperCase());
-      if (!m.columns?.length) break;
+      if (!m.columns?.length) {
+        noColumns.add(String(m.name).toUpperCase());
+        break;
+      }
       tableColumns.set(String(m.name).toUpperCase(), m.columns);
       editor.dispatch({ effects: sqlLang.reconfigure(sqlWith()) });
       reopenIfAfterDot(editor);
+      regroup();
       break;
     case 'do':
       // 단축키(Ctrl+E 등)·오른쪽 클릭 메뉴가 확장을 거쳐 온다
       if (m.what === 'selectStatement') selectStatement(editor, rules);
       else if (m.what === 'format') format();
+      else if (m.what === 'addToBook') vscode.postMessage({ type: 'addToBook', sql: pickedSql() });
       else start(m.what);
       break;
     case 'inline':
@@ -574,6 +624,9 @@ window.addEventListener('message', (event) => {
       editor.focus();
       break;
     }
+    case 'snippet':
+      insertBookSnippet(m.query, m.values ?? {}, m.title);
+      break;
     case 'hint':
       hint(m.message, 'warn');
       break;

@@ -1,6 +1,6 @@
 import type { Connection } from 'oracledb';
 import type { DbConnectionConfig } from '../../connection/config';
-import type { Binds, DbConnection, DriverExtras, RunResult, SchemaReader, ServerInfo } from '../../driver/types';
+import type { Binds, ExecuteOptions, DbConnection, DriverExtras, RunResult, SchemaReader, ServerInfo } from '../../driver/types';
 import { buildConnectString } from './connect';
 import { CONNECT_TIMEOUT_SEC, errorCode, explainError } from './errors';
 import { runStatement, explainPlan } from './execute';

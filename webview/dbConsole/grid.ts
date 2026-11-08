@@ -13,6 +13,15 @@ export interface GridData {
   columns: Col[];
   rows: Cell[][];
 }
+/** 칸마다 어느 테이블에서 왔는지 (여러 테이블 JOIN 결과를 테이블별 색으로) */
+export interface ColumnGroups {
+  /** 칸마다 테이블 번호 (모르면 undefined) */
+  groups: (number | undefined)[];
+  /** 테이블 번호 → 이름 (머리글 도움말) */
+  labels: string[];
+}
+/** 테이블 색 가짓수 (넘으면 돌려 쓴다) */
+const GROUP_COLORS = 6;
 export interface Sort {
   col: number;
   dir: 1 | -1;
@@ -35,6 +44,8 @@ export interface Grid {
   refresh(): void;
   /** 화면 순서의 원래 행 번호 */
   order(): number[];
+  /** 칸별 테이블 색을 바꾼다 (칸 정보를 나중에 받았을 때) */
+  setGroups(g: ColumnGroups | undefined): void;
 }
 
 /** 칸 너비를 셀 때 볼 앞쪽 행 수 (전부 보면 큰 결과에서 느리다) */
@@ -81,12 +92,12 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 };
 
-export function createGrid(d: GridData, opts: GridOptions): Grid {
+export function createGrid(d: GridData, opts: GridOptions, initialGroups?: ColumnGroups): Grid {
   const root = el('div', 'grid');
   root.tabIndex = -1;
   if (!d.columns.length) {
     root.appendChild(el('div', 'grid-empty', '칸이 없는 결과입니다.'));
-    return { root, refresh() {}, order: () => [] };
+    return { root, refresh() {}, order: () => [], setGroups() {} };
   }
 
   // ── 칸 너비 (한 번 정한다: 스크롤하며 바뀌지 않게) ──
@@ -111,6 +122,19 @@ export function createGrid(d: GridData, opts: GridOptions): Grid {
   root.appendChild(table);
 
   let order = sortedOrder(d, opts.sort());
+  /** 칸마다 붙일 class (테이블 색·테이블이 바뀌는 경계) */
+  let colClass: string[] = [];
+  let groups: ColumnGroups | undefined;
+  const applyGroups = (g: ColumnGroups | undefined) => {
+    groups = g;
+    colClass = d.columns.map((_, i) => {
+      const n = g?.groups[i];
+      const prev = i > 0 ? g?.groups[i - 1] : undefined;
+      const edge = g && i > 0 && n !== prev ? ' tgb' : '';
+      return (n === undefined ? '' : ` tg tg${n % GROUP_COLORS}`) + edge;
+    });
+  };
+  applyGroups(initialGroups);
   /** 고른 칸: 원래 행 번호와 칸 번호 (다시 그려도 남게) */
   let picked: { row: number; col: number } | undefined;
   let rowHeight = 0;
@@ -121,11 +145,12 @@ export function createGrid(d: GridData, opts: GridOptions): Grid {
     tr.appendChild(el('th', 'rownum', '#'));
     const s = opts.sort();
     d.columns.forEach((c, i) => {
-      const th = el('th', c.numeric ? 'num' : '');
+      const th = el('th', (c.numeric ? 'num' : '') + (colClass[i] ?? ''));
       th.appendChild(document.createTextNode(c.name));
       if (opts.showTypes && c.type) th.appendChild(el('span', 'type', c.type));
       if (s?.col === i) th.appendChild(el('span', 'sort', s.dir > 0 ? ' ▲' : ' ▼'));
-      th.title = `${c.name} · ${c.type} · 눌러서 정렬 (가져온 행 안에서)`;
+      const g = groups?.groups[i];
+      th.title = `${g !== undefined ? groups!.labels[g] + ' · ' : ''}${c.name} · ${c.type} · 눌러서 정렬 (가져온 행 안에서)`;
       th.addEventListener('mousedown', (e) => e.preventDefault());
       th.addEventListener('click', () => opts.onSort(i));
       tr.appendChild(th);
@@ -158,7 +183,7 @@ export function createGrid(d: GridData, opts: GridOptions): Grid {
       const tr = el('tr');
       tr.appendChild(el('td', 'rownum', String(k + 1)));
       d.rows[ri].forEach((v, ci) => {
-        const td = el('td', (v === null ? 'null' : '') + (d.columns[ci]?.numeric ? ' num' : ''), v === null ? 'NULL' : v);
+        const td = el('td', (v === null ? 'null' : '') + (d.columns[ci]?.numeric ? ' num' : '') + (colClass[ci] ?? ''), v === null ? 'NULL' : v);
         if (v !== null && width(v) > MAX_CH) td.title = v.length > 2000 ? v.slice(0, 2000) + '…' : v;
         td.dataset.r = String(ri);
         td.dataset.c = String(ci);
@@ -219,5 +244,10 @@ export function createGrid(d: GridData, opts: GridOptions): Grid {
       drawRows(true);
     },
     order: () => order,
+    setGroups(g) {
+      applyGroups(g);
+      drawHead();
+      drawRows(true);
+    },
   };
 }

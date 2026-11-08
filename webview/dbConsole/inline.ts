@@ -2,7 +2,7 @@
 // 글을 고쳐도 결과는 그 문장을 따라 움직이고, 같은 줄에서 다시 실행하면 새 결과로 바뀐다.
 import { EditorView, WidgetType, Decoration, ViewPlugin, type DecorationSet } from '@codemirror/view';
 import { StateField, StateEffect, MapMode, type EditorState, type Range } from '@codemirror/state';
-import { createGrid, toTsv, type Cell, type Col, type Grid, type Sort } from './grid';
+import { createGrid, toTsv, type Cell, type Col, type ColumnGroups, type Grid, type Sort } from './grid';
 
 export interface InlineData {
   key: string;
@@ -43,6 +43,8 @@ export interface InlineActions {
   csv(data: ResultData): void;
   /** 한 번에 가져오는 행 수·최대 행 수 (버튼 글에 쓴다) */
   limits(): { pageSize: number; maxRows: number };
+  /** 결과 칸마다 어느 테이블에서 왔는지 (여러 테이블일 때만, 모르면 undefined — 칸 정보를 물어 두고 나중에 regroup) */
+  groups(sql: string, columns: Col[]): ColumnGroups | undefined;
 }
 
 const data = new Map<string, InlineData>();
@@ -191,7 +193,9 @@ function gridFor(view: EditorView, d: InlineData): Grid {
     have.grid.refresh();
     return have.grid;
   }
-  const grid = createGrid(gridData(d), {
+  const grid = createGrid(
+    gridData(d),
+    {
     sort: () => d.sort,
     onSort: (col) => {
       const s = d.sort;
@@ -199,10 +203,20 @@ function gridFor(view: EditorView, d: InlineData): Grid {
       grid.refresh();
     },
     onCopy: (text) => actions.copy(text),
-  });
+    },
+    d.sql ? actions.groups(d.sql, d.columns ?? []) : undefined
+  );
   grid.root.classList.add('ir-grid');
   grids.set(d.key, { grid, rows: d.rows! });
   return grid;
+}
+
+/** 칸 정보가 새로 왔다: 그려 둔 표들의 테이블 색을 다시 정한다 */
+export function regroup() {
+  for (const [key, g] of grids) {
+    const d = data.get(key);
+    if (d?.sql && d.columns) g.grid.setGroups(actions.groups(d.sql, d.columns));
+  }
 }
 
 /**

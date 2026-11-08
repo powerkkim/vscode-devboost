@@ -1,5 +1,5 @@
 import type { DbConnectionConfig } from '../../connection/config';
-import type { Binds, Cell, Column, DbConnection, DriverExtras, Page, RowCursor, RunResult, SchemaReader, ServerInfo } from '../../driver/types';
+import type { Binds, ExecuteOptions, Cell, Column, DbConnection, DriverExtras, Page, RowCursor, RunResult, SchemaReader, ServerInfo } from '../../driver/types';
 import { classify } from '../../sql/statements';
 import { toPositional, type BindValue } from '../../sql/binds';
 import { loadLib } from '../lib';
@@ -58,13 +58,13 @@ function toMyValue(v: BindValue): unknown {
  * 화면 칸으로: 숫자·날짜는 접속 설정(bigNumberStrings·dateStrings)으로 이미 글로 오고,
  * 바이너리(BLOB·BINARY)는 Buffer → 16진수, JSON 칸은 객체 → 글
  */
-function cellOf(v: unknown): Cell {
+function cellOf(v: unknown, limit = MAX_CELL_CHARS): Cell {
   if (v === null || v === undefined) return null;
   let s: string;
   if (Buffer.isBuffer(v)) s = `0x${v.subarray(0, 2000).toString('hex').toUpperCase()}${v.length > 2000 ? '…' : ''}`;
   else if (typeof v === 'object') s = JSON.stringify(v);
   else s = String(v);
-  return s.length > MAX_CELL_CHARS ? s.slice(0, MAX_CELL_CHARS) + '…' : s;
+  return s.length > limit ? s.slice(0, limit) + '…' : s;
 }
 
 export class MyConnection implements DbConnection {
@@ -93,8 +93,8 @@ export class MyConnection implements DbConnection {
     });
   }
 
-  private static cells(rows: unknown[][]): Cell[][] {
-    return rows.map((r) => r.map(cellOf));
+  private static cells(rows: unknown[][], limit = MAX_CELL_CHARS): Cell[][] {
+    return rows.map((r) => r.map((v) => cellOf(v, limit)));
   }
 
   /** 흘려 받는 중인 조회를 멈춘다 (다른 문장을 보내기 전에) */
@@ -117,17 +117,25 @@ export class MyConnection implements DbConnection {
     return Array.isArray(r.rows) ? (r.rows as unknown[][]) : [];
   }
 
-  async execute(sql: string, binds: Binds, pageSize: number): Promise<RunResult> {
+  async execute(sql: string, binds: Binds, pageSize: number, opts?: ExecuteOptions): Promise<RunResult> {
     await this.stopStream();
+    const limit = opts?.fullText ? Infinity : MAX_CELL_CHARS;
     const info = classify(sql, MYSQL_RULES);
     const { sql: text, values } = toPositional(sql, binds, MYSQL_RULES, 'question');
     const params = values.map(toMyValue);
     const started = Date.now();
-    if (info.kind === 'query') return this.openStream(text, params, pageSize, started);
+    if (info.kind === 'query') return this.openStream(text, params, pageSize, started, limit);
     const r = await this.run(text, params);
+    // CALL 은 결과 집합 여러 개 + 마지막 OK 를 준다: 행이 있는 첫 결과를 보여 준다
+    if (Array.isArray(r.fields) && Array.isArray(r.fields[0])) {
+      const sets = r.rows as unknown[];
+      const i = (r.fields as unknown as (MyField[] | undefined)[]).findIndex((f) => Array.isArray(f) && f.length > 0);
+      if (i >= 0) return { kind: 'rows', columns: this.columns((r.fields as unknown as MyField[][])[i]), page: { rows: MyConnection.cells(sets[i] as unknown[][], limit), done: true }, ms: Date.now() - started };
+      return { kind: 'ok', ms: Date.now() - started };
+    }
     if (Array.isArray(r.rows) && r.fields?.length) {
       // SHOW … 처럼 조회가 아닌 낱말로 시작하는데 행이 오는 문장
-      return { kind: 'rows', columns: this.columns(r.fields), page: { rows: MyConnection.cells(r.rows as unknown[][]), done: true }, ms: Date.now() - started };
+      return { kind: 'rows', columns: this.columns(r.fields), page: { rows: MyConnection.cells(r.rows as unknown[][], limit), done: true }, ms: Date.now() - started };
     }
     const ok = r.rows as { affectedRows?: number } | undefined;
     if (ok && typeof ok.affectedRows === 'number' && (info.kind === 'dml' || /^(REPLACE|LOAD)$/.test(info.verb))) {
@@ -137,7 +145,7 @@ export class MyConnection implements DbConnection {
   }
 
   /** 조회를 흘려 받는다: 버퍼가 차면 멈추고(pause), 더 달라고 하면 이어 받는다(resume) */
-  private openStream(text: string, values: unknown[], pageSize: number, started: number): Promise<RunResult> {
+  private openStream(text: string, values: unknown[], pageSize: number, started: number, limit: number): Promise<RunResult> {
     let fields: MyField[] = [];
     const buffer: unknown[][] = [];
     let want = pageSize;
@@ -206,7 +214,7 @@ export class MyConnection implements DbConnection {
       const rows = buffer.splice(0, n);
       const done = state.done && buffer.length === 0;
       if (done && this.stream === state) this.stream = undefined;
-      return { rows: MyConnection.cells(rows), done };
+      return { rows: MyConnection.cells(rows, limit), done };
     };
     const self = this;
     const cursor: RowCursor = {
