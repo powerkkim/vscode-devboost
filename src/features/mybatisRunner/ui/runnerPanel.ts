@@ -7,6 +7,7 @@ import { ParamInput, ParamType } from '../mapper/values';
 import { MapperIndex } from '../mapperIndex';
 import { OracleBridge } from '../../../core/oracleBridge';
 import { RunnerStore, Prepared } from '../store';
+import { buildConsoleRun } from '../mapper/consoleSql';
 
 /**
  * SQL 실행 화면 (Webview). 한 번에 하나만 띄우고, 다른 쿼리에서 열면 같은 화면이 그 쿼리로 바뀐다.
@@ -233,7 +234,7 @@ export class RunnerPanel {
     await this.deps.oracle.run(text, { action, insert }, (t, k, since) => this.notice(t, k, since));
   }
 
-  /** 값을 넣은 SQL 을 DevBoost DB 콘솔에서 실행 (바인드 변수 모드여도 값 넣기 SQL 로) */
+  /** DevBoost DB 콘솔에서 실행 (:이름 파라미터 + 지금 입력값을 콘솔 파라미터 칸에) */
   private async runInConsole() {
     if (!this.lastDoc) return;
     const st = this.lastDoc.statements.find((s) => s.id === this.stmtId);
@@ -241,9 +242,7 @@ export class RunnerPanel {
     if (!vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('enabled', true)) {
       return this.notice('DB 콘솔이 꺼져 있습니다 (설정 devBoost.dbConsole.enabled).', 'warn');
     }
-    const sqlText = this.deps.store.prepare(this.lastDoc, st, this.deps.index.resolver(), 'literal').result.sql.trim();
-    if (!sqlText) return this.notice('보낼 SQL 이 비어 있습니다.', 'warn');
-    await vscode.commands.executeCommand('devBoost.dbConsole.runSql', `-- ${this.lastDoc.namespace}.${st.id}\n${sqlText}`);
+    if (!(await sendToConsole(this.deps, this.lastDoc, st))) this.notice('보낼 SQL 이 비어 있습니다.', 'warn');
   }
 
   private async reveal(file: string | undefined, line: number | undefined) {
@@ -312,4 +311,18 @@ interface Msg {
   action?: string;
   file?: string;
   line?: number;
+}
+
+/**
+ * mapper 쿼리를 DevBoost DB 콘솔로 보내 실행한다.
+ *  - 동적 태그(if/foreach…)는 마지막 입력값으로 풀고, #{} 는 :이름 파라미터로 남긴다
+ *  - 파라미터 값은 콘솔의 파라미터 칸에 채운다 (콘솔의 "실행할 때마다 값 확인"이면 실행 전에 값 칸으로 감)
+ * 보낼 SQL 이 비어 있으면 false
+ */
+export async function sendToConsole(deps: Deps, doc: MapperDoc, st: MapperStatement): Promise<boolean> {
+  const p = deps.store.prepare(doc, st, deps.index.resolver(), 'bind');
+  if (!p.result.sql.trim()) return false;
+  const run = buildConsoleRun(p.result.sql, p.result.binds, `${doc.namespace}.${st.id}`);
+  await vscode.commands.executeCommand('devBoost.dbConsole.runSql', run.text, { params: run.params });
+  return true;
 }

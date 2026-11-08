@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { BindInput } from './sql/binds';
 import { Feature } from '../../core/feature';
 import { DbConnectionConfig } from './connection/config';
 import type { SchemaObjects, TableColumn } from './driver/types';
@@ -600,7 +601,8 @@ export const dbConsole: Feature = {
         }
       }),
 
-      cmd('runSql', async (sqlText: string, opts?: { run?: boolean; pick?: boolean }) => {
+      // params: 파라미터 칸에 미리 채울 값 (이름 → 값·타입). MyBatis mapper 실행이 :이름 과 함께 넘긴다
+      cmd('runSql', async (sqlText: string, opts?: { run?: boolean; pick?: boolean; params?: Record<string, BindInput> }) => {
         if (!sqlText?.trim()) return;
         const list = store.list();
         if (!list.length) {
@@ -616,7 +618,7 @@ export const dbConsole: Feature = {
         }
         await context.workspaceState.update(KEY, cfg.id);
         const text = /;\s*$/.test(sqlText.trim()) ? sqlText.trim() : sqlText.trim() + ';';
-        queryConsole.insertText(cfg.id, text, { asBlock: true, run: opts?.run !== false });
+        queryConsole.insertText(cfg.id, text, { asBlock: true, run: opts?.run !== false, params: opts?.params });
       }),
     ];
   },
