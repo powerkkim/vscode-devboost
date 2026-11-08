@@ -9,7 +9,9 @@ import { tags as t } from '@lezer/highlight';
 import { splitStatements, statementAt, type Statement, type DialectRules } from '../../src/features/dbConsole/sql/statements';
 import { bindNames, inferType, BIND_TYPES, type BindType } from '../../src/features/dbConsole/sql/binds';
 import { rulesOf } from '../../src/features/dbConsole/driver/dialects';
-import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll } from './inline';
+import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll, regroup } from './inline';
+import { tableNames as tableNameMarks, tableNamesTheme } from './tables';
+import { columnSources } from '../../src/features/dbConsole/sql/tableRefs';
 import { editingAssist, selectStatement, currentTargets } from './assist';
 import { columnLoader, reopenIfAfterDot } from './columns';
 import { formatSql } from './format';
@@ -74,6 +76,14 @@ let dbKind = 'oracle';
 let tableNames: string[] = [];
 /** 테이블(대문자) → 칸 이름들 */
 const tableColumns = new Map<string, string[]>();
+/** 물어봤는데 칸이 없던 이름 (없는 테이블·뷰를 계속 묻지 않게) */
+const noColumns = new Set<string>();
+function askColumns(t: string) {
+  const k = t.toUpperCase();
+  if (asking.has(k) || noColumns.has(k) || tableColumns.has(k)) return;
+  asking.add(k);
+  vscode.postMessage({ type: 'needColumns', name: t });
+}
 const asking = new Set<string>();
 function schemaObject(): Record<string, string[]> {
   const o: Record<string, string[]> = {};
@@ -112,13 +122,11 @@ const editor = new EditorView({
       sqlLang.of(sqlWith()),
       columnLoader({
         has: (t) => tableColumns.has(t.toUpperCase()),
-        request: (t) => {
-          if (asking.has(t.toUpperCase())) return;
-          asking.add(t.toUpperCase());
-          vscode.postMessage({ type: 'needColumns', name: t });
-        },
+        request: askColumns,
         rules: () => rules,
       }),
+      tableNameMarks(() => rules),
+      tableNamesTheme,
       inlineResults({
         more: (resultId, all) => vscode.postMessage({ type: 'more', resultId, all }),
         limits: () => limits,
@@ -126,6 +134,11 @@ const editor = new EditorView({
         copy: (text) => vscode.postMessage({ type: 'copy', text }),
         copyInsert: (data) => vscode.postMessage({ type: 'copyInsert', data }),
         csv: (data) => vscode.postMessage({ type: 'csv', data, params }),
+        groups: (sqlText, columns) => {
+          const r = columnSources(sqlText, columns.map((c) => c.name), (t) => tableColumns.get(t.toUpperCase()), rules);
+          for (const t of r.need) askColumns(t);
+          return r.result && { groups: r.result.groups, labels: r.result.sources.map((x) => x.label) };
+        },
       }),
       syntaxHighlighting(highlight),
       bindPlugin,
@@ -488,6 +501,7 @@ window.addEventListener('message', (event) => {
       dialect = DIALECTS[m.kind] ?? PLSQL;
       dbKind = m.kind ?? 'oracle';
       tableColumns.clear();
+      noColumns.clear();
       if (m.limits) limits = m.limits;
       showLimits();
       params = m.params ?? {};
@@ -522,10 +536,14 @@ window.addEventListener('message', (event) => {
       break;
     case 'columns':
       asking.delete(String(m.name).toUpperCase());
-      if (!m.columns?.length) break;
+      if (!m.columns?.length) {
+        noColumns.add(String(m.name).toUpperCase());
+        break;
+      }
       tableColumns.set(String(m.name).toUpperCase(), m.columns);
       editor.dispatch({ effects: sqlLang.reconfigure(sqlWith()) });
       reopenIfAfterDot(editor);
+      regroup();
       break;
     case 'do':
       // 단축키(Ctrl+E 등)·오른쪽 클릭 메뉴가 확장을 거쳐 온다
