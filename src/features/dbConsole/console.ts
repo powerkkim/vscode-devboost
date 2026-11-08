@@ -45,6 +45,8 @@ type FromWebview =
   | { type: 'serverOutput'; on: boolean }
   | { type: 'needColumns'; name: string }
   | { type: 'history' }
+  | { type: 'book' }
+  | { type: 'addToBook'; sql: string }
   | DialogMessage;
 
 /** 쿼리 아래에 붙는 결과 하나 (화면이 그린다) */
@@ -314,7 +316,7 @@ export class DbConsole implements vscode.Disposable {
   }
 
   /** 단축키·명령: 보고 있는 콘솔에서 실행 / 실행계획 / 지금 문장 고르기 */
-  trigger(what: 'run' | 'explain' | 'selectStatement' | 'format') {
+  trigger(what: 'run' | 'explain' | 'selectStatement' | 'format' | 'addToBook' | 'bookPick') {
     const tab = this.activeTab();
     if (tab) this.post(tab, { type: 'do', what });
   }
@@ -324,6 +326,21 @@ export class DbConsole implements vscode.Disposable {
    *  - 기본: 커서 자리에 (트리에서 테이블 이름을 누를 때)
    *  - asBlock: 글 끝에 새 문단으로 넣고 고른다 (트리에서 만든 SELECT·JOIN). run 이면 이어서 실행
    */
+  /** 지금 보고 있는 콘솔의 연결 (사전 등 다른 화면이 대상을 정할 때) */
+  activeConnectionId(): string | undefined {
+    return this.activeTab()?.connectionId;
+  }
+
+  /**
+   * 쿼리 사전 항목을 그 연결의 콘솔에 넣는다: 바꿀 자리(${이름:값})는 Tab 으로 옮겨 다니며 바꾸게.
+   * values 에 없는 "테이블" 자리는 콘솔이 커서 문장의 테이블로 채운다
+   */
+  insertSnippet(connectionId: string, query: string, values: Record<string, string>, title: string) {
+    const cfg = this.deps.store.get(connectionId);
+    if (!cfg) return;
+    this.post(this.open(cfg), { type: 'snippet', query, values, title });
+  }
+
   insertText(connectionId: string, text: string, opts: { asBlock?: boolean; run?: boolean } = {}) {
     const cfg = this.deps.store.get(connectionId);
     if (!cfg) return;
@@ -396,6 +413,12 @@ export class DbConsole implements vscode.Disposable {
         if (cfg) await this.showHistory(cfg);
         return;
       }
+      case 'book':
+        if (tab.connectionId) await vscode.commands.executeCommand('devBoost.dbConsole.queryBook', undefined, tab.connectionId);
+        return;
+      case 'addToBook':
+        if (tab.connectionId) await vscode.commands.executeCommand('devBoost.dbConsole.addToQueryBook', tab.connectionId, m.sql);
+        return;
       case 'needColumns': {
         const names = tab.connectionId ? await this.deps.columnNames(tab.connectionId, m.name).catch(() => []) : [];
         this.post(tab, { type: 'columns', name: m.name, columns: names });
@@ -842,6 +865,7 @@ export class DbConsole implements vscode.Disposable {
     <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 1.5 V10.5 M2 4 H6 M2 8.5 H6"/><rect x="6.5" y="2.5" width="4" height="3"/><rect x="6.5" y="7" width="4" height="3"/></svg>실행계획
   </button>
   <button type="button" id="history" title="이 연결에서 실행한 쿼리 기록 (찾아서 다시 넣기·실행)">기록</button>
+  <button type="button" id="book" title="쿼리 사전 — 상황별 쿼리를 설명과 함께 찾아 넣기 (Ctrl+Alt+Q 검색 팝업)">사전</button>
   <span id="hint" class="hint" role="status"></span>
   <span class="spacer"></span>
   <label class="check hidden" id="outputBox" title="DBMS_OUTPUT.PUT_LINE 으로 찍은 줄을 결과와 함께 보여 줍니다"><input type="checkbox" id="serverOutput"> 서버 출력</label>

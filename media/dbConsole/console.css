@@ -555,3 +555,10 @@ body.vscode-light .cm-tbl-alias,
 body.vscode-light .cm-tbl-alias * {
   color: #267f99;
 }
+
+/* 쿼리 사전에서 넣은 틀: 바꿀 자리 (Tab 으로 옮겨 다님) */
+.cm-snippetField {
+  background: rgba(240, 180, 0, 0.18);
+  outline: 1px solid rgba(240, 180, 0, 0.6);
+  border-radius: 2px;
+}

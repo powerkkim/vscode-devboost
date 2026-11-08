@@ -1,4 +1,5 @@
 // 편집을 VS Code 처럼 편하게: 지금 문장 표시, 선택 넓히기(Shift+Alt+→), 실행 취소가 두 번 되는 문제, 선택이 줄 강조에 가리는 문제.
+import { hasNextSnippetField, hasPrevSnippetField } from '@codemirror/autocomplete';
 import { EditorView, ViewPlugin, Decoration, keymap, gutter, GutterMarker, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { EditorSelection, Prec, StateField, RangeSet, type EditorState, type Extension, type Range } from '@codemirror/state';
 import { undo, redo, indentWithTab } from '@codemirror/commands';
@@ -207,11 +208,14 @@ function runGutter(rules: () => DialectRules, onRun: (stmt: Statement) => void):
 }
 
 /** 지금 실행 대상 (선택 영역의 문장들, 없으면 커서가 있는 문장) — 도구 줄 안내·파라미터 칸에 쓴다 */
-export function currentTargets(state: EditorState, rules: DialectRules): Statement[] {
-  if (state.doc.length > MAX_SCAN) return [];
+/** force: 아주 긴 글이어도 찾는다 (실행할 때. 화면 표시만 할 때는 건너뛴다) */
+export function currentTargets(state: EditorState, rules: DialectRules, force = false): Statement[] {
+  if (!force && state.doc.length > MAX_SCAN) return [];
   const text = state.doc.toString();
   const sel = state.selection.main;
-  if (sel.empty) {
+  // 사전 틀을 채우는 중(바꿀 자리가 골라져 있음)이면 고른 글이 아니라 그 문장 전체가 대상
+  const filling = state.selection.ranges.length > 1 || hasNextSnippetField(state) || hasPrevSnippetField(state);
+  if (sel.empty || filling) {
     const s = statementAt(text, sel.head, rules);
     return s ? [s] : [];
   }

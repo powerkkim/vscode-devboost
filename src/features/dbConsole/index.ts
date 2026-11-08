@@ -15,6 +15,8 @@ import { TableInfoPanel } from './ui/tableInfo';
 import { DbConsole } from './console';
 import { parseNameFilter } from './sql/nameFilter';
 import { JoinTable, buildCount, buildJoin, buildSelect } from './sql/joinBuilder';
+import { QueryBookStore } from './querybook/store';
+import { BookDeps, BookTarget, QueryBookPanel, addEntry, pickEntry } from './querybook/bookPanel';
 
 /**
  * DB 콘솔 — DB 에 직접 접속해 쿼리를 실행한다. 지금은 Oracle (node-oracledb Thin 모드, Oracle Client 설치 불필요, 12.1 이상).
@@ -341,6 +343,24 @@ export const dbConsole: Feature = {
 
     const cmd = (name: string, run: (...args: any[]) => unknown) => vscode.commands.registerCommand(`devBoost.dbConsole.${name}`, run);
 
+    // ── 쿼리 사전 ──
+    const bookStore = new QueryBookStore(context);
+    const bookDeps: BookDeps = {
+      store: bookStore,
+      insert: (t, query, values, title) => queryConsole.insertSnippet(t.connectionId, query, values, title),
+      practice: (t, sql, title) => queryConsole.insertText(t.connectionId, `-- [연습] ${title}\n${sql.trim().replace(/;?\s*$/, ';')}`, { asBlock: true, run: true }),
+    };
+    const bookPanel = new QueryBookPanel(context, bookDeps);
+    /** 사전을 쓸 연결: 넘겨받은 것 → 지금 콘솔 → 하나뿐이면 그것 → 고르게 */
+    const bookTarget = async (connectionId?: string): Promise<BookTarget | undefined> => {
+      let cfg = store.get(connectionId ?? queryConsole.activeConnectionId() ?? '');
+      if (!cfg) {
+        const list = store.list();
+        cfg = list.length === 1 ? list[0] : await pick(undefined, '쿼리 사전을 쓸 DB 연결');
+      }
+      return cfg && { connectionId: cfg.id, kind: driverFor(cfg).kind, name: cfg.name };
+    };
+
     return [
       store,
       { dispose: () => sessions.dispose() },
@@ -505,6 +525,25 @@ export const dbConsole: Feature = {
       cmd('explain', () => queryConsole.trigger('explain')),
       cmd('selectStatement', () => queryConsole.trigger('selectStatement')),
       cmd('format', () => queryConsole.trigger('format')),
+      cmd('queryBook', async (focusId?: string, connectionId?: string) => {
+        const t = await bookTarget(connectionId);
+        if (t) await bookPanel.open(t, typeof focusId === 'string' ? focusId : undefined);
+      }),
+      cmd('queryBookPick', async () => {
+        const t = await bookTarget();
+        if (t) await pickEntry(bookStore, t, bookDeps);
+      }),
+      cmd('queryBookForTable', async (item?: TreeNode) => {
+        if (!(item instanceof TableItem)) return;
+        const t = await bookTarget(item.connectionId);
+        if (t) await pickEntry(bookStore, t, bookDeps, { 테이블: item.qualified, 테이블명: item.tableName, 소유자: item.owner }, `쿼리 사전 · ${item.qualified}`);
+      }),
+      cmd('addToQueryBook', async (connectionId?: string, sqlText?: string) => {
+        // 오른쪽 클릭 메뉴에서: 콘솔에 고른 글을 물어 온다 (콘솔이 addToBook 으로 다시 부른다)
+        if (typeof connectionId !== 'string') return queryConsole.trigger('addToBook');
+        const t = await bookTarget(connectionId);
+        if (t) await addEntry(bookStore, t, sqlText ?? '', bookPanel);
+      }),
       cmd('history', (item?: TreeNode) => queryConsole.showHistory(item instanceof ConnectionItem ? store.get(item.config.id) : undefined)),
       cmd('commit', () => queryConsole.commit()),
       cmd('rollback', () => queryConsole.rollback()),
