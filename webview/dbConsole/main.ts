@@ -605,6 +605,13 @@ window.addEventListener('message', (event) => {
       editor.focus();
       break;
     case 'insert': {
+      // 함께 온 파라미터 값(MyBatis mapper 실행)은 파라미터 칸에 채운다. 이름은 소문자로 기억
+      if (m.params && typeof m.params === 'object') {
+        for (const [name, p] of Object.entries(m.params as Record<string, ParamInput>)) {
+          params[name.toLowerCase()] = { value: String(p?.value ?? ''), ...(p?.type ? { type: p.type } : {}) };
+        }
+        armed = false;
+      }
       if (m.asBlock) {
         // 트리에서 만든 쿼리: 글 끝에 새 문단으로 넣고 골라 둔다 (run 이면 바로 실행 — 고른 영역의 문장들)
         const doc = editor.state.doc;
@@ -616,6 +623,11 @@ window.addEventListener('message', (event) => {
           scrollIntoView: true,
         });
         editor.focus();
+        if (m.params) {
+          showTarget(); // 새 문장이 실행 대상 → 그 파라미터 칸을 흐리지 않게
+          renderParams();
+          scheduleSave();
+        }
         if (m.run) start('run');
         break;
       }

@@ -78,7 +78,7 @@
       },
       {
         "command": "devBoost.mybatisRunner.runInConsole",
-        "title": "DB 콘솔에서 실행 (커서 위치 쿼리, 마지막 입력값)",
+        "title": "DB 콘솔에서 실행 (커서 위치 쿼리)",
         "category": "MyBatis"
       },
       {
@@ -528,7 +528,7 @@
         },
         {
           "command": "devBoost.mybatisRunner.open",
-          "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml",
+          "when": "config.devBoost.mybatisRunner.enabled && !config.devBoost.dbConsole.enabled && resourceExtname == .xml",
           "group": "navigation@98"
         },
         {
@@ -728,10 +728,16 @@
         "when": "config.devBoost.searchEverywhere.enabled"
       },
       {
+        "command": "devBoost.mybatisRunner.runInConsole",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
+        "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && config.devBoost.dbConsole.enabled && resourceExtname == .xml"
+      },
+      {
         "command": "devBoost.mybatisRunner.open",
         "key": "ctrl+alt+enter",
         "mac": "cmd+alt+enter",
-        "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
+        "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && !config.devBoost.dbConsole.enabled && resourceExtname == .xml"
       },
       {
         "command": "devBoost.caseConverter.cycleNext",

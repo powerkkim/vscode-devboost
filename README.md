@@ -7,7 +7,7 @@
 | 기능 | 단축키 | 켜기/끄기 설정 |
 |---|---|---|
 | **Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
-| **MyBatis SQL 실행** — mapper XML 쿼리를 값으로 풀어 Oracle 워크시트에서 실행 | `Ctrl+Alt+Enter` / 쿼리 위 `▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
+| **MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔(또는 Oracle 워크시트)에서 실행 | `Ctrl+Alt+Enter`·우클릭 `DB 콘솔에서 실행` / 쿼리 위 `▶ 콘솔에서 실행`·`▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
 | **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
@@ -79,7 +79,7 @@
 5. 결과 옆 `⋯` → 헤더 포함 복사 · INSERT 문으로 복사 · CSV 내보내기 · 패널에서 보기 (화면에 있는 결과 그대로, 정렬 순서 포함). 아직 받지 않은 행이 있으면 CSV 는 `전체 결과`(쿼리를 다시 실행해 끝까지 파일로)도 고를 수 있음
 6. 편집: 테이블 이름·별칭은 청록색(이름은 굵게), JOIN 결과는 테이블별 색으로 구분. `별칭.` 뒤에서 칸 이름 자동 완성, `Shift+Alt+F` SQL 정렬, 도구 줄 `기록`(연결별 실행 기록, 다시 실행), 테이블 오른쪽 클릭 `테이블 정보`(칸·제약·인덱스·참조하는 테이블·DDL)
 7. 쿼리 사전: 도구 줄 `사전` (또는 `Ctrl+Alt+Q`) — 상황별 쿼리를 설명·예제와 함께 찾아 넣고, `연습 실행` 으로 예제 데이터에서 먼저 결과를 본다. 내가 만든 쿼리는 오른쪽 클릭 `사전에 추가` 로 `.devboost/querybook/` 에 `.md` 로 쌓아 팀과 나눈다
-8. MyBatis mapper 의 쿼리 위 `▶ 콘솔에서 실행` — 파라미터 값을 넣은 SQL 이 콘솔 끝에 들어가 바로 실행됨
+8. MyBatis mapper 의 쿼리 위 `▶ 콘솔에서 실행` (또는 우클릭 `DB 콘솔에서 실행`, `Ctrl+Alt+Enter`) — 동적 태그(if·foreach 등)는 마지막 입력값으로 풀고 `#{}` 는 `:이름` 파라미터로 콘솔 끝에 들어감. 값은 콘솔 파라미터 칸에 채워지고, `실행할 때마다 값 확인`이 켜져 있으면 값을 확인한 뒤 Enter 로 실행
 
 DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙)은 따로 처리합니다. Oracle 의 `DBMS_OUTPUT`·`/` 구분·`q'[...]'` 는 Oracle 에서만, PostgreSQL 의 `$$` 본문·`RAISE NOTICE` 는 PostgreSQL 에서만, MySQL 의 백틱·`#` 주석·`DELIMITER` 는 MySQL 에서만 씁니다. PostgreSQL·MySQL 드라이버는 그 DB 에 처음 접속할 때 불러옵니다.
 

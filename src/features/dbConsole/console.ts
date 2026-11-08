@@ -341,10 +341,10 @@ export class DbConsole implements vscode.Disposable {
     this.post(this.open(cfg), { type: 'snippet', query, values, title });
   }
 
-  insertText(connectionId: string, text: string, opts: { asBlock?: boolean; run?: boolean } = {}) {
+  insertText(connectionId: string, text: string, opts: { asBlock?: boolean; run?: boolean; params?: Params } = {}) {
     const cfg = this.deps.store.get(connectionId);
     if (!cfg) return;
-    this.post(this.open(cfg), { type: 'insert', text, asBlock: !!opts.asBlock, run: !!opts.run });
+    this.post(this.open(cfg), { type: 'insert', text, asBlock: !!opts.asBlock, run: !!opts.run, params: opts.params });
   }
 
   private fail(tab: ConsoleTab, e: unknown) {

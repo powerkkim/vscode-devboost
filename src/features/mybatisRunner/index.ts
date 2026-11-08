@@ -4,7 +4,7 @@ import { looksLikeMapper, parseMapper, statementAt } from './mapper/mapperDoc';
 import { MapperIndex } from './mapperIndex';
 import { OracleBridge } from '../../core/oracleBridge';
 import { RunnerStore } from './store';
-import { RunnerPanel, Deps } from './ui/runnerPanel';
+import { RunnerPanel, Deps, sendToConsole } from './ui/runnerPanel';
 
 /**
  * MyBatis SQL 실행 — mapper XML 의 쿼리를 파라미터 값으로 풀어 실행 가능한 SQL 로 만들고
@@ -64,7 +64,10 @@ export const mybatisRunner: Feature = {
       void vscode.window.setStatusBarMessage(`$(copy) ${st.id} SQL 복사됨${tail ? ` — ${tail}` : ''}`, 5000);
     });
 
-    /** 마지막 입력값으로 값을 넣은 SQL 을 DevBoost DB 콘솔에서 바로 실행 (콘솔이 연결을 고르고 결과는 쿼리 아래에) */
+    /**
+     * 커서 위치 쿼리를 DevBoost DB 콘솔에서 실행.
+     * 동적 태그는 마지막 입력값으로 풀고 #{} 는 :이름 파라미터로 보내, 값은 콘솔의 파라미터 칸에서 확인·수정한다.
+     */
     const runInConsole = vscode.commands.registerCommand('devBoost.mybatisRunner.runInConsole', async (uri?: vscode.Uri, id?: string) => {
       const t = target(uri, id);
       if (!t) return;
@@ -77,21 +80,8 @@ export const mybatisRunner: Feature = {
       const st = doc?.statements.find((s) => s.id === t.id);
       if (!doc || !st) return;
       await deps.index.ensureBuilt();
-      const p = deps.store.prepare(doc, st, deps.index.resolver(), 'literal');
-      if (!p.result.sql.trim()) {
-        void vscode.window.showWarningMessage(`${st.id}: 만들어진 SQL 이 비어 있습니다.`);
-        return;
-      }
-      const empty = p.specs.filter((s) => (p.inputs[s.path]?.value ?? '') === '').length;
-      if (empty) {
-        // 값을 안 넣은 파라미터가 있으면 실행 화면을 열어 값을 넣게 한다
-        void vscode.window.setStatusBarMessage(`${st.id}: 값이 빈 파라미터 ${empty}개 — 실행 화면에서 넣으세요`, 5000);
-        RunnerPanel.show(context, deps, t.uri, t.id);
-        return;
-      }
-      await vscode.commands.executeCommand('devBoost.dbConsole.runSql', `-- ${doc.namespace}.${st.id}\n${p.result.sql.trim()}`);
+      await sendToConsole(deps, doc, st);
     });
-
     const lens = new MapperCodeLens();
     const lensReg = vscode.languages.registerCodeLensProvider(
       [{ language: 'xml' }, { pattern: '**/*.xml' }],
