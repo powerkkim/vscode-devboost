@@ -38,10 +38,14 @@ export interface TableRef {
   from: number;
   to: number;
   alias?: string;
+  /** 별칭을 쓴 자리 (FROM TB_PART P 의 P) */
+  aliasAt?: number;
 }
 
 interface Scan {
   pos: number;
+  /** readAlias 가 마지막으로 읽은 별칭의 자리 */
+  aliasAt?: number;
 }
 
 const skipWs = (t: string, s: Scan) => {
@@ -103,12 +107,17 @@ function skipParens(t: string, s: Scan) {
 function readAlias(t: string, s: Scan): string | undefined {
   const save = s.pos;
   skipWs(t, s);
+  let at = s.pos;
   let word = readIdent(t, s);
   if (word && word.toLowerCase() === 'as') {
     skipWs(t, s);
+    at = s.pos;
     word = readIdent(t, s);
   }
-  if (word && !NOT_ALIAS.has(word.toLowerCase())) return word;
+  if (word && !NOT_ALIAS.has(word.toLowerCase())) {
+    s.aliasAt = at;
+    return word;
+  }
   s.pos = save;
   return undefined;
 }
@@ -128,8 +137,9 @@ function readSource(t: string, s: Scan): { ref?: TableRef; alias?: string } {
     skipParens(t, s);
     return { alias: readAlias(t, s) };
   }
+  s.aliasAt = undefined;
   const alias = readAlias(t, s);
-  return { ref: { ...n, alias }, alias };
+  return { ref: { ...n, alias, aliasAt: alias ? s.aliasAt : undefined }, alias };
 }
 
 /** 문장 안 모든 테이블 이름 자리 (서브쿼리 안도) */
@@ -162,6 +172,26 @@ export function tableRefs(sql: string, rules: DialectRules): TableRef[] {
     }
   }
   // 서브쿼리 안도 다시 훑으므로 자리 순서로 (같은 자리는 한 번)
+  out.sort((a, b) => a.from - b.from);
+  return out.filter((r, i) => i === 0 || r.from !== out[i - 1].from);
+}
+
+/**
+ * 테이블 별칭 자리: 정한 곳(FROM TB_PART P 의 P)과 쓰는 곳(P.PART_NO 의 P).
+ * 서브쿼리 별칭은 테이블이 아니므로 뺀다. 같은 문장 안에서만 찾는다
+ */
+export function aliasRefs(sql: string, rules: DialectRules, refs: TableRef[] = tableRefs(sql, rules)): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  const names = new Set<string>();
+  for (const r of refs) {
+    if (!r.alias || r.aliasAt === undefined) continue;
+    out.push({ from: r.aliasAt, to: r.aliasAt + r.alias.length });
+    names.add(r.alias.toLowerCase());
+  }
+  if (!names.size) return out;
+  const t = maskSql(sql, rules);
+  const re = /(?<![\w$#.\u3131-\uD79D"`])([A-Za-z_\u3131-\uD79D][\w$#\u3131-\uD79D]*)\s*\.(?=\s*["`A-Za-z_\u3131-\uD79D*])/g;
+  for (const m of t.matchAll(re)) if (names.has(m[1].toLowerCase())) out.push({ from: m.index!, to: m.index! + m[1].length });
   out.sort((a, b) => a.from - b.from);
   return out.filter((r, i) => i === 0 || r.from !== out[i - 1].from);
 }

@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'dbConsole');
-const { tableRefs, columnSources } = require(path.join(OUT, 'sql', 'tableRefs.js'));
+const { tableRefs, aliasRefs, columnSources } = require(path.join(OUT, 'sql', 'tableRefs.js'));
 const { rulesOf } = require(path.join(OUT, 'driver', 'dialects.js'));
 const ora = rulesOf('oracle');
 const names = (sql, r = ora) => tableRefs(sql, r).map((x) => sql.slice(x.from, x.to));
@@ -59,4 +59,20 @@ test('결과 칸 → 테이블: 서브쿼리 자리, 바깥 문장만 본다', (
   );
   assert.deepEqual(r.result.groups, [0, 1]);
   assert.equal(r.result.sources[0].label, '(서브쿼리) v');
+});
+
+test('별칭 자리: 정한 곳과 쓰는 곳 (서브쿼리 별칭·문자열 안·스키마 이름은 빼고)', () => {
+  const sql = "SELECT P.PART_NO, b.qty, 'P.x' s, v.cnt FROM PLM.TB_PART P JOIN TB_BOM AS b ON b.PART_NO = P.PART_NO, (select 1 cnt from dual) v WHERE P.REV > 0 -- P.y";
+  const got = aliasRefs(sql, ora).map((r) => `${sql.slice(r.from, r.to)}@${r.from}`);
+  const at = (needle, from = 0) => sql.indexOf(needle, from);
+  assert.deepEqual(got, [
+    `P@${at('P.PART_NO')}`,
+    `b@${at('b.qty')}`,
+    `P@${at('P JOIN')}`,
+    `b@${at('b ON')}`,
+    `b@${at('b.PART_NO')}`,
+    `P@${at('P.PART_NO', at('= P'))}`,
+    `P@${at('P.REV')}`,
+  ]);
+  assert.deepEqual(aliasRefs('select * from tb_part', ora), []);
 });

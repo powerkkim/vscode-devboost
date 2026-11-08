@@ -541,3 +541,17 @@ label.limit input {
   background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
   color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
 }
+
+/* 편집기: 테이블 이름(굵게)·별칭은 한 가지 색. 안쪽 문법 색(함수 이름 등)보다 이기게 * 까지 */
+.cm-tbl,
+.cm-tbl *,
+.cm-tbl-alias,
+.cm-tbl-alias * {
+  color: #4ec9b0;
+}
+body.vscode-light .cm-tbl,
+body.vscode-light .cm-tbl *,
+body.vscode-light .cm-tbl-alias,
+body.vscode-light .cm-tbl-alias * {
+  color: #267f99;
+}
