@@ -6,6 +6,7 @@ import { mybatisRunner } from './features/mybatisRunner';
 import { dbSchema } from './features/dbSchema';
 import { caseConverter } from './features/caseConverter';
 import { dbConsole } from './features/dbConsole';
+import { Sessions } from './features/dbConsole/sessions';
 
 /**
  * 새 기능을 추가할 때는
@@ -63,4 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-export function deactivate() {}
+/** 끌 때: DB 접속을 모두 닫고 기다린다 (실행 중인 쿼리는 서버에서 멈춘 뒤) — 서버에 세션이 남지 않게 */
+export function deactivate(): Promise<void> {
+  return Sessions.closeAll();
+}

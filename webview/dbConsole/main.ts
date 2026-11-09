@@ -353,6 +353,7 @@ function format() {
 $('run').addEventListener('click', () => start('run'));
 $('history').addEventListener('click', () => vscode.postMessage({ type: 'history' }));
 $('book').addEventListener('click', () => vscode.postMessage({ type: 'book' }));
+$('newConsole').addEventListener('click', () => vscode.postMessage({ type: 'newConsole' }));
 
 /**
  * Ctrl+A (VS Code 단축키가 받아 'do' 로 돌려준다): 입력 칸에 있으면 그 칸의 글, 결과 표에 있으면 그대로, 아니면 편집기 전체
@@ -562,7 +563,7 @@ window.addEventListener('message', (event) => {
       conn.classList.toggle('hidden', !m.name);
       conn.classList.toggle('on', !!m.connected);
       conn.classList.toggle('prod', !!m.production);
-      $('connText').textContent = m.name ? `${m.name}${m.connected ? ' · ' + m.schema : m.connecting ? ' (접속하는 중…)' : ' (접속 안 됨)'}${m.readOnly ? ' · 읽기 전용' : ''}` : '';
+      $('connText').textContent = m.name ? `${m.name}${m.connected ? ' · ' + m.schema : m.connecting ? ' (접속하는 중…)' : m.lazy ? ' (실행하면 접속)' : ' (접속 안 됨)'}${m.readOnly ? ' · 읽기 전용' : ''}` : '';
       conn.title = m.connected ? '접속됨' : '눌러서 접속';
       const dirty = $('dirty');
       dirty.classList.toggle('hidden', !m.dirty);

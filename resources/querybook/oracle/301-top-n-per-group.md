@@ -1,6 +1,6 @@
 ---
 title: 그룹별 상위 N건 (부서마다 월급 많은 2명)
-category: 집계·분석
+category: 순위·최신값
 db: oracle
 tags: ROW_NUMBER, RANK, 순위, TOP N, 그룹별 최신, 상위
 ---

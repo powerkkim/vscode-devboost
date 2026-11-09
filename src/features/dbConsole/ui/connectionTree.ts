@@ -19,15 +19,19 @@ export class ConnectionItem extends vscode.TreeItem {
     readonly config: DbConnectionConfig,
     state: State,
     info?: { product: string; version: string },
-    view: { schema?: string; filter?: string } = {}
+    view: { schema?: string; filter?: string; sessions?: number } = {}
   ) {
     super(config.name, state === 'connected' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
     this.id = config.id;
     const flags = [config.production ? '운영' : '', config.readOnly ? '읽기 전용' : ''].filter(Boolean).join(' · ');
     const shown = [view.schema ? `스키마 ${view.schema}` : '', view.filter ? `필터 ${view.filter}` : ''].filter(Boolean).join(' · ');
-    this.description = describeConnection(config) + (flags ? `  [${flags}]` : '') + (shown ? `  (${shown})` : '');
-    // package.json 의 메뉴 조건(viewItem)에 쓴다: dbConnection.connected / .connected.filtered …
-    this.contextValue = `dbConnection.${state}${view.filter ? '.filtered' : ''}`;
+    // 서버에 열어 둔 접속 수 (기본 + 콘솔별). 둘 이상이거나, 기본 접속 없이 콘솔 접속만 있을 때 보인다
+    const n = view.sessions ?? 0;
+    const count = n > 1 || (n > 0 && state !== 'connected') ? `  · 접속 ${n}` : '';
+    this.description = describeConnection(config) + (flags ? `  [${flags}]` : '') + (shown ? `  (${shown})` : '') + count;
+    // package.json 의 메뉴 조건(viewItem)에 쓴다: dbConnection.connected / .connected.filtered / .disconnected.sessions(콘솔 접속만 있음) …
+    const consoleOnly = state !== 'connected' && n > 0 ? '.sessions' : '';
+    this.contextValue = `dbConnection.${state}${consoleOnly}${view.filter ? '.filtered' : ''}`;
     // 접속됨 = 플러그 아이콘(초록), 접속 안 됨 = DB 아이콘. 운영 DB 는 어느 쪽이든 빨간색
     const color = config.production ? 'charts.red' : state === 'connected' ? 'charts.green' : undefined;
     this.iconPath =
@@ -38,6 +42,7 @@ export class ConnectionItem extends vscode.TreeItem {
     tip.appendMarkdown(`**${config.name}**${flags ? ` — ${flags}` : ''}\n\n`);
     tip.appendCodeblock(describeConnection(config), 'text');
     tip.appendMarkdown(state === 'connected' ? `접속됨${info ? ` · ${info.product} ${info.version}` : ''}` : state === 'connecting' ? '접속하는 중…' : '접속 안 됨');
+    if (n > 0) tip.appendMarkdown(`\n\n서버에 열어 둔 접속 ${n}개 (콘솔마다 따로 접속합니다. 콘솔을 닫으면 그 접속도 닫습니다)`);
     if (shown) tip.appendMarkdown(`\n\n${shown}`);
     this.tooltip = tip;
   }
@@ -153,6 +158,7 @@ export class ConnectionTree implements vscode.TreeDataProvider<TreeNode>, vscode
         return new ConnectionItem(c, s ? 'connected' : this.sessions.isConnecting(c.id) ? 'connecting' : 'disconnected', s?.info, {
           schema: shownSchema,
           filter: parseNameFilter(view.filter).text || undefined,
+          sessions: this.sessions.countOf(c.id),
         });
       });
     }

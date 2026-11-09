@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { BindInput } from './sql/binds';
 
-/** 콘솔 하나(연결 하나)에 기억해 두는 것 */
+/** 콘솔 하나에 기억해 두는 것 (콘솔 1 은 연결 id, 콘솔 2부터는 "연결 id#N" 파일) */
 export interface ConsoleSaved {
   sql: string;
   params: Record<string, BindInput>;
@@ -57,6 +57,19 @@ export class ConsoleStore {
       if (this.writing.get(id) === settled) this.writing.delete(id);
     });
     return next;
+  }
+
+  /** 연결을 지울 때: 콘솔 1 과 콘솔 2부터(연결 id#N)의 파일을 모두 */
+  async removeAll(connectionId: string): Promise<void> {
+    await this.remove(connectionId);
+    const prefix = `${connectionId}#`.replace(/[^\w-]/g, '_');
+    const files = await vscode.workspace.fs.readDirectory(this.dir).then(
+      (list) => list,
+      () => [] as [string, vscode.FileType][]
+    );
+    for (const [name] of files) {
+      if (name.startsWith(prefix) && name.endsWith('.json')) await vscode.workspace.fs.delete(vscode.Uri.joinPath(this.dir, name)).then(undefined, () => undefined);
+    }
   }
 
   async remove(id: string): Promise<void> {

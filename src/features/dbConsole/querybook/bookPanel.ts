@@ -195,7 +195,7 @@ export async function addEntry(store: QueryBookStore, target: BookTarget, query:
   });
   if (!title) return;
   const entries = await store.load(target.kind);
-  const cats = [...new Set(['집계·분석', '데이터 점검', '계층·BOM', '날짜', '조회 기법', '데이터 바꾸기', '딕셔너리', '세션·성능', ...entries.map((e) => e.category)])];
+  const cats = [...new Set(['집계·분석', '대시보드 통계', '순위·최신값', '날짜·기간', '데이터 점검', '조회 기법', '계층·BOM', '데이터 바꾸기', '딕셔너리', '세션·성능', ...entries.map((e) => e.category)])];
   const NEW = '$(add) 새 분류…';
   const pickedCat = await vscode.window.showQuickPick([...cats, NEW], { title: '사전에 추가 (2/3) — 분류' });
   if (!pickedCat) return;
