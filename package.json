@@ -46,11 +46,6 @@
         "category": "Search Everywhere"
       },
       {
-        "command": "devBoost.searchEverywhere.actions",
-        "title": "액션",
-        "category": "Search Everywhere"
-      },
-      {
         "command": "devBoost.searchEverywhere.text",
         "title": "텍스트",
         "category": "Search Everywhere"
@@ -346,10 +341,6 @@
         },
         {
           "command": "devBoost.searchEverywhere.symbols",
-          "when": "config.devBoost.searchEverywhere.enabled"
-        },
-        {
-          "command": "devBoost.searchEverywhere.actions",
           "when": "config.devBoost.searchEverywhere.enabled"
         },
         {

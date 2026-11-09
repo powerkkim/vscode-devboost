@@ -10,11 +10,10 @@
     { id: 'symbols', label: '심볼' },
     { id: 'mappers', label: 'Mapper' },
     { id: 'spring', label: 'Spring' },
-    { id: 'actions', label: '액션' },
     { id: 'text', label: '텍스트' },
   ];
-  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', mappers: 'Mapper', spring: 'Spring', actions: '액션', text: '텍스트' };
-  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', mappers: 'M', spring: 'S', actions: '⚡', text: 'T' };
+  const KIND_LABEL = { classes: '클래스', files: '파일', symbols: '심볼', mappers: 'Mapper', spring: 'Spring', text: '텍스트' };
+  const KIND_BADGE = { classes: 'C', files: 'F', symbols: 'm', mappers: 'M', spring: 'S', text: 'T' };
   // 심볼 종류별 배지 (IntelliJ: C=클래스, I=인터페이스, E=enum, m=메서드, f=필드, v=변수)
   const ICON_BADGE = {
     'symbol-class': ['C', 'class'],
@@ -23,9 +22,6 @@
     'symbol-method': ['m', 'method'],
     'symbol-field': ['f', 'field'],
     'symbol-variable': ['v', 'field'],
-    terminal: ['>', 'action'],
-    gear: ['⚙', 'action'],
-    keyboard: ['⌨', 'action'],
     'file-code': ['X', 'class'],
     database: ['q', 'method'],
     link: ['@', 'action'],
@@ -106,11 +102,10 @@
     search(true);
   }
 
-  /** 탭에 따라 오른쪽 컨트롤 표시: 액션=없음, 텍스트=범위+파일타입+Cc/W/.*, 나머지=범위만 */
+  /** 탭에 따라 오른쪽 컨트롤 표시: 텍스트·모두=범위+파일타입+Cc/W/.*, 나머지=범위만 (모두 탭에서는 텍스트 결과에만 적용) */
   function updateControls() {
-    $controls.classList.toggle('hidden', tab === 'actions');
-    $controls.classList.toggle('text-mode', tab === 'text');
-    $filterbar.classList.toggle('hidden', !filterOpen || tab === 'actions');
+    $controls.classList.toggle('text-mode', tab === 'text' || tab === 'all'); // 모두 탭도 텍스트 결과가 섞여 있어 같은 옵션
+    $filterbar.classList.toggle('hidden', !filterOpen);
   }
 
   function readOptions() {
@@ -491,7 +486,7 @@
         break;
       default:
         if (!e.altKey) break;
-        if (e.code === 'KeyP' && tab !== 'actions') {
+        if (e.code === 'KeyP') {
           e.preventDefault();
           setFilterOpen(!filterOpen);
           (filterOpen ? $incl : $query).focus();
@@ -502,15 +497,15 @@
           e.preventDefault();
           $scope.value = $scope.value === 'projectAndLibs' ? 'production' : 'projectAndLibs';
           optionsChanged();
-        } else if (tab === 'text' && e.code === 'KeyC') {
+        } else if ((tab === 'text' || tab === 'all') && e.code === 'KeyC') {
           e.preventDefault();
           $optCase.classList.toggle('on');
           optionsChanged();
-        } else if (tab === 'text' && e.code === 'KeyW') {
+        } else if ((tab === 'text' || tab === 'all') && e.code === 'KeyW') {
           e.preventDefault();
           $optWord.classList.toggle('on');
           optionsChanged();
-        } else if (tab === 'text' && e.code === 'KeyX') {
+        } else if ((tab === 'text' || tab === 'all') && e.code === 'KeyX') {
           e.preventDefault();
           $optRegex.classList.toggle('on');
           optionsChanged();

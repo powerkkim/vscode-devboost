@@ -49,7 +49,6 @@ export const searchEverywhere: Feature = {
       cmd('classes', 'classes'),
       cmd('files', 'files'),
       cmd('symbols', 'symbols'),
-      cmd('actions', 'actions'),
       cmd('text', 'text'),
       service,
     ];
