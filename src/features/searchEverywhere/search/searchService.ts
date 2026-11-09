@@ -39,6 +39,8 @@ export interface SearchItem {
   range?: vscode.Range;
   /** 열 때 그 줄에서 label(클래스 이름)을 찾아 선택한다 (클래스 색인 결과는 줄만 알고 있음) */
   selectName?: boolean;
+  /** 텍스트 결과: label 안에서 실제로 맞은 곳 [시작, 길이]. 화면은 검색어를 다시 찾지 않고 이 위치를 칠한다 */
+  marks?: [number, number][];
 }
 
 /** 검색 단계 하나의 소요 시간 (속도 측정용) */
@@ -1368,9 +1370,18 @@ export class SearchService implements vscode.Disposable {
           re.lastIndex = 0;
           const m = re.exec(lines[i]);
           if (m) {
+            // 같은 줄의 다른 매치도 강조하도록 전부 모은다 (g 플래그일 때)
+            const spans: [number, number][] = [[m.index, m[0].length || query.length]];
+            if (re.global) {
+              let n: RegExpExecArray | null;
+              while ((n = re.exec(lines[i])) && spans.length < 50) {
+                if (!n[0].length) { re.lastIndex++; continue; }
+                spans.push([n.index, n[0].length]);
+              }
+            }
             results.push(
               toTextItem(
-                { file: uri.fsPath, line: i, column: m.index, length: m[0].length || query.length, text: lines[i] },
+                { file: uri.fsPath, line: i, column: m.index, length: m[0].length || query.length, text: lines[i], spans },
                 uri,
                 query
               )
@@ -1387,9 +1398,16 @@ export class SearchService implements vscode.Disposable {
 }
 
 function toTextItem(m: RgMatch, uri: vscode.Uri, query: string): SearchItem {
+  // 표시는 앞뒤 공백을 자르고 200자까지 → 실제로 맞은 위치도 그만큼 옮겨 자른다
+  const lead = m.text.length - m.text.trimStart().length;
+  const label = m.text.trim().slice(0, 200);
+  const spans = (m.spans ?? (m.length ? [[m.column, m.length] as [number, number]] : []))
+    .map(([s, n]) => [s - lead, n] as [number, number])
+    .filter(([s, n]) => s >= 0 && s + n <= label.length);
   return {
     kind: 'text',
-    label: m.text.trim().slice(0, 200),
+    label,
+    marks: spans.length ? spans : undefined,
     description: `${path.basename(uri.fsPath)}:${m.line + 1}`,
     detail: vscode.workspace.asRelativePath(uri),
     icon: 'whole-word',

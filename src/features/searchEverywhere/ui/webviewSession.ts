@@ -29,6 +29,7 @@ export interface ResultRow {
   secondary?: string; // 이름 옆 회색 글씨 (패키지 등)
   right?: string; // 오른쪽 정렬 (파일명:줄, 폴더 등)
   footer?: string; // 선택 시 하단에 보여줄 전체 경로
+  marks?: [number, number][]; // 텍스트 결과: 실제로 맞은 위치 (있으면 화면이 이 위치를 칠함)
 }
 
 export interface SessionHost {
@@ -317,7 +318,7 @@ export function toRow(item: SearchItem): ResultRow {
       };
     case 'text':
       // description = 파일명:줄, detail = 상대경로
-      return { ...base, right: item.description?.replace(/:(\d+)$/, ' $1'), footer: item.detail };
+      return { ...base, right: item.description?.replace(/:(\d+)$/, ' $1'), footer: item.detail, marks: item.marks };
   }
 }
 

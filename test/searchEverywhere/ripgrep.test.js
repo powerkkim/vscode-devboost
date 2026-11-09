@@ -130,3 +130,16 @@ test('findRipgrep: 2026년 VS Code 배치 (@vscode/ripgrep-universal/bin/<OS>-<C
   fs.writeFileSync(path.join(bin2, exe), '');
   assert.equal(findRipgrep(app2), path.join(bin2, exe));
 });
+
+test('parseJsonLine: 한 줄의 매치 위치 전부 (한글 앞의 바이트 → 문자 위치)', () => {
+  const path = require('path');
+  const { parseJsonLine } = require(path.join(__dirname, '..', '..', 'out', 'features', 'searchEverywhere', 'search', 'ripgrep.js'));
+  const raw = '가 Skill[Claude skill] skill\n';
+  const b = (s) => Buffer.byteLength(s, 'utf8');
+  const at = (i) => b(raw.slice(0, i));
+  const i1 = raw.indexOf('skill'), i2 = raw.lastIndexOf('skill');
+  const line = JSON.stringify({ type: 'match', data: { path: { text: '/a.txt' }, lines: { text: raw }, line_number: 3, submatches: [{ start: at(i1), end: at(i1) + 5 }, { start: at(i2), end: at(i2) + 5 }] } });
+  const [m] = parseJsonLine(line);
+  assert.deepEqual(m.spans, [[i1, 5], [i2, 5]]);
+  assert.equal(m.column, i1);
+});

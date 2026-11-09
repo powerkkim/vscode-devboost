@@ -45,6 +45,8 @@ export interface RgMatch {
   length: number;
   /** 줄 내용 (줄바꿈 제거) */
   text: string;
+  /** 이 줄에서 실제로 맞은 곳 전부 [시작, 길이] (문자 위치). 화면 강조용 — 대소문자·단어·정규식 옵션이 반영된 위치 */
+  spans?: [number, number][];
 }
 
 /**
@@ -168,12 +170,16 @@ export function parseJsonLine(line: string): RgMatch[] {
     return [];
   }
   const text = raw.replace(/\r?\n$/, '');
-  const first = d.submatches?.[0];
   // rg는 바이트 오프셋을 주므로 UTF-8 → 문자 위치로 변환 (한글 등)
   const buf = Buffer.from(raw, 'utf8');
-  const column = first ? buf.subarray(0, first.start).toString('utf8').length : 0;
-  const length = first ? buf.subarray(first.start, first.end).toString('utf8').length : 0;
-  return [{ file, line: d.line_number - 1, column, length, text }];
+  const spans: [number, number][] = [];
+  for (const sm of d.submatches ?? []) {
+    const start = buf.subarray(0, sm.start).toString('utf8').length;
+    const len = buf.subarray(sm.start, sm.end).toString('utf8').length;
+    if (len > 0) spans.push([start, len]);
+  }
+  const [column, length] = spans[0] ?? [0, 0];
+  return [{ file, line: d.line_number - 1, column, length, text, spans }];
 }
 
 /** 새 검색이 시작됐는지 확인하는 간격 */
