@@ -18,7 +18,7 @@ SALES (판매)
 | 와셔 | 200 |
 
 ## 원하는 결과
-| CATEGORY | AMT | PCT |
+| CATEGORY | SUM_AMT | PCT |
 |---|---:|---:|
 | 볼트 | 500 | 50 |
 | 너트 | 300 | 30 |
@@ -27,11 +27,11 @@ SALES (판매)
 ## 쿼리
 ```sql
 SELECT ${분류칸:CATEGORY},
-       SUM(${값칸:AMT}) AS AMT,
+       SUM(${값칸:AMT}) AS SUM_AMT,
        ROUND(RATIO_TO_REPORT(SUM(${값칸})) OVER () * 100, 1) AS PCT
   FROM ${테이블:SALES}
  GROUP BY ${분류칸}
- ORDER BY AMT DESC
+ ORDER BY SUM_AMT DESC
 ```
 
 ## 풀이
@@ -50,9 +50,9 @@ WITH SALES AS (
   SELECT '와셔', 200 FROM DUAL
 )
 SELECT CATEGORY,
-       SUM(AMT) AS AMT,
+       SUM(AMT) AS SUM_AMT,
        ROUND(RATIO_TO_REPORT(SUM(AMT)) OVER () * 100, 1) AS PCT
   FROM SALES
  GROUP BY CATEGORY
- ORDER BY AMT DESC
+ ORDER BY SUM_AMT DESC
 ```
