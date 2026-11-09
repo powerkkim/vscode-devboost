@@ -20,15 +20,15 @@ UPDATE 가 끝나지 않고 계속 돈다. 누군가 같은 행을 고쳐 놓고
 
 ## 쿼리
 ```sql
-SELECT w.SID              AS WAIT_SID,
-       w.USERNAME         AS WAIT_USER,
+SELECT w.SID AS WAIT_SID,
+       w.USERNAME AS WAIT_USER,
        w.SECONDS_IN_WAIT  AS WAIT_SEC,
-       b.SID              AS BLOCK_SID,
-       b.SERIAL#          AS BLOCK_SERIAL,
-       b.USERNAME         AS BLOCK_USER,
-       b.MACHINE          AS BLOCK_MACHINE,
-       b.PROGRAM          AS BLOCK_PROGRAM,
-       b.STATUS           AS BLOCK_STATUS,
+       b.SID AS BLOCK_SID,
+       b.SERIAL# AS BLOCK_SERIAL,
+       b.USERNAME AS BLOCK_USER,
+       b.MACHINE AS BLOCK_MACHINE,
+       b.PROGRAM AS BLOCK_PROGRAM,
+       b.STATUS AS BLOCK_STATUS,
        (SELECT s.SQL_TEXT FROM V$SQL s WHERE s.SQL_ID = w.SQL_ID AND ROWNUM = 1) AS WAIT_SQL
   FROM V$SESSION w
   JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION
