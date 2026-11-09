@@ -135,25 +135,33 @@ export function mapperPanel(o: MapperPanelOptions) {
     return any;
   }
 
+  /** 접기(«)·펼치기(»). 접으면 왼쪽에 얇은 띠만 남고, 띠를 누르면 다시 펼친다 */
+  function setFolded(v: boolean) {
+    folded = v;
+    $panel.classList.toggle('folded', v);
+    const b = $panel.querySelector<HTMLButtonElement>('.m-fold');
+    if (b) {
+      b.textContent = v ? '»' : '«';
+      b.title = v ? '파라미터 패널 펼치기' : '파라미터 패널 접기 (편집기를 넓게)';
+      b.setAttribute('aria-label', b.title);
+    }
+  }
+
   function head(title: string) {
     const h = document.createElement('div');
     h.className = 'm-head';
-    const fold = document.createElement('button');
-    fold.type = 'button';
-    fold.className = 'm-fold';
-    fold.textContent = folded ? '▸' : '◂';
-    fold.title = folded ? '파라미터 패널 펼치기' : '파라미터 패널 접기';
-    fold.addEventListener('click', () => {
-      folded = !folded;
-      $panel.classList.toggle('folded', folded);
-      fold.textContent = folded ? '▸' : '◂';
-      fold.title = folded ? '파라미터 패널 펼치기' : '파라미터 패널 접기';
-    });
     const t = document.createElement('span');
     t.className = 'm-title';
     t.textContent = title;
     t.title = title;
-    h.append(fold, t);
+    const fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'm-fold';
+    fold.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setFolded(!folded);
+    });
+    h.append(t, fold);
     return h;
   }
 
@@ -225,6 +233,12 @@ export function mapperPanel(o: MapperPanelOptions) {
     drawn = names;
     $panel.textContent = '';
     $panel.appendChild(head(`파라미터 · ${r.ns.split('.').pop()}.${r.id}`));
+    const strip = document.createElement('div');
+    strip.className = 'm-strip';
+    strip.textContent = '파라미터';
+    strip.title = '파라미터 패널 펼치기';
+    strip.addEventListener('click', () => setFolded(false));
+    $panel.appendChild(strip);
     const base = r.specs.filter((s) => s.group === 'base');
     const cond = r.specs.filter((s) => s.group === 'cond');
     for (const s of base) $panel.appendChild(row(s));
@@ -240,6 +254,7 @@ export function mapperPanel(o: MapperPanelOptions) {
     w.className = 'm-msg warn m-warn hidden';
     $panel.appendChild(w);
     warn(r.warnings[0]);
+    setFolded(folded);
     if (focused) $panel.querySelector<HTMLInputElement>(`input[data-path="${CSS.escape(focused)}"]`)?.focus();
   }
 
@@ -297,7 +312,7 @@ export function mapperPanel(o: MapperPanelOptions) {
   function focusFirst(): boolean {
     const first = $panel.querySelector<HTMLInputElement>('input[data-path]');
     if (first) {
-      if (folded) $panel.querySelector<HTMLButtonElement>('.m-fold')?.click();
+      if (folded) setFolded(false);
       first.focus();
       first.select();
       return true;
