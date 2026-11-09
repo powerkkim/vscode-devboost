@@ -39,3 +39,46 @@ test('mapper 쿼리 → :이름 SQL + 값', () => {
   assert.strictEqual(run.params.dept.value, '');
   assert.deepStrictEqual(run.empty, ['dept']);
 });
+
+const { panelSpecs, parseMapperHeader } = require(path.join(OUT, 'consoleSql.js'));
+const { collectParams } = require(path.join(OUT, 'render.js'));
+
+test('콘솔 머리 주석 → mapper 쿼리', () => {
+  assert.deepStrictEqual(parseMapperHeader('-- com.example.post.PostMapper.countUncategorized'), { ns: 'com.example.post.PostMapper', id: 'countUncategorized' });
+  assert.deepStrictEqual(parseMapperHeader('  --UserMapper.find  '), { ns: 'UserMapper', id: 'find' });
+  assert.strictEqual(parseMapperHeader('-- 그룹별 상위 N건 (사전)'), undefined);
+  assert.strictEqual(parseMapperHeader('-- find'), undefined);
+  assert.strictEqual(parseMapperHeader('SELECT 1 FROM dual'), undefined);
+});
+
+test('패널: 늘 들어가는 값 / 조건 값과 켜짐·꺼짐', () => {
+  const xml = `<mapper namespace="a.PostMapper">
+  <select id="search">
+    SELECT * FROM tb_posts p
+    WHERE p.create_user = #{userId}
+    <if test="category != null and category != ''">AND p.category = #{category}</if>
+    <if test="ids != null and ids.size() > 0">
+      AND p.post_id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+  </select>
+</mapper>`;
+  const doc = parseMapper(xml, 'PostMapper.xml');
+  const st = doc.statements[0];
+  const specs = collectParams(doc, st);
+  const run = (inputs) => {
+    const r = renderStatement(doc, st, buildParamObject(inputs), { mode: 'bind' });
+    return { r, p: Object.fromEntries(panelSpecs(specs, r.branches).map((s) => [s.path, s])) };
+  };
+  let { r, p } = run({ userId: { type: 'auto', value: 'power' } });
+  assert.strictEqual(p.userId.group, 'base');
+  assert.strictEqual(p.category.group, 'cond');
+  assert.strictEqual(p.category.status, 'if 꺼짐');
+  assert.strictEqual(p.ids.status, 'foreach 꺼짐');
+  assert.doesNotMatch(r.sql, /category|IN/);
+  ({ r, p } = run({ userId: { type: 'auto', value: 'power' }, category: { type: 'string', value: 'NEWS' }, ids: { type: 'list', value: '10,20' } }));
+  assert.strictEqual(p.category.status, 'if 켜짐');
+  assert.strictEqual(p.category.on, true);
+  assert.strictEqual(p.ids.status, 'foreach 2개');
+  assert.match(r.sql, /p\.category = :category/);
+  assert.match(r.sql, /IN\s*\(\s*:id_\d+\s*,\s*:id_\d+\s*\)/);
+});
