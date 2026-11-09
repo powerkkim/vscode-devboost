@@ -10,16 +10,42 @@ export async function openSession(cfg: DbConnectionConfig, password: string): Pr
   return new DbSession(driver, connection, info);
 }
 
+/**
+ * 접속 키: 연결 하나에 접속을 여럿 둘 수 있다 (콘솔마다 따로).
+ *  - 연결 id 그대로: 기본 접속 — 트리·딕셔너리 읽기와 첫 번째 콘솔이 쓴다
+ *  - "연결 id#N": N번째 콘솔만 쓰는 접속
+ */
+export const sessionKey = (connectionId: string, consoleNo = 1) => (consoleNo <= 1 ? connectionId : `${connectionId}#${consoleNo}`);
+/** 접속 키 → 연결 id */
+export const connectionOfKey = (key: string) => {
+  const i = key.indexOf('#');
+  return i < 0 ? key : key.slice(0, i);
+};
+/** 콘솔만 쓰는 접속인가 (기본 접속이 아님) */
+export const isConsoleKey = (key: string) => key.includes('#');
+
+/** 접속하는 사이에 끊었거나 연결을 지웠음 (연 접속은 바로 닫았다). 알릴 오류가 아니다 */
+export class ConnectAborted extends Error {
+  constructor() {
+    super('접속하는 사이에 접속을 닫았습니다');
+  }
+}
+
 /** 끊긴 접속 */
 export interface LostSession {
+  /** 접속 키 */
   id: string;
+  /** 연결 id */
+  connectionId: string;
   /** 화면에 보여 줄 이유 */
   reason: string;
 }
 
 export interface SessionsOptions {
-  /** 접속을 여는 함수 (테스트에서 바꿔 끼운다) */
-  open?: (cfg: DbConnectionConfig, password: string) => Promise<DbSession>;
+  /** 접속을 여는 함수 (테스트에서 바꿔 끼운다). key 는 접속 키 */
+  open?: (cfg: DbConnectionConfig, password: string, key: string) => Promise<DbSession>;
+  /** 콘솔만 쓰는 접속을 이 시간 동안 안 쓰면 닫는다 (ms). 0 이면 닫지 않는다 */
+  idleCloseMs?: number;
   /** 서버에 다녀와 확인하는 간격 (ms). 0 이면 서버에는 다녀오지 않는다 */
   checkEveryMs?: number;
   /** 소켓 상태만 보는(서버에 가지 않는) 확인 간격 (ms) */
@@ -32,6 +58,8 @@ export interface SessionsOptions {
 export const DEFAULT_CHECK_MS = 5 * 60_000;
 /** 소켓 상태만 보는 확인: 30초마다 (네트워크를 쓰지 않는다) */
 export const DEFAULT_LOCAL_CHECK_MS = 30_000;
+/** 콘솔만 쓰는 접속을 안 쓰면 닫는 시간: 30분 */
+export const DEFAULT_IDLE_CLOSE_MS = 30 * 60_000;
 /** 서버 확인에서 답을 기다리는 시간: 10초 (느린 망에서 멀쩡한 접속을 끊김으로 잡지 않게 넉넉히) */
 export const DEFAULT_PING_TIMEOUT_MS = 10_000;
 
@@ -53,7 +81,12 @@ class Emitter<T> {
 }
 
 /**
- * 열려 있는 접속들 (연결 하나에 접속 하나). 기능을 끄거나 VS Code 를 닫으면 모두 닫는다.
+ * 열려 있는 접속들 (접속 키마다 하나 — 연결 하나에 기본 접속과 콘솔별 접속). 기능을 끄거나 VS Code 를 닫으면 모두 닫는다.
+ *
+ * 서버에 접속이 남지 않게:
+ *  - 콘솔별 접속은 콘솔을 닫으면 닫는다 (콘솔이 부른다)
+ *  - 콘솔별 접속을 idleCloseMs 동안 안 쓰면 닫는다. 커밋하지 않은 변경이 있으면(keepOpen) 닫지 않는다
+ *  - 접속하는 사이에 끊거나 지우면, 열린 뒤 바로 닫는다
  *
  * 끊김 감지:
  *  - 소켓 확인: localCheckMs 마다 소켓이 닫혔는지만 본다 (서버에 가지 않음). 서버가 끊거나 세션이 죽은 경우를 잡는다
@@ -74,8 +107,14 @@ export class Sessions {
   /** 접속이 끊긴 것을 알아챘을 때 (사용자가 끊은 것은 아님) */
   readonly onDidLose = this.lost.event;
 
-  private readonly openFn: (cfg: DbConnectionConfig, password: string) => Promise<DbSession>;
+  private readonly openFn: (cfg: DbConnectionConfig, password: string, key: string) => Promise<DbSession>;
   private checkEveryMs: number;
+  private idleCloseMs: number;
+  /** 닫으면 안 되는 접속인가 (커밋하지 않은 변경·실행 중). 콘솔이 정한다 */
+  private keepOpen: (key: string) => boolean = () => false;
+  private readonly idle = new Emitter<string>();
+  /** 오래 안 써서 닫았을 때 (접속 키) */
+  readonly onDidCloseIdle = this.idle.event;
   private readonly localCheckMs: number;
   private readonly pingTimeoutMs: number;
   /** 마지막으로 서버에 다녀와 확인한 시각 (타이머를 켠 시각부터 센다) */
@@ -89,6 +128,33 @@ export class Sessions {
     this.checkEveryMs = options.checkEveryMs ?? DEFAULT_CHECK_MS;
     this.localCheckMs = options.localCheckMs ?? DEFAULT_LOCAL_CHECK_MS;
     this.pingTimeoutMs = options.pingTimeoutMs ?? DEFAULT_PING_TIMEOUT_MS;
+    this.idleCloseMs = options.idleCloseMs ?? DEFAULT_IDLE_CLOSE_MS;
+    Sessions.live.add(this);
+  }
+
+  /** 안 쓰는 콘솔 접속을 닫는 시간을 바꾼다 (설정 변경). 0 이면 닫지 않는다 */
+  setIdleClose(ms: number) {
+    this.idleCloseMs = ms;
+  }
+
+  /** 닫으면 안 되는 접속을 알려 줄 함수 (커밋하지 않은 변경이 있는 콘솔) */
+  setKeepOpen(fn: (key: string) => boolean) {
+    this.keepOpen = fn;
+  }
+
+  /** 그 연결에 열린(또는 여는 중인) 접속 키들 */
+  keysOf(connectionId: string): string[] {
+    return [...new Set([...this.open.keys(), ...this.opening.keys()])].filter((k) => connectionOfKey(k) === connectionId);
+  }
+
+  /** 그 연결에 열린 접속 수 (기본 + 콘솔별) */
+  countOf(connectionId: string): number {
+    return [...this.open.keys()].filter((k) => connectionOfKey(k) === connectionId).length;
+  }
+
+  /** 열린 접속 수 (모든 연결) */
+  get size(): number {
+    return this.open.size;
   }
 
   get(id: string): DbSession | undefined {
@@ -103,45 +169,60 @@ export class Sessions {
     return this.opening.has(id);
   }
 
-  /** 이미 열려 있으면 그 접속을 돌려준다 */
-  async connect(cfg: DbConnectionConfig, password: string): Promise<DbSession> {
-    const have = this.open.get(cfg.id);
+  /**
+   * 이미 열려 있으면 그 접속을 돌려준다. key 는 접속 키 (기본: 연결의 기본 접속).
+   * 접속하는 사이에 끊었으면(disconnect) 열린 접속을 바로 닫고 오류로 끝낸다 — 쓰는 쪽이 닫힌 접속을 들고 있지 않게
+   */
+  async connect(cfg: DbConnectionConfig, password: string, key: string = cfg.id): Promise<DbSession> {
+    if (this.disposed) throw new ConnectAborted();
+    const have = this.open.get(key);
     if (have) return have;
-    let p = this.opening.get(cfg.id);
+    let p = this.opening.get(key);
     if (!p) {
-      p = this.openFn(cfg, password);
-      this.opening.set(cfg.id, p);
-      this.changed.fire();
-      const mine = p;
-      p.then(
+      const mine: Promise<DbSession> = this.openFn(cfg, password, key).then(
         (s) => {
-          if (!this.disposed && this.opening.get(cfg.id) === mine) {
-            this.opening.delete(cfg.id);
-            this.open.set(cfg.id, s);
+          if (!this.disposed && this.opening.get(key) === mine) {
+            this.opening.delete(key);
+            s.lastUsed = Date.now();
+            this.open.set(key, s);
             this.schedule();
-          } else {
-            void s.close().catch(() => undefined); // 접속하는 사이에 연결을 지웠거나 기능을 껐음
+            this.changed.fire();
+            return s;
           }
+          void s.close().catch(() => undefined); // 접속하는 사이에 끊었거나 연결을 지웠거나 기능을 껐음
           this.changed.fire();
+          throw new ConnectAborted();
         },
-        () => {
-          if (this.opening.get(cfg.id) === mine) this.opening.delete(cfg.id);
+        (e) => {
+          if (this.opening.get(key) === mine) this.opening.delete(key);
           this.changed.fire();
+          throw e;
         }
       );
+      p = mine;
+      this.opening.set(key, p);
+      this.changed.fire();
     }
     return p;
   }
 
-  /** 사용자가 끊음 */
-  async disconnect(id: string): Promise<void> {
-    this.opening.delete(id);
-    const s = this.open.get(id);
-    if (!s) return;
-    this.open.delete(id);
+  /** 접속 하나를 닫는다 (접속 키). 여는 중이면 열린 뒤 바로 닫는다 */
+  async disconnect(key: string): Promise<void> {
+    const wasOpening = this.opening.delete(key);
+    const s = this.open.get(key);
+    if (!s) {
+      if (wasOpening) this.changed.fire();
+      return;
+    }
+    this.open.delete(key);
     this.schedule();
     this.changed.fire();
     await s.close().catch(() => undefined);
+  }
+
+  /** 그 연결의 접속을 모두 닫는다 (기본 + 콘솔별). 끊기·연결 수정·삭제 */
+  async disconnectAll(connectionId: string): Promise<void> {
+    await Promise.all(this.keysOf(connectionId).map((k) => this.disconnect(k)));
   }
 
   /** 서버에 다녀와 확인하는 간격을 바꾼다 (설정 변경). 0 이면 서버에는 다녀오지 않는다 (소켓 확인은 계속) */
@@ -163,6 +244,7 @@ export class Sessions {
   }
 
   private tick() {
+    this.closeIdle();
     if (this.checkEveryMs > 0 && Date.now() - this.lastServerCheck >= this.checkEveryMs) {
       void this.checkNow(); // 서버에 다녀오는 확인 (소켓 확인 포함)
       return;
@@ -171,6 +253,24 @@ export class Sessions {
     for (const [id, s] of [...this.open]) {
       if (!s.busy && !s.connection.isHealthy()) this.drop(id, s, '서버와의 연결이 닫혔습니다');
     }
+  }
+
+  /** 오래 안 쓴 콘솔 접속을 닫는다 (기본 접속은 사용자가 끊을 때까지 둔다). 실행 중이거나 커밋하지 않은 변경이 있으면 두고 */
+  closeIdle(now = Date.now()): string[] {
+    if (!(this.idleCloseMs > 0)) return [];
+    const closed: string[] = [];
+    for (const [key, s] of [...this.open]) {
+      if (!isConsoleKey(key) || s.busy || now - s.lastUsed < this.idleCloseMs || this.keepOpen(key)) continue;
+      this.open.delete(key);
+      void s.close().catch(() => undefined);
+      closed.push(key);
+    }
+    if (closed.length) {
+      this.schedule();
+      this.changed.fire();
+      for (const k of closed) this.idle.fire(k);
+    }
+    return closed;
   }
 
   /**
@@ -216,16 +316,32 @@ export class Sessions {
     this.schedule();
     void s.close().catch(() => undefined); // 이미 끊긴 접속이라 실패해도 된다 (드라이버 쪽 자원 정리)
     this.changed.fire();
-    this.lost.fire({ id, reason });
+    this.lost.fire({ id, connectionId: connectionOfKey(id), reason });
   }
 
-  dispose() {
+  /** 모두 닫는다 (실행 중이면 서버에서 멈춘 뒤). 닫기가 끝나면 풀리는 Promise — 확장을 끌 때 기다린다 */
+  dispose(): Promise<void> {
+    if (this.disposed) return this.closing ?? Promise.resolve();
     this.disposed = true;
+    Sessions.live.delete(this);
     this.schedule();
     this.opening.clear();
-    for (const s of this.open.values()) void s.close().catch(() => undefined);
+    const all = [...this.open.values()];
     this.open.clear();
     this.changed.dispose();
     this.lost.dispose();
+    this.idle.dispose();
+    this.closing = Promise.all(all.map((s) => s.close().catch(() => undefined))).then(() => undefined);
+    return this.closing;
+  }
+
+  private closing: Promise<void> | undefined;
+  private static readonly live = new Set<Sessions>();
+
+  /** 확장을 끌 때(deactivate): 열린 접속을 모두 닫고 기다린다 (오래 걸리면 timeoutMs 에서 그만 기다림) */
+  static closeAll(timeoutMs = 4000): Promise<void> {
+    const all = [...Sessions.live].map((x) => x.dispose());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([Promise.all(all).then(() => undefined), new Promise<void>((res) => (timer = setTimeout(res, timeoutMs)))]).finally(() => clearTimeout(timer));
   }
 }

@@ -160,6 +160,12 @@
         "icon": "$(terminal)"
       },
       {
+        "command": "devBoost.dbConsole.newConsole",
+        "title": "새 콘솔 (콘솔 하나 더)",
+        "category": "DB 콘솔",
+        "icon": "$(add)"
+      },
+      {
         "command": "devBoost.dbConsole.run",
         "title": "실행 (커서가 있는 문장 / 선택 영역)",
         "category": "DB 콘솔",
@@ -433,6 +439,10 @@
           "when": "config.devBoost.dbConsole.enabled"
         },
         {
+          "command": "devBoost.dbConsole.newConsole",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
           "command": "devBoost.dbConsole.run",
           "when": "config.devBoost.dbConsole.enabled && activeWebviewPanelId == 'devBoostDbConsole'"
         },
@@ -580,13 +590,18 @@
           "group": "0_console@1"
         },
         {
+          "command": "devBoost.dbConsole.newConsole",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\./",
+          "group": "0_console@2"
+        },
+        {
           "command": "devBoost.dbConsole.connect",
           "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.disconnected/",
           "group": "inline@1"
         },
         {
           "command": "devBoost.dbConsole.disconnect",
-          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.connected/",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.(connected|disconnected\\.sessions)/",
           "group": "inline@1"
         },
         {
@@ -601,7 +616,7 @@
         },
         {
           "command": "devBoost.dbConsole.disconnect",
-          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.connected/",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.(connected|disconnected\\.sessions)/",
           "group": "1_session@1"
         },
         {
@@ -1132,6 +1147,17 @@
             "default": 300,
             "minimum": 0,
             "markdownDescription": "열려 있는 DB 접속이 살아 있는지 **서버에 다녀와** 확인하는 간격(초). 기본 300초(5분). 끊긴 것을 알아채면 목록에서 접속 안 됨으로 바꾸고 알립니다. `0` 이면 서버에는 다녀오지 않습니다 (30 보다 작은 값은 30초로).\n\n이와 별개로 연결(소켓)이 닫혔는지는 30초마다 봅니다 — 서버에 요청을 보내지 않는 확인입니다.\n\n서버에 다녀오는 확인은 쉬는 접속을 끊는 방화벽이나 DB 의 쉬는 시간 제한(IDLE_TIME)에 걸리지 않고 접속이 유지되는 효과도 있습니다. 그것을 원하지 않으면 `0` 으로 두세요 (끊김은 다음에 쓸 때 알게 됩니다)."
+          },
+          "devBoost.dbConsole.sessionPerConsole": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "콘솔마다 따로 접속합니다 (기본). 콘솔 1 은 연결 목록(트리)과 접속을 같이 쓰고, 콘솔 2부터는 저마다 접속합니다 — 한 콘솔에서 긴 쿼리를 돌리는 동안 다른 콘솔을 쓸 수 있고, 커밋·롤백도 콘솔마다 따로입니다.\n\n콘솔 2부터의 접속은 처음 실행할 때 열고, 콘솔을 닫으면 닫습니다 (커밋하지 않은 변경이 있으면 커밋·롤백을 먼저 묻습니다). 끄면 모든 콘솔이 접속 하나를 같이 씁니다 (서버 접속 수를 늘리기 어려운 DB). 바꾼 값은 새로 여는 콘솔부터 적용됩니다."
+          },
+          "devBoost.dbConsole.idleCloseMinutes": {
+            "type": "number",
+            "default": 30,
+            "minimum": 0,
+            "markdownDescription": "콘솔 2부터의 접속을 이 시간(분) 동안 쓰지 않으면 닫습니다. 기본 30분. 콘솔은 그대로 두고, 다음에 실행하면 다시 접속합니다. 커밋하지 않은 변경이 있거나 실행 중이면 닫지 않습니다. `0` 이면 닫지 않습니다 (5 보다 작은 값은 5분으로).\n\n연결 목록의 기본 접속(콘솔 1)은 접속 끊기를 할 때까지 둡니다."
           },
           "devBoost.dbConsole.pageSize": {
             "type": "number",
