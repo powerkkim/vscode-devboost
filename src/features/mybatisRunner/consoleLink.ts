@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import { MapperDoc, MapperStatement } from './mapper/mapperDoc';
 import { buildConsoleRun, ConsoleParam, PanelSpec, panelSpecs } from './mapper/consoleSql';
-import { ParamInput } from './mapper/values';
+import { ParamInput, ParamType } from './mapper/values';
+
+const TYPES: ParamType[] = ['auto', 'string', 'number', 'date', 'list', 'json', 'null', 'empty'];
 import { MapperIndex } from './mapperIndex';
-import { RunnerStore } from './store';
+import { RunnerStore, stmtKey } from './store';
 
 /**
  * MyBatis mapper ↔ DevBoost DB 콘솔.
@@ -52,7 +54,9 @@ export async function consolePanel(deps: Deps, ns: string, id: string, set?: { p
   const st = doc.statements.find((s) => s.id === id);
   if (!st) return { ok: false, ns, id, why: `${ns} 에 ${id} 쿼리가 없습니다` };
   if (set && typeof set.path === 'string') {
-    deps.store.setInput(`${doc.namespace || doc.file}.${st.id}`, set.path, { type: set.input?.type ?? 'auto', value: String(set.input?.value ?? '') });
+    // 화면에서 온 값: 종류는 아는 것만 (모르면 자동)
+    const type = TYPES.includes(set.input?.type as ParamType) ? (set.input.type as ParamType) : 'auto';
+    deps.store.setInput(stmtKey(doc, st), set.path, { type, value: String(set.input?.value ?? '') });
   }
   const p = render(deps, doc, st);
   const run = buildConsoleRun(p.result.sql, p.result.binds, '');
