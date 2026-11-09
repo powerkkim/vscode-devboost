@@ -8,7 +8,7 @@ import { driverFor } from './driver/registry';
 import { ConnectionStore } from './connectionStore';
 import { ConsoleStore, ConsoleSaved } from './consoleStore';
 import { HistoryStore } from './historyStore';
-import { Sessions } from './sessions';
+import { Sessions, isConsoleKey, sessionKey } from './sessions';
 import { Statement, StatementInfo, classify, changesData } from './sql/statements';
 import { BindInput, bindValuesFor, toDriverSql } from './sql/binds';
 import { MAX_ROWS_LIMIT, ResultData, ResultView } from './ui/resultView';
@@ -47,6 +47,8 @@ type FromWebview =
   | { type: 'history' }
   | { type: 'book' }
   | { type: 'addToBook'; sql: string }
+  | { type: 'newConsole' }
+  | { type: 'mapperPanel'; seq: number; ns: string; id: string; set?: { path: string; input: { type: string; value: string } } }
   | DialogMessage;
 
 /** 쿼리 아래에 붙는 결과 하나 (화면이 그린다) */
@@ -66,8 +68,8 @@ export interface ConsoleDeps {
   sessions: Sessions;
   results: ResultView;
   formActions: FormActions;
-  /** 접속돼 있지 않으면 접속한다 (비밀번호를 묻는 것까지). 실패·취소면 undefined */
-  ensureSession(cfg: DbConnectionConfig): Promise<DbSession | undefined>;
+  /** 접속돼 있지 않으면 접속한다 (비밀번호를 묻는 것까지). key 는 접속 키 (기본: 연결의 기본 접속). 실패·취소면 undefined */
+  ensureSession(cfg: DbConnectionConfig, key?: string): Promise<DbSession | undefined>;
   /** 연결을 고르게 한다 */
   pickConnection(title: string): Promise<DbConnectionConfig | undefined>;
   /** 그 연결의 테이블 이름들 (자동 완성용). 모르면 [] */
@@ -76,10 +78,20 @@ export interface ConsoleDeps {
   columnNames(connectionId: string, name: string): Promise<string[]>;
 }
 
-/** 콘솔 탭 하나 (연결 하나에 하나. 연결을 아직 정하지 않은 빈 콘솔도 있다 — 연결 추가 팝업을 띄우는 자리) */
+/**
+ * 콘솔 탭 하나. 연결 하나에 여러 개 (콘솔 1, 2, 3…). 연결을 아직 정하지 않은 빈 콘솔도 있다 — 연결 추가 팝업을 띄우는 자리.
+ *  - 콘솔 1 은 연결의 기본 접속(트리와 같이 씀), 콘솔 2부터는 저마다 접속 (설정으로 모두 기본 접속을 같이 쓰게 할 수 있다)
+ *  - 커밋하지 않은 변경·실행 중은 접속(key)마다 센다
+ */
 interface ConsoleTab {
   panel: vscode.WebviewPanel;
   connectionId: string | undefined;
+  /** 콘솔 번호 (1부터. 빈 콘솔은 0) */
+  no: number;
+  /** 이 콘솔이 쓰는 접속 키 */
+  key: string | undefined;
+  /** 마지막으로 본 시각 (트리·사전에서 넣을 때 그 연결의 어느 콘솔에 넣을지) */
+  seenAt: number;
   ready: boolean;
   /** 화면이 준비되기 전에 보내려던 메시지 */
   queue: unknown[];
@@ -92,7 +104,7 @@ interface ConsoleTab {
  * 쿼리 콘솔: 실행 도구 줄 · 파라미터 줄 · SQL 편집기를 한 화면(Webview)에 그린다.
  * 결과·실행계획은 실행한 문장 바로 아래(편집기 안)에 낸다. 하단 패널 "DB 결과"에도 쌓아 두지만 열지는 않는다
  * (크게 보거나 기록을 볼 때 사용자가 연다. 쿼리 아래의 "패널" 버튼은 그 결과를 패널에서 보여 준다).
- *  - 연결마다 콘솔 하나. 쓰던 SQL·파라미터 값은 연결별 파일로 기억한다
+ *  - 연결마다 콘솔 여러 개 (콘솔마다 따로 접속 — ConsoleTab 참고). 쓰던 SQL·파라미터 값은 콘솔 번호별 파일로 기억한다
  *  - Ctrl+Enter: 선택 영역의 문장들, 없으면 커서가 있는 문장. Ctrl+E: 실행계획
  *  - 자동 커밋하지 않는다. 변경한 문장 수를 "커밋 안 한 변경 N건"으로 보여 주고 커밋·롤백으로 확정한다
  *  - 안전장치: 읽기 전용 연결은 조회만, WHERE 없는 UPDATE·DELETE 와 운영 DB 변경은 실행 전에 확인
@@ -100,10 +112,13 @@ interface ConsoleTab {
  */
 export class DbConsole implements vscode.Disposable {
   private readonly tabs = new Set<ConsoleTab>();
-  /** 연결 id → 커밋하지 않은 변경 문장 수 */
+  /** 접속 키 → 커밋하지 않은 변경 문장 수 */
   private readonly dirty = new Map<string, number>();
-  /** 사용자가 실행 중인 연결 (실행을 두 번 겹쳐 누르지 않게. 트리 읽기 같은 일은 줄을 서서 기다린다) */
+  /** 사용자가 실행 중인 접속 키 (실행을 두 번 겹쳐 누르지 않게. 트리 읽기 같은 일은 줄을 서서 기다린다) */
   private readonly running = new Set<string>();
+  /** 실행이 끝나기를 기다리는 일 (콘솔을 닫을 때 실행을 멈추고 끝나기를 기다린다) */
+  private readonly waiters = new Map<string, (() => void)[]>();
+  private disposing = false;
   /** 결과 탭 id → 그 결과를 쿼리 아래에 보여 주는 콘솔 */
   private readonly owners = new Map<number, ConsoleTab>();
   private readonly subs: vscode.Disposable[] = [];
@@ -111,6 +126,7 @@ export class DbConsole implements vscode.Disposable {
   constructor(private readonly deps: ConsoleDeps) {
     deps.results.fetchMore = (connectionId, cursor, count) => this.fetchMore(connectionId, cursor, count);
     deps.results.setLimits(pageSize(), maxRows());
+    deps.sessions.setKeepOpen((key) => this.isDirtyKey(key) || this.running.has(key));
     this.subs.push(
       // 접속이 닫히면(끊김 포함) 그 접속의 변경은 롤백된 것이고, 열어 둔 커서도 못 쓴다
       deps.sessions.onDidChange(() => {
@@ -119,13 +135,18 @@ export class DbConsole implements vscode.Disposable {
         this.refresh();
       }),
       deps.sessions.onDidLose(({ id }) => deps.results.dropConnection(id)),
+      // 오래 안 쓴 콘솔 접속을 닫았으면: 그 결과의 "더 가져오기"는 못 쓴다. 다음에 실행하면 다시 접속한다
+      deps.sessions.onDidCloseIdle((key) => {
+        deps.results.dropConnection(key);
+        for (const tab of this.tabs) if (tab.key === key) this.post(tab, { type: 'hint', message: '한동안 쓰지 않아 접속을 닫았습니다. 실행하면 다시 접속합니다.' });
+      }),
       deps.store.onDidChange(() => {
         // 지운 연결의 콘솔은 닫고, 이름이 바뀐 연결은 탭 제목을 맞춘다
         for (const tab of [...this.tabs]) {
           if (!tab.connectionId) continue;
           const cfg = deps.store.get(tab.connectionId);
           if (!cfg) tab.panel.dispose();
-          else tab.panel.title = `${cfg.name}.sql`;
+          else tab.panel.title = this.titleOf(cfg, tab.no);
         }
         this.refresh();
       }),
@@ -143,6 +164,8 @@ export class DbConsole implements vscode.Disposable {
         }
         for (const [tab, list] of byTab) this.post(tab, { type: 'inlineDropped', ids: list });
       }),
+      // 오래 안 쓴 접속을 닫을 때, 커밋하지 않은 변경이 있거나 실행 중인 접속은 두고
+      { dispose: () => deps.sessions.setKeepOpen(() => false) },
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('devBoost.dbConsole.pageSize') || e.affectsConfiguration('devBoost.dbConsole.maxRows')) this.sendLimits();
       })
@@ -157,13 +180,56 @@ export class DbConsole implements vscode.Disposable {
   }
 
   dispose() {
+    // VS Code 를 닫는 중: 묻지 않는다. 접속은 Sessions 가 모두 닫는다 (커밋하지 않은 변경은 서버가 롤백)
+    this.disposing = true;
     this.subs.forEach((d) => d.dispose());
     for (const tab of [...this.tabs]) tab.panel.dispose();
   }
 
-  /** 이 연결에 커밋하지 않은 변경이 있는가 (끊기 전에 물어보려고) */
+  /** 이 연결의 어느 접속에든 커밋하지 않은 변경이 있는가 (끊기 전에 물어보려고) */
   isDirty(connectionId: string): boolean {
-    return (this.dirty.get(connectionId) ?? 0) > 0;
+    return this.deps.sessions.keysOf(connectionId).some((k) => this.isDirtyKey(k));
+  }
+
+  /** 이 연결에서 커밋하지 않은 변경 수 (모든 콘솔) */
+  dirtyCount(connectionId: string): number {
+    return this.deps.sessions.keysOf(connectionId).reduce((n, k) => n + (this.dirty.get(k) ?? 0), 0);
+  }
+
+  private isDirtyKey(key: string): boolean {
+    return (this.dirty.get(key) ?? 0) > 0;
+  }
+
+  /** 실행 시작·끝 (끝나면 기다리던 일을 깨운다) */
+  private startRunning(key: string) {
+    this.running.add(key);
+    this.refresh();
+  }
+
+  private endRunning(key: string) {
+    this.running.delete(key);
+    for (const w of this.waiters.get(key)?.splice(0) ?? []) w();
+    this.waiters.delete(key);
+    this.refresh();
+  }
+
+  private untilIdle(key: string): Promise<void> {
+    if (!this.running.has(key)) return Promise.resolve();
+    return new Promise((res) => {
+      const list = this.waiters.get(key) ?? [];
+      list.push(res);
+      this.waiters.set(key, list);
+    });
+  }
+
+  /** 탭 제목: 콘솔 1 은 "개발DB.sql", 2부터 "개발DB (2).sql" */
+  private titleOf(cfg: DbConnectionConfig, no: number) {
+    return no > 1 ? `${cfg.name} (${no}).sql` : `${cfg.name}.sql`;
+  }
+
+  /** 콘솔 이름 (알림·확인 창에) */
+  private labelOf(cfg: DbConnectionConfig, no: number) {
+    return no > 1 ? `${cfg.name} 콘솔 ${no}` : cfg.name;
   }
 
   private activeTab(): ConsoleTab | undefined {
@@ -171,6 +237,7 @@ export class DbConsole implements vscode.Disposable {
   }
 
   private post(tab: ConsoleTab, msg: unknown) {
+    if (!this.tabs.has(tab)) return; // 닫은 콘솔 (실행이 끝나기 전에 닫았을 때)
     if (tab.ready) void tab.panel.webview.postMessage(msg);
     else tab.queue.push(msg);
   }
@@ -187,17 +254,20 @@ export class DbConsole implements vscode.Disposable {
 
   private sendStatus(tab: ConsoleTab) {
     const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
-    const s = cfg && this.deps.sessions.get(cfg.id);
+    const key = tab.key;
+    const s = cfg && key ? this.deps.sessions.get(key) : undefined;
     this.post(tab, {
       type: 'status',
-      name: cfg?.name,
+      name: cfg ? this.labelOf(cfg, tab.no) : undefined,
       kind: cfg ? kindOf(cfg) : undefined,
       product: s?.info.product,
       schema: s?.info.schema,
       connected: !!s,
-      connecting: !!cfg && this.deps.sessions.isConnecting(cfg.id),
-      busy: !!cfg && this.running.has(cfg.id),
-      dirty: cfg ? (this.dirty.get(cfg.id) ?? 0) : 0,
+      // 이 콘솔만 쓰는 접속은 실행할 때 접속한다 ("접속 안 됨" 대신)
+      lazy: !!key && isConsoleKey(key),
+      connecting: !!cfg && !!key && this.deps.sessions.isConnecting(key),
+      busy: !!key && this.running.has(key),
+      dirty: key ? (this.dirty.get(key) ?? 0) : 0,
       readOnly: !!cfg?.readOnly,
       production: !!cfg?.production,
       // 그 DB에만 있는 기능: 접속이 내놓을 때만 화면에 보인다
@@ -211,20 +281,36 @@ export class DbConsole implements vscode.Disposable {
     for (const tab of this.tabs) if (tab.connectionId === connectionId) this.post(tab, { type: 'tables', names: this.deps.tableNames(connectionId) });
   }
 
-  /** 연결의 콘솔을 연다. 이미 열려 있으면 그 탭으로 간다 */
+  /** 연결의 콘솔을 연다. 이미 열려 있으면 그 연결에서 마지막으로 본 콘솔로 간다 */
   open(cfg: DbConnectionConfig): ConsoleTab {
-    const have = [...this.tabs].find((t) => t.connectionId === cfg.id);
+    const have = [...this.tabs].filter((t) => t.connectionId === cfg.id).sort((a, b) => b.seenAt - a.seenAt)[0];
     if (have) {
       have.panel.reveal(undefined, false);
       return have;
     }
+    return this.openNew(cfg);
+  }
+
+  /**
+   * 그 연결의 콘솔을 하나 더 연다 (비어 있는 가장 작은 번호). 콘솔 2부터는 저마다 접속하는데,
+   * 처음 실행할 때 접속한다 (열기만 하고 안 쓰는 콘솔이 서버에 접속을 잡아 두지 않게)
+   */
+  openNew(cfg: DbConnectionConfig): ConsoleTab {
+    const used = new Set([...this.tabs].filter((t) => t.connectionId === cfg.id).map((t) => t.no));
+    let no = 1;
+    while (used.has(no)) no++;
     // 연결을 아직 정하지 않은 빈 콘솔이 있으면 그것을 쓴다
     const blank = [...this.tabs].find((t) => !t.connectionId);
     const tab = blank ?? this.create();
-    void this.bind(tab, cfg);
+    void this.bind(tab, cfg, no);
     tab.panel.reveal(undefined, false);
-    void this.deps.ensureSession(cfg); // 쓰는 동안 미리 접속해 둔다
+    if (tab.key === cfg.id) void this.deps.ensureSession(cfg); // 기본 접속은 미리 (트리도 쓴다)
     return tab;
+  }
+
+  /** 그 연결에 열린 콘솔 수 */
+  consoleCount(connectionId: string): number {
+    return [...this.tabs].filter((t) => t.connectionId === connectionId).length;
   }
 
   private create(): ConsoleTab {
@@ -235,41 +321,65 @@ export class DbConsole implements vscode.Disposable {
       localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media', 'dbConsole')],
     });
     panel.iconPath = new vscode.ThemeIcon('database');
-    const tab: ConsoleTab = { panel, connectionId: undefined, ready: false, queue: [], serverOutput: false };
+    const tab: ConsoleTab = { panel, connectionId: undefined, no: 0, key: undefined, seenAt: Date.now(), ready: false, queue: [], serverOutput: false };
     this.tabs.add(tab);
     panel.webview.html = this.html(panel.webview);
     panel.webview.onDidReceiveMessage((m: FromWebview) => void this.onMessage(tab, m).catch((e) => this.fail(tab, e)));
+    panel.onDidChangeViewState((e) => {
+      if (e.webviewPanel.active) tab.seenAt = Date.now();
+    });
     panel.onDidDispose(() => {
       tab.dialog?.cancel();
       this.tabs.delete(tab);
       for (const [id, owner] of [...this.owners]) if (owner === tab) this.owners.delete(id);
-      this.warnUncommitted(tab.connectionId);
+      void this.closeTab(tab).catch((e) => this.fail(tab, e));
     });
     return tab;
   }
 
   /**
-   * 콘솔을 닫았는데 커밋하지 않은 변경이 남아 있으면 알린다.
-   * 접속은 열려 있으므로 여기서 커밋·롤백할 수 있다 (닫는 것 자체는 막을 수 없다)
+   * 콘솔을 닫은 뒤: 서버에 접속·잠금이 남지 않게 정리한다.
+   *  1) 실행 중이면 멈추고 끝나기를 기다린다
+   *  2) 커밋하지 않은 변경이 있으면 커밋·롤백을 고르게 한다 (고르지 않고 닫으면 롤백 — 콘솔이 없으니 나중에 확정할 곳이 없다)
+   *  3) 이 콘솔만 쓰던 접속이면 닫는다. 기본 접속(트리와 같이 씀)이나 다른 콘솔도 쓰는 접속이면 둔다
+   * VS Code 를 닫는 중이면 묻지 않는다 (접속을 모두 닫으면 서버가 롤백한다)
    */
-  private warnUncommitted(connectionId: string | undefined) {
-    if (!connectionId || !this.isDirty(connectionId)) return;
-    const cfg = this.deps.store.get(connectionId);
-    if (!cfg) return;
-    const commit = '커밋';
-    const rollback = '롤백';
-    void vscode.window
-      .showWarningMessage(`${cfg.name} 에 커밋하지 않은 변경 ${this.dirty.get(connectionId)}건이 남아 있습니다.`, commit, rollback)
-      .then((b) => {
-        if (b === commit || b === rollback) void this.endTransaction(cfg, b === commit ? 'commit' : 'rollback');
-      });
+  private async closeTab(tab: ConsoleTab) {
+    const key = tab.key;
+    if (!key || !tab.connectionId || this.disposing) return;
+    if ([...this.tabs].some((t) => t.key === key)) return; // 다른 콘솔이 같은 접속을 쓴다
+    const cfg = this.deps.store.get(tab.connectionId);
+    if (this.running.has(key)) {
+      void this.deps.sessions.get(key)?.connection.cancel().catch(() => undefined);
+      await this.untilIdle(key);
+    }
+    if (cfg && this.isDirtyKey(key) && this.deps.sessions.isConnected(key)) {
+      const commit = '커밋';
+      const rollback = '롤백';
+      const answer = await vscode.window.showWarningMessage(
+        `${this.labelOf(cfg, tab.no)} 에 커밋하지 않은 변경 ${this.dirty.get(key)}건이 있습니다.`,
+        { modal: true, detail: '콘솔을 닫았으니 지금 확정합니다. 고르지 않고 닫으면 롤백합니다.' },
+        commit,
+        rollback
+      );
+      if (this.disposing) return;
+      const ok = await this.endTransaction(cfg, key, answer === commit ? 'commit' : 'rollback');
+      if (!ok && answer === commit) {
+        // 커밋하지 못했으면 접속을 닫지 않는다 — 변경이 롤백되지 않게. 다시 콘솔을 열어 확정할 수 있다
+        if (isConsoleKey(key)) void vscode.window.showWarningMessage(`${this.labelOf(cfg, tab.no)} 의 접속은 커밋하지 못해 열어 두었습니다. 접속 끊기를 하면 롤백됩니다.`);
+        return;
+      }
+    }
+    if (isConsoleKey(key)) await this.deps.sessions.disconnect(key);
   }
 
-  /** 콘솔에 연결을 정하고 기억해 둔 SQL·파라미터를 불러온다 */
-  private async bind(tab: ConsoleTab, cfg: DbConnectionConfig) {
+  /** 콘솔에 연결을 정하고 기억해 둔 SQL·파라미터를 불러온다. no: 콘솔 번호 */
+  private async bind(tab: ConsoleTab, cfg: DbConnectionConfig, no = 1) {
     tab.connectionId = cfg.id;
-    tab.panel.title = `${cfg.name}.sql`;
-    const saved = await this.deps.consoles.load(cfg.id);
+    tab.no = no;
+    tab.key = sharedSession() ? cfg.id : sessionKey(cfg.id, no);
+    tab.panel.title = this.titleOf(cfg, no);
+    const saved = await this.deps.consoles.load(sessionKey(cfg.id, no)); // 쓰던 SQL 은 콘솔 번호마다
     tab.serverOutput = !!saved?.serverOutput;
     this.post(tab, {
       type: 'init',
@@ -286,7 +396,7 @@ export class DbConsole implements vscode.Disposable {
 
   /** 기억해 둔 서버 출력 켬·끔을 접속에 맞춘다 (그 기능이 있는 DB일 때만) */
   private async syncServerOutput(tab: ConsoleTab) {
-    const s = tab.connectionId ? this.deps.sessions.get(tab.connectionId) : undefined;
+    const s = tab.key ? this.deps.sessions.get(tab.key) : undefined;
     const out = s?.connection.extras.output;
     if (!s || !out || out.enabled === tab.serverOutput) return;
     try {
@@ -363,12 +473,12 @@ export class DbConsole implements vscode.Disposable {
       case 'save':
         if (tab.connectionId) {
           const saved: ConsoleSaved = { sql: m.sql, params: m.params, confirmEach: m.confirmEach, serverOutput: tab.serverOutput };
-          await this.deps.consoles.save(tab.connectionId, saved);
+          await this.deps.consoles.save(sessionKey(tab.connectionId, tab.no), saved);
         }
         return;
       case 'connect': {
         const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
-        if (cfg) await this.deps.ensureSession(cfg);
+        if (cfg) await this.deps.ensureSession(cfg, tab.key);
         return;
       }
       case 'run':
@@ -378,7 +488,7 @@ export class DbConsole implements vscode.Disposable {
       case 'commit':
       case 'rollback': {
         const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
-        if (cfg) await this.endTransaction(cfg, m.type, tab);
+        if (cfg && tab.key) await this.endTransaction(cfg, tab.key, m.type, tab);
         return;
       }
       case 'more':
@@ -416,12 +526,28 @@ export class DbConsole implements vscode.Disposable {
       case 'book':
         if (tab.connectionId) await vscode.commands.executeCommand('devBoost.dbConsole.queryBook', undefined, tab.connectionId);
         return;
+      case 'newConsole': {
+        const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
+        if (cfg) this.openNew(cfg);
+        return;
+      }
       case 'addToBook':
         if (tab.connectionId) await vscode.commands.executeCommand('devBoost.dbConsole.addToQueryBook', tab.connectionId, m.sql);
         return;
       case 'needColumns': {
         const names = tab.connectionId ? await this.deps.columnNames(tab.connectionId, m.name).catch(() => []) : [];
         this.post(tab, { type: 'columns', name: m.name, columns: names });
+        return;
+      }
+      case 'mapperPanel': {
+        // MyBatis mapper 에서 온 문장: 왼쪽 패널의 파라미터·조건 상태와 다시 푼 SQL (MyBatis SQL 실행 기능이 답한다)
+        let reply: unknown;
+        try {
+          reply = await vscode.commands.executeCommand('devBoost.mybatisRunner.consolePanel', m.ns, m.id, m.set);
+        } catch {
+          reply = undefined;
+        }
+        this.post(tab, { type: 'mapperPanel', seq: m.seq, reply: reply ?? { ok: false, ns: m.ns, id: m.id, why: 'MyBatis SQL 실행 기능이 꺼져 있습니다' } });
         return;
       }
       case 'serverOutput':
@@ -434,23 +560,29 @@ export class DbConsole implements vscode.Disposable {
         const r = await tab.dialog?.onMessage(m);
         if (!r) return;
         tab.dialog = undefined;
-        if (r.done === 'saved' && !tab.connectionId) await this.bind(tab, r.config); // 빈 콘솔이면 방금 만든 연결의 콘솔이 된다
+        if (r.done === 'saved' && !tab.connectionId) await this.bind(tab, r.config, 1); // 빈 콘솔이면 방금 만든 연결의 콘솔이 된다
         else if (r.done === 'cancelled' && !tab.connectionId) tab.panel.dispose(); // 팝업만 띄우려고 연 빈 콘솔은 닫는다
       }
     }
   }
 
   /** 실행할 준비: 연결·접속·겹침 확인. 안 되면 undefined */
-  private async prepare(tab: ConsoleTab): Promise<{ cfg: DbConnectionConfig; session: DbSession } | undefined> {
+  private async prepare(tab: ConsoleTab): Promise<{ cfg: DbConnectionConfig; session: DbSession; key: string } | undefined> {
     const cfg = tab.connectionId ? this.deps.store.get(tab.connectionId) : undefined;
-    if (!cfg) return undefined;
-    if (this.running.has(cfg.id)) {
+    const key = tab.key;
+    if (!cfg || !key) return undefined;
+    if (this.running.has(key)) {
       this.post(tab, { type: 'hint', message: '다른 쿼리를 실행하는 중입니다. 끝난 뒤에 다시 실행하세요.' });
       return undefined;
     }
-    const session = await this.deps.ensureSession(cfg);
+    const session = await this.deps.ensureSession(cfg, key);
+    // 접속하는 사이에 콘솔을 닫았으면 이 콘솔만 쓰는 접속은 바로 닫는다 (남지 않게)
+    if (!this.tabs.has(tab)) {
+      if (session && isConsoleKey(key) && ![...this.tabs].some((t) => t.key === key)) await this.deps.sessions.disconnect(key);
+      return undefined;
+    }
     if (!session) return undefined;
-    return { cfg, session };
+    return { cfg, session, key };
   }
 
   /** 쿼리 아래 결과를 화면에 보낸다 */
@@ -467,14 +599,13 @@ export class DbConsole implements vscode.Disposable {
     if (!(await this.confirmSafe(cfg0, statements, infos))) return cancelAll('실행하지 않았습니다');
     const ready = await this.prepare(tab);
     if (!ready) return cancelAll('실행하지 않았습니다');
-    const { cfg, session } = ready;
+    const { cfg, session, key } = ready;
 
     const { results } = this.deps;
     results.setLimits(pageSize(), maxRows());
     results.beginRun();
 
-    this.running.add(cfg.id);
-    this.refresh();
+    this.startRunning(key);
     try {
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `${cfg.name}: 실행 중…`, cancellable: true },
@@ -502,10 +633,10 @@ export class DbConsole implements vscode.Disposable {
             try {
               const r = await session.use((c) => c.execute(toDriverSql(st.sql, rules), binds.values, results.pageSize));
               const output = await this.readOutput(session);
-              this.afterRun(tab, cfg, st, infos[i], r, output);
+              this.afterRun(tab, cfg, key, st, infos[i], r, output);
             } catch (e) {
               const output = await this.readOutput(session).catch(() => undefined);
-              this.runFailed(tab, cfg, st, e, cancelled, output);
+              this.runFailed(tab, cfg, key, st, e, cancelled, output);
               statements.slice(i + 1).forEach((s) => this.inline(tab, s.key, { status: 'skip', text: '앞 문장이 실패해 실행하지 않았습니다' }));
               break; // 뒤 문장은 실행하지 않는다
             }
@@ -513,8 +644,7 @@ export class DbConsole implements vscode.Disposable {
         }
       );
     } finally {
-      this.running.delete(cfg.id);
-      this.refresh();
+      this.endRunning(key);
     }
   }
 
@@ -545,7 +675,7 @@ export class DbConsole implements vscode.Disposable {
   private async exportAll(tab: ConsoleTab, sql: string, params: Params) {
     const ready = await this.prepare(tab);
     if (!ready) return;
-    const { cfg, session } = ready;
+    const { cfg, session, key } = ready;
     const rules = driverFor(cfg).rules;
     const binds = bindValuesFor(sql, params, rules);
     if (!binds.ok) return void vscode.window.showErrorMessage(`파라미터 값이 맞지 않습니다: ${binds.message}`);
@@ -559,8 +689,7 @@ export class DbConsole implements vscode.Disposable {
       write: (text) => (out ? new Promise((res, rej) => out.write(text, (err) => (err ? rej(err) : res()))) : (parts.push(text), Promise.resolve())),
     };
     const BATCH = 1000;
-    this.running.add(cfg.id);
-    this.refresh();
+    this.startRunning(key);
     try {
       const r = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `${cfg.name}: 전체 내보내는 중…`, cancellable: true },
@@ -594,12 +723,11 @@ export class DbConsole implements vscode.Disposable {
         await new Promise<void>((res) => out.end(res));
         await fs.promises.unlink(uri.fsPath).catch(() => undefined);
       }
-      this.deps.sessions.reportError(cfg.id, e);
+      this.deps.sessions.reportError(key, e);
       const errors = driverFor(cfg).errors;
       void vscode.window.showErrorMessage(errors.isCancel(e) ? '내보내기를 취소했습니다' : `내보내지 못했습니다: ${errors.explain(e)}`);
     } finally {
-      this.running.delete(cfg.id);
-      this.refresh();
+      this.endRunning(key);
     }
   }
 
@@ -612,9 +740,9 @@ export class DbConsole implements vscode.Disposable {
   }
 
   /** 실행 오류: 메시지·쿼리 아래에 남기고, 난 자리를 알면 커서를 옮긴다. 접속이 끊겨서 난 오류면 목록에서도 뺀다 (Sessions 가 알림) */
-  private runFailed(tab: ConsoleTab, cfg: DbConnectionConfig, st: Target, e: unknown, cancelled: boolean, output?: string[]) {
+  private runFailed(tab: ConsoleTab, cfg: DbConnectionConfig, key: string, st: Target, e: unknown, cancelled: boolean, output?: string[]) {
     const errors = driverFor(cfg).errors;
-    const lost = this.deps.sessions.reportError(cfg.id, e);
+    const lost = this.deps.sessions.reportError(key, e);
     const wasCancel = cancelled || errors.isCancel(e);
     const off = errors.offset(e);
     // 드라이버에 보낸 SQL 은 #{name} → :name 으로 길이가 달라질 수 있어, 줄 번호는 원문 기준으로 대략 맞춘다
@@ -632,13 +760,14 @@ export class DbConsole implements vscode.Disposable {
   }
 
   /** 실행 결과를 패널·쿼리 아래에 넣고, 커밋할 것이 생겼는지 기록한다 */
-  private afterRun(tab: ConsoleTab, cfg: DbConnectionConfig, st: Target, info: StatementInfo, r: RunResult, output: string[] | undefined) {
+  private afterRun(tab: ConsoleTab, cfg: DbConnectionConfig, key: string, st: Target, info: StatementInfo, r: RunResult, output: string[] | undefined) {
     const { results } = this.deps;
     const sql = firstLine(st.sql);
-    const addDirty = () => this.dirty.set(cfg.id, (this.dirty.get(cfg.id) ?? 0) + 1);
+    const addDirty = () => this.dirty.set(key, (this.dirty.get(key) ?? 0) + 1);
     this.logOutput(cfg, output);
     if (r.kind === 'rows') {
-      const resultId = results.addRows({ sql: st.sql, connectionId: cfg.id, kind: kindOf(cfg), columns: r.columns, rows: r.page.rows, done: r.page.done, ms: r.ms, cursor: r.cursor });
+      // 결과의 "더 가져오기"는 이 접속(key)으로
+      const resultId = results.addRows({ sql: st.sql, connectionId: key, kind: kindOf(cfg), columns: r.columns, rows: r.page.rows, done: r.page.done, ms: r.ms, cursor: r.cursor });
       this.owners.set(resultId, tab);
       const n = r.page.rows.length.toLocaleString('ko-KR');
       results.addLog({ kind: 'ok', text: `${n}행${r.page.done ? '' : ' (더 있음)'} · ${seconds(r.ms)}`, sql, connectionName: cfg.name });
@@ -659,7 +788,7 @@ export class DbConsole implements vscode.Disposable {
     }
     const ddlCommits = driverFor(cfg).ddlCommits;
     if ((info.kind === 'tx' && info.verb !== 'SAVEPOINT') || (info.kind === 'ddl' && ddlCommits)) {
-      this.dirty.delete(cfg.id); // 직접 친 COMMIT·ROLLBACK, 또는 DDL (Oracle·MySQL 은 DDL 을 실행하면서 그 앞의 변경까지 커밋한다)
+      this.dirty.delete(key); // 직접 친 COMMIT·ROLLBACK, 또는 DDL (Oracle·MySQL 은 DDL 을 실행하면서 그 앞의 변경까지 커밋한다)
     } else if (!(r.kind === 'count' && r.rowsAffected === 0)) {
       addDirty(); // DML·PL/SQL·그 밖: 바뀐 것이 있을 수 있다 (0행 변경은 세지 않는다)
     }
@@ -669,7 +798,7 @@ export class DbConsole implements vscode.Disposable {
         : info.kind === 'ddl' && ddlCommits
           ? '실행됨 (DDL — 자동으로 커밋됩니다)'
           : '실행됨';
-    const pending = this.isDirty(cfg.id) && info.kind !== 'tx' ? ' · 아직 커밋하지 않음' : '';
+    const pending = this.isDirtyKey(key) && info.kind !== 'tx' ? ' · 아직 커밋하지 않음' : '';
     results.addLog({ kind: 'ok', text: `${what} · ${seconds(r.ms)}${pending}`, sql, connectionName: cfg.name });
     void this.deps.history.add(cfg.id, { sql: st.sql, at: Date.now(), ms: r.ms, summary: what, ok: true });
     this.inline(tab, st.key, { status: 'done', text: `${what}${pending}`, ms: r.ms, output });
@@ -680,7 +809,7 @@ export class DbConsole implements vscode.Disposable {
     if (!st) return;
     const ready = await this.prepare(tab);
     if (!ready) return this.inline(tab, st.key, { status: 'skip', text: '실행하지 않았습니다' });
-    const { cfg, session } = ready;
+    const { cfg, session, key } = ready;
     const { results } = this.deps;
     const rules = session.driver.rules;
     const binds = bindValuesFor(st.sql, params, rules);
@@ -690,8 +819,7 @@ export class DbConsole implements vscode.Disposable {
       this.inline(tab, st.key, { status: 'error', text });
       return;
     }
-    this.running.add(cfg.id);
-    this.refresh();
+    this.startRunning(key);
     try {
       const started = Date.now();
       const lines = await session.use((c) => c.explain(toDriverSql(st.sql, rules), binds.values));
@@ -700,10 +828,9 @@ export class DbConsole implements vscode.Disposable {
       this.inline(tab, st.key, { status: 'plan', lines, ms });
       results.addLog({ kind: 'ok', text: `실행계획 · ${seconds(ms)}`, sql: firstLine(st.sql), connectionName: cfg.name });
     } catch (e) {
-      this.runFailed(tab, cfg, st, e, false);
+      this.runFailed(tab, cfg, key, st, e, false);
     } finally {
-      this.running.delete(cfg.id);
-      this.refresh();
+      this.endRunning(key);
     }
   }
 
@@ -742,14 +869,15 @@ export class DbConsole implements vscode.Disposable {
   }
 
   /** "다음 행 가져오기" (패널·쿼리 아래 어느 쪽에서든) */
-  private async fetchMore(connectionId: string, cursor: RowCursor, count: number) {
-    const session = this.deps.sessions.get(connectionId);
+  /** key: 결과를 만든 접속 키 */
+  private async fetchMore(key: string, cursor: RowCursor, count: number) {
+    const session = this.deps.sessions.get(key);
     if (!session) throw new Error('접속이 끊겨 더 가져올 수 없습니다. 쿼리를 다시 실행하세요.');
-    if (this.running.has(connectionId)) throw new Error('다른 쿼리를 실행하는 중입니다. 끝난 뒤에 다시 누르세요.');
+    if (this.running.has(key)) throw new Error('다른 쿼리를 실행하는 중입니다. 끝난 뒤에 다시 누르세요.');
     try {
       return await session.use(() => cursor.next(count));
     } catch (e) {
-      this.deps.sessions.reportError(connectionId, e);
+      this.deps.sessions.reportError(key, e);
       throw new Error(session.driver.errors.explain(e));
     }
   }
@@ -808,12 +936,14 @@ export class DbConsole implements vscode.Disposable {
   /** 명령 팔레트에서 부른 커밋·롤백: 보고 있는 콘솔의 연결 */
   async commit() {
     const cfg = this.activeConfig();
-    if (cfg) await this.endTransaction(cfg, 'commit', this.activeTab());
+    const tab = this.activeTab();
+    if (cfg && tab?.key) await this.endTransaction(cfg, tab.key, 'commit', tab);
   }
 
   async rollback() {
     const cfg = this.activeConfig();
-    if (cfg) await this.endTransaction(cfg, 'rollback', this.activeTab());
+    const tab = this.activeTab();
+    if (cfg && tab?.key) await this.endTransaction(cfg, tab.key, 'rollback', tab);
   }
 
   private activeConfig(): DbConnectionConfig | undefined {
@@ -821,24 +951,34 @@ export class DbConsole implements vscode.Disposable {
     return id ? this.deps.store.get(id) : undefined;
   }
 
-  private async endTransaction(cfg: DbConnectionConfig, what: 'commit' | 'rollback', tab?: ConsoleTab) {
+  /** 커밋·롤백 (접속 키 하나). 했으면 true */
+  private async endTransaction(cfg: DbConnectionConfig, key: string, what: 'commit' | 'rollback', tab?: ConsoleTab): Promise<boolean> {
     const label = what === 'commit' ? '커밋' : '롤백';
     const hint = (message: string) => (tab ? this.post(tab, { type: 'hint', message }) : void vscode.window.showInformationMessage(message));
-    const session = this.deps.sessions.get(cfg.id);
-    if (!session) return hint(`접속돼 있지 않아 ${label}할 것이 없습니다.`);
-    if (this.running.has(cfg.id)) return hint(`쿼리를 실행하는 중입니다. 끝난 뒤에 ${label}하세요.`);
+    const session = this.deps.sessions.get(key);
+    if (!session) {
+      hint(`접속돼 있지 않아 ${label}할 것이 없습니다.`);
+      return false;
+    }
+    if (this.running.has(key)) {
+      hint(`쿼리를 실행하는 중입니다. 끝난 뒤에 ${label}하세요.`);
+      return false;
+    }
+    let ok = false;
     try {
       await session.use((c) => (what === 'commit' ? c.commit() : c.rollback()));
-      this.dirty.delete(cfg.id);
+      this.dirty.delete(key);
+      ok = true;
       this.deps.results.addLog({ kind: 'ok', text: `${label}했습니다`, connectionName: cfg.name });
       vscode.window.setStatusBarMessage(`${cfg.name}: ${label}했습니다`, 4000);
     } catch (e) {
       const text = session.driver.errors.explain(e);
-      this.deps.sessions.reportError(cfg.id, e);
+      this.deps.sessions.reportError(key, e);
       this.deps.results.addLog({ kind: 'error', text: `${label} 실패: ${text}`, connectionName: cfg.name });
       void vscode.window.showErrorMessage(`${cfg.name} ${label} 실패: ${text}`);
     }
     this.refresh();
+    return ok;
   }
 
   private html(wv: vscode.Webview): string {
@@ -866,6 +1006,7 @@ export class DbConsole implements vscode.Disposable {
   </button>
   <button type="button" id="history" title="이 연결에서 실행한 쿼리 기록 (찾아서 다시 넣기·실행)">기록</button>
   <button type="button" id="book" title="쿼리 사전 — 상황별 쿼리를 설명과 함께 찾아 넣기 (Ctrl+Alt+Q 검색 팝업)">사전</button>
+  <button type="button" id="newConsole" title="이 연결의 콘솔을 하나 더 엽니다 (콘솔마다 따로 접속 — 처음 실행할 때 접속하고, 콘솔을 닫으면 접속도 닫습니다)">+ 콘솔</button>
   <span id="hint" class="hint" role="status"></span>
   <span class="spacer"></span>
   <label class="check hidden" id="outputBox" title="DBMS_OUTPUT.PUT_LINE 으로 찍은 줄을 결과와 함께 보여 줍니다"><input type="checkbox" id="serverOutput"> 서버 출력</label>
@@ -875,15 +1016,19 @@ export class DbConsole implements vscode.Disposable {
   <button type="button" id="rollback">롤백</button>
 </div>
 <div class="params">
-  <span class="title">파라미터</span>
+  <span class="title" id="paramTitle">파라미터</span>
   <span id="paramList"></span>
   <button type="button" id="addParam">+ 파라미터</button>
+  <span id="mapperNote" class="muted small hidden">MyBatis 쿼리 — 값은 왼쪽 칸에서</span>
   <span class="spacer"></span>
   <label class="check hidden" id="confirmBox" title="파라미터가 있는 문장을 실행하면 먼저 값 칸으로 커서를 옮깁니다. 값을 보고 Enter(또는 실행을 한 번 더)를 누르면 실행합니다"><input type="checkbox" id="confirmEach" checked> 실행 전 값 확인</label>
   <label class="limit" title="조회 결과를 한 번에 가져오는 행 수 (10~5,000)">한 번에 <input type="number" id="pageSize" min="10" max="5000" step="100">행</label>
   <label class="limit" title="한 결과에 가져오는 최대 행 수 (100~200,000). '끝까지'도 여기까지만">최대 <input type="number" id="maxRows" min="100" max="200000" step="1000">행</label>
 </div>
-<div id="editor" data-vscode-context='{"webviewSection": "editor", "preventDefaultContextMenuItems": false}'></div>
+<div class="work">
+  <aside id="mapperPanel" class="mapper hidden" aria-label="MyBatis 파라미터"></aside>
+  <div id="editor" data-vscode-context='{"webviewSection": "editor", "preventDefaultContextMenuItems": false}'></div>
+</div>
 
 <div class="overlay hidden" id="overlay">
   <form class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="d-title" autocomplete="off" novalidate>
@@ -949,6 +1094,11 @@ export class DbConsole implements vscode.Disposable {
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }
+}
+
+/** 콘솔끼리 접속 하나를 같이 쓰는가 (설정 devBoost.dbConsole.sessionPerConsole 을 끈 경우) */
+function sharedSession(): boolean {
+  return !vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('sessionPerConsole', true);
 }
 
 const clamp = (n: unknown, min: number, max: number, fallback: number) => Math.min(max, Math.max(min, Math.floor(Number(n)) || fallback));

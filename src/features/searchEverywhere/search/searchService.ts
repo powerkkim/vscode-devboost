@@ -25,7 +25,7 @@ import { NameHit, arrangeMapperResults, ownerStatement, mapperSearchRoots, hitPe
 import { FileIndex } from './fileIndex';
 import { SpringEntry, createSpringIndex } from './springIndex';
 
-export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'mappers' | 'spring' | 'actions' | 'text';
+export type TabId = 'all' | 'classes' | 'files' | 'symbols' | 'mappers' | 'spring' | 'text';
 export type ResultKind = Exclude<TabId, 'all'>;
 
 export interface SearchItem {
@@ -39,14 +39,11 @@ export interface SearchItem {
   range?: vscode.Range;
   /** 열 때 그 줄에서 label(클래스 이름)을 찾아 선택한다 (클래스 색인 결과는 줄만 알고 있음) */
   selectName?: boolean;
-  /** 액션 탭 전용: 실행할 커맨드 ID와 인자 */
-  command?: string;
-  args?: unknown[];
 }
 
 /** 검색 단계 하나의 소요 시간 (속도 측정용) */
 export interface SearchTiming {
-  /** 단계 이름: 클래스 / 심볼 / Mapper / 파일 / 텍스트 / 액션 */
+  /** 단계 이름: 클래스 / 심볼 / Mapper / Spring / 파일 / 텍스트 */
   part: string;
   ms: number;
   /** 이 단계에서 나온 결과 수 */
@@ -293,9 +290,6 @@ export class SearchService implements vscode.Disposable {
       case 'files':
         items = await measure('파일', () => this.searchFiles(query, max, sink('files')));
         break;
-      case 'actions':
-        items = await measure('액션', () => this.searchActions(query));
-        break;
       case 'text': {
         // 먼저 찾은 결과를 바로 보내고(VS Code 검색처럼), 다 찾으면 전체를 정렬한 결과로 바꾼다
         const early = onPartial
@@ -307,7 +301,7 @@ export class SearchService implements vscode.Disposable {
         break;
       }
       case 'all': {
-        // 클래스·메서드·필드는 색인, 파일·텍스트는 rg. 액션은 '모두'에서 제외 (잡음)
+        // 클래스·메서드·필드는 색인, 파일·텍스트는 rg
         const per = Math.max(5, Math.floor(this.max / 3));
         let classTotal = 0;
         let memberTotal = 0;
@@ -374,10 +368,6 @@ export class SearchService implements vscode.Disposable {
 
   /** preserveFocus: 파일은 열되 커서는 검색 창에 둔다 (고정 상태에서 이어서 고를 수 있게) */
   async open(item: SearchItem, viewColumn?: vscode.ViewColumn, preserveFocus = false): Promise<void> {
-    if (item.kind === 'actions' && item.command) {
-      await vscode.commands.executeCommand(item.command, ...(item.args ?? []));
-      return;
-    }
     if (item.uri) {
       const doc = await vscode.workspace.openTextDocument(item.uri);
       const editor = await vscode.window.showTextDocument(doc, { viewColumn, preserveFocus });
@@ -1134,42 +1124,6 @@ export class SearchService implements vscode.Disposable {
       this.classOkCache = { key, globs, map: new Map() };
     }
     return this.classOkCache.map;
-  }
-
-  // ───────────────────────── 액션 ─────────────────────────
-
-  /**
-   * IntelliJ의 액션 = 명령 + 설정 바로가기. VS Code에서는 명령 팔레트·설정 검색이 이 역할을 하므로
-   * 목록을 직접 만들지 않고, 검색어를 채운 상태로 그 화면을 열어준다.
-   */
-  private searchActions(query: string): SearchItem[] {
-    const q = query.trim();
-    return [
-      {
-        kind: 'actions',
-        label: q ? `명령 팔레트에서 "${q}" 찾기` : '명령 팔레트 열기',
-        description: '명령 팔레트',
-        icon: 'terminal',
-        command: 'workbench.action.quickOpen',
-        args: [`>${q}`],
-      },
-      {
-        kind: 'actions',
-        label: q ? `설정에서 "${q}" 찾기` : '설정 열기',
-        description: '설정',
-        icon: 'gear',
-        command: 'workbench.action.openSettings',
-        args: [q],
-      },
-      {
-        kind: 'actions',
-        label: q ? `단축키 설정에서 "${q}" 찾기` : '단축키 설정 열기',
-        description: '단축키',
-        icon: 'keyboard',
-        command: 'workbench.action.openGlobalKeybindings',
-        args: [q],
-      },
-    ];
   }
 
   // ───────────────────────── 텍스트 ─────────────────────────

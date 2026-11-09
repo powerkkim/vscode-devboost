@@ -17,6 +17,7 @@ import { snippet } from '@codemirror/autocomplete';
 import { editingAssist, selectStatement, currentTargets } from './assist';
 import { columnLoader, reopenIfAfterDot } from './columns';
 import { formatSql } from './format';
+import { mapperPanel } from './mapper';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -304,8 +305,33 @@ const scheduleTarget = () => {
   targetTimer = setTimeout(() => {
     if (hintMessage && hintMessage !== '') hint('');
     else showTarget();
+    mapper.update();
   }, 120);
 };
+
+// ───────── MyBatis 파라미터 패널 (mapper 에서 온 문장일 때 왼쪽) ─────────
+const mapper = mapperPanel({
+  editor,
+  rules: () => rules,
+  post: (m) => vscode.postMessage(m),
+  setParams: (ps) => {
+    for (const [name, p] of Object.entries(ps)) {
+      const t = p.type === 'NUMBER' || p.type === 'VARCHAR2' || p.type === 'DATE' ? (p.type as BindType) : undefined;
+      params[name.toLowerCase()] = { value: String(p.value ?? ''), ...(t ? { type: t } : {}) };
+    }
+    scheduleParams();
+    scheduleSave();
+  },
+  onActive: (on) => {
+    // 값은 왼쪽 패널에서 넣으므로 위쪽 줄의 파라미터 칸은 숨긴다 (한 번에·최대 행 수는 그대로)
+    for (const id of ['paramList', 'addParam']) $(id).classList.toggle('hidden', on);
+    $('mapperNote').classList.toggle('hidden', !on);
+  },
+  run: () => {
+    armed = true; // 값 칸에서 Enter = 확인했다
+    start('run');
+  },
+});
 
 /** 실행할 문장들: 선택 영역이 있으면 그 안의 문장들, 없으면 커서가 있는 문장 */
 let runSeq = 0;
@@ -324,7 +350,15 @@ function start(what: 'run' | 'explain') {
     return;
   }
   const names = [...new Set(list.flatMap((s) => bindNames(s.sql, rules).map((n) => n.toLowerCase())))];
-  if (what === 'run' && confirmEach && names.length && !armed) {
+  if (what === 'run' && confirmEach && !armed && mapper.active()) {
+    // MyBatis 쿼리: 왼쪽 패널의 첫 값 칸으로 (값을 바꾸면 SQL 이 다시 풀린 뒤 Enter 로 실행)
+    if (mapper.focusFirst()) {
+      armed = true;
+      hint('파라미터 값을 확인하고 Enter (또는 실행을 한 번 더)', 'warn');
+      return;
+    }
+  }
+  if (what === 'run' && confirmEach && names.length && !armed && !mapper.active()) {
     // 값 확인: 첫 파라미터 칸으로 보내고 한 번 더 누르면 실행
     armed = true;
     renderParams();
@@ -353,6 +387,7 @@ function format() {
 $('run').addEventListener('click', () => start('run'));
 $('history').addEventListener('click', () => vscode.postMessage({ type: 'history' }));
 $('book').addEventListener('click', () => vscode.postMessage({ type: 'book' }));
+$('newConsole').addEventListener('click', () => vscode.postMessage({ type: 'newConsole' }));
 
 /**
  * Ctrl+A (VS Code 단축키가 받아 'do' 로 돌려준다): 입력 칸에 있으면 그 칸의 글, 결과 표에 있으면 그대로, 아니면 편집기 전체
@@ -562,7 +597,7 @@ window.addEventListener('message', (event) => {
       conn.classList.toggle('hidden', !m.name);
       conn.classList.toggle('on', !!m.connected);
       conn.classList.toggle('prod', !!m.production);
-      $('connText').textContent = m.name ? `${m.name}${m.connected ? ' · ' + m.schema : m.connecting ? ' (접속하는 중…)' : ' (접속 안 됨)'}${m.readOnly ? ' · 읽기 전용' : ''}` : '';
+      $('connText').textContent = m.name ? `${m.name}${m.connected ? ' · ' + m.schema : m.connecting ? ' (접속하는 중…)' : m.lazy ? ' (실행하면 접속)' : ' (접속 안 됨)'}${m.readOnly ? ' · 읽기 전용' : ''}` : '';
       conn.title = m.connected ? '접속됨' : '눌러서 접속';
       const dirty = $('dirty');
       dirty.classList.toggle('hidden', !m.dirty);
@@ -642,6 +677,7 @@ window.addEventListener('message', (event) => {
           showTarget(); // 새 문장이 실행 대상 → 그 파라미터 칸을 흐리지 않게
           renderParams();
           scheduleSave();
+          mapper.update(); // MyBatis 쿼리면 왼쪽 패널 (실행 전 값 확인이 그 칸으로 가도록 먼저)
         }
         if (m.run) start('run');
         break;
@@ -651,6 +687,9 @@ window.addEventListener('message', (event) => {
       editor.focus();
       break;
     }
+    case 'mapperPanel':
+      mapper.onReply(m);
+      break;
     case 'snippet':
       insertBookSnippet(m.query, m.values ?? {}, m.title);
       break;

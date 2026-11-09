@@ -7,7 +7,7 @@
 | 기능 | 단축키 | 켜기/끄기 설정 |
 |---|---|---|
 | **Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
-| **MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔(또는 Oracle 워크시트)에서 실행 | `Ctrl+Alt+Enter`·우클릭 `DB 콘솔에서 실행` / 쿼리 위 `▶ 콘솔에서 실행`·`▶ SQL 실행` | `devBoost.mybatisRunner.enabled` |
+| **MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔에서 실행, 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림 | `Ctrl+Alt+Enter`·우클릭 `DB 콘솔에서 실행` / 쿼리 위 `▶ 콘솔에서 실행`·`SQL 복사` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
 | **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
@@ -19,7 +19,7 @@
 
 | 조작 | 키 |
 |---|---|
-| 탭 전환 (모두 / 클래스 / 파일 / 심볼 / Mapper / Spring / 액션 / 텍스트) | `Tab` / `Shift+Tab` |
+| 탭 전환 (모두 / 클래스 / 파일 / 심볼 / Mapper / Spring / 텍스트) | `Tab` / `Shift+Tab` |
 | 이동 · 열기 · 닫기 | `↑↓` `PageUp/Down` · `Enter` · `Esc` |
 | 범위: 테스트 제외 ↔ 라이브러리 포함 | `Alt+N` (오른쪽 위 드롭다운) |
 | 포함/제외 경로 필터 | `Alt+P` |
@@ -33,7 +33,6 @@
   - `현재 폴더` 버튼: 지금 보는 파일의 폴더를 포함에 넣기
 - **Mapper 탭**: MyBatis mapper XML(파일과 SQL id)과 Java mapper 인터페이스·메서드만. `<mapper namespace>` 가 있는 XML 만 골라 pom.xml·설정 XML 은 나오지 않습니다. SQL id 를 고르면 그 줄로 이동. 검색어가 2글자 이상이면 mapper XML 본문(테이블·컬럼 이름 등)에서 찾은 줄도 함께 나오고, 어느 SQL id 안인지 옆에 표시합니다 (대소문자 무시)
 - **Spring 탭**: 빈 클래스(`@Service` 등)·`@Bean` 메서드·URL 매핑(`@GetMapping("/search")` 적힌 그대로). URL 일부(`/search`)나 클래스·메서드 이름으로 찾음
-- **액션 탭**: 명령 팔레트 / 설정 / 단축키 설정을 검색어가 채워진 상태로 엽니다
 - **결과 개수와 더 보기**: 탭마다 `maxResults`(기본 50)개씩 보여 주고, 더 있으면 끝에 `더 보기 — 123개 중 50개 표시`. 모두 탭은 종류별 머리글에 개수가 나오고 `더 보기`는 그 탭으로 이동
 - 텍스트 검색은 최대 2,000건까지 모은 뒤 열린 파일 → `src` → 기타 → 라이브러리 순으로 정렬해 보여 줍니다. 2,000건을 넘으면 알려 주니 포함 경로·파일 타입으로 좁혀 보세요
 - 에디터에서 단어를 선택한 채로 열면 그 단어로 바로 검색
@@ -79,7 +78,12 @@
 5. 결과 옆 `⋯` → 헤더 포함 복사 · INSERT 문으로 복사 · CSV 내보내기 · 패널에서 보기 (화면에 있는 결과 그대로, 정렬 순서 포함). 아직 받지 않은 행이 있으면 CSV 는 `전체 결과`(쿼리를 다시 실행해 끝까지 파일로)도 고를 수 있음
 6. 편집: 테이블 이름·별칭은 청록색(이름은 굵게), JOIN 결과는 테이블별 색으로 구분. `별칭.` 뒤에서 칸 이름 자동 완성, `Shift+Alt+F` SQL 정렬, 도구 줄 `기록`(연결별 실행 기록, 다시 실행), 테이블 오른쪽 클릭 `테이블 정보`(칸·제약·인덱스·참조하는 테이블·DDL)
 7. 쿼리 사전: 도구 줄 `사전` (또는 `Ctrl+Alt+Q`) — 상황별 쿼리를 설명·예제와 함께 찾아 넣고, `연습 실행` 으로 예제 데이터에서 먼저 결과를 본다. 내가 만든 쿼리는 오른쪽 클릭 `사전에 추가` 로 `.devboost/querybook/` 에 `.md` 로 쌓아 팀과 나눈다
-8. MyBatis mapper 의 쿼리 위 `▶ 콘솔에서 실행` (또는 우클릭 `DB 콘솔에서 실행`, `Ctrl+Alt+Enter`) — 동적 태그(if·foreach 등)는 마지막 입력값으로 풀고 `#{}` 는 `:이름` 파라미터로 콘솔 끝에 들어감. 값은 콘솔 파라미터 칸에 채워지고, `실행할 때마다 값 확인`이 켜져 있으면 값을 확인한 뒤 Enter 로 실행
+8. 콘솔 여러 개: 도구 줄 `+ 콘솔` (또는 연결 오른쪽 클릭 `새 콘솔`). 콘솔마다 따로 접속해 긴 쿼리를 돌리는 동안 다른 콘솔을 쓰고, 커밋·롤백도 콘솔마다 따로. 콘솔 2부터는 처음 실행할 때 접속하고 콘솔을 닫으면 접속도 닫음 (커밋하지 않은 변경이 있으면 먼저 물음). 연결 목록에 서버에 열어 둔 접속 수가 보임
+9. MyBatis mapper 의 쿼리 위 `▶ 콘솔에서 실행` (또는 우클릭 `DB 콘솔에서 실행`, `Ctrl+Alt+Enter`) — `-- 네임스페이스.쿼리id` 머리 주석과 함께 콘솔 끝에 들어가고, 커서가 그 문장에 있으면 **왼쪽에 MyBatis 파라미터 칸**이 열림
+   - 한 줄에 하나씩 `이름 · 값 · 종류(자동·글자·숫자·날짜·목록·null·'')`. `<if>`·`<foreach>` 에 쓰이는 값은 아래 "조건" 묶음에 `if 켜짐 / if 꺼짐 / foreach 3개` 상태와 함께
+   - 값을 바꾸면 mapper 를 다시 풀어 문장이 바뀜 (조건이 붙거나 빠지고 foreach 는 개수만큼 펼침). `#{}` 는 `:이름` 으로 들어가고 값은 그대로 실행에 쓰임. 목록은 `10,20,30`
+   - `실행 전 값 확인`이 켜져 있으면 실행 전에 왼쪽 첫 칸으로 가고, Enter 로 실행. 값은 쿼리별로 기억
+   - 일반 SQL 로 커서를 옮기면 패널이 닫히고 위쪽 파라미터 줄로 돌아감. 머리 주석을 지우면 그 문장은 일반 SQL
 
 DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙)은 따로 처리합니다. Oracle 의 `DBMS_OUTPUT`·`/` 구분·`q'[...]'` 는 Oracle 에서만, PostgreSQL 의 `$$` 본문·`RAISE NOTICE` 는 PostgreSQL 에서만, MySQL 의 백틱·`#` 주석·`DELIMITER` 는 MySQL 에서만 씁니다. PostgreSQL·MySQL 드라이버는 그 DB 에 처음 접속할 때 불러옵니다.
 
@@ -88,6 +92,8 @@ DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙
 | `devBoost.dbConsole.pageSize` | 한 번에 가져오는 행 수 (기본 500). 콘솔 도구 줄에서도 바꿈 |
 | `devBoost.dbConsole.maxRows` | 한 결과에 가져오는 최대 행 수 (기본 10,000, 200,000까지). `끝까지`도 여기까지 |
 | `devBoost.dbConsole.checkConnectionSeconds` | 접속이 살아 있는지 서버에 다녀와 확인하는 간격(초, 기본 300, `0` 이면 끔) |
+| `devBoost.dbConsole.sessionPerConsole` | 콘솔마다 따로 접속 (기본 켬). 끄면 모든 콘솔이 접속 하나를 같이 씀 |
+| `devBoost.dbConsole.idleCloseMinutes` | 콘솔 2부터의 접속을 이 시간(분) 동안 안 쓰면 닫음 (기본 30, `0` 이면 닫지 않음). 커밋하지 않은 변경이 있으면 두고 |
 
 ### DB 스키마 · 테이블 정의서
 

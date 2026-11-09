@@ -8,7 +8,7 @@ import { driverFor, describeConnection } from './driver/registry';
 import { ConnectionStore } from './connectionStore';
 import { ConsoleStore } from './consoleStore';
 import { HistoryStore } from './historyStore';
-import { Sessions } from './sessions';
+import { ConnectAborted, Sessions, isConsoleKey } from './sessions';
 import { ConnectionItem, ConnectionTree, TableItem, TreeNode, CONNECTIONS_VIEW_ID } from './ui/connectionTree';
 import { ResultView, RESULTS_VIEW_ID } from './ui/resultView';
 import { FormActions } from './ui/formDialog';
@@ -194,15 +194,17 @@ export const dbConsole: Feature = {
       }
     };
 
-    const connect = async (cfg: DbConnectionConfig) => {
-      if (sessions.isConnected(cfg.id)) return;
+    /** key: 접속 키 (기본: 연결의 기본 접속. 콘솔 2부터는 "연결 id#N") */
+    const connect = async (cfg: DbConnectionConfig, key: string = cfg.id) => {
+      if (sessions.isConnected(key)) return;
       const pw = await passwordFor(cfg);
       if (pw === undefined) return;
       try {
-        const s = await vscode.window.withProgress({ location: { viewId: CONNECTIONS_VIEW_ID } }, () => sessions.connect(cfg, pw.value));
+        const s = await vscode.window.withProgress({ location: { viewId: CONNECTIONS_VIEW_ID } }, () => sessions.connect(cfg, pw.value, key));
         if (!pw.saved) typed.set(cfg.id, pw.value);
         vscode.window.setStatusBarMessage(`${cfg.name} 접속됨 — ${s.info.product} ${s.info.version} · 스키마 ${s.info.schema}`, 5000);
       } catch (e) {
+        if (e instanceof ConnectAborted) return; // 접속하는 사이에 끊었거나 연결을 지웠음 (연 접속은 이미 닫았다)
         failed(cfg, e, '접속');
       }
     };
@@ -214,12 +216,24 @@ export const dbConsole: Feature = {
       sessions.setCheckInterval(sec > 0 ? Math.max(30, sec) * 1000 : 0);
     };
     applyCheckInterval();
+    // 콘솔 2부터의 접속: 이 시간 동안 쓰지 않으면 닫는다 (기본 30분, 0 = 닫지 않음). 커밋하지 않은 변경이 있으면 두고
+    const applyIdleClose = () => {
+      const min = vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('idleCloseMinutes', 30);
+      sessions.setIdleClose(min > 0 ? Math.max(5, min) * 60_000 : 0);
+    };
+    applyIdleClose();
     const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('devBoost.dbConsole.checkConnectionSeconds')) applyCheckInterval();
+      if (e.affectsConfiguration('devBoost.dbConsole.idleCloseMinutes')) applyIdleClose();
     });
-    const lostWatcher = sessions.onDidLose(({ id, reason }) => {
-      const cfg = store.get(id);
+    const lostWatcher = sessions.onDidLose(({ id, connectionId, reason }) => {
+      const cfg = store.get(connectionId);
       if (!cfg) return;
+      if (isConsoleKey(id)) {
+        // 콘솔만 쓰던 접속: 그 콘솔에서 다음에 실행할 때 다시 접속한다
+        void vscode.window.showWarningMessage(`${cfg.name} 콘솔 ${id.slice(id.indexOf('#') + 1)} 의 접속이 끊겼습니다: ${reason} (커밋하지 않은 변경은 롤백됐습니다. 실행하면 다시 접속합니다)`);
+        return;
+      }
       const again = '다시 접속';
       void vscode.window.showWarningMessage(`${cfg.name} 접속이 끊겼습니다: ${reason}`, again).then((b) => {
         if (b === again) void connect(cfg);
@@ -249,7 +263,7 @@ export const dbConsole: Feature = {
         }
       },
       save: async (config, password) => {
-        await sessions.disconnect(config.id); // 주소·계정이 바뀌었을 수 있으니 접속은 끊는다
+        await sessions.disconnectAll(config.id); // 주소·계정이 바뀌었을 수 있으니 접속은 끊는다 (콘솔별 접속까지)
         typed.delete(config.id);
         await store.save(config, password);
         // 저장하지 않기로 한 비밀번호는 VS Code 를 닫을 때까지만 기억 (바로 접속할 때 다시 묻지 않게)
@@ -267,9 +281,9 @@ export const dbConsole: Feature = {
       sessions,
       results,
       formActions,
-      ensureSession: async (cfg) => {
-        if (!sessions.isConnected(cfg.id)) await connect(cfg);
-        return sessions.get(cfg.id);
+      ensureSession: async (cfg, key = cfg.id) => {
+        if (!sessions.isConnected(key)) await connect(cfg, key);
+        return sessions.get(key);
       },
       pickConnection: (title) => pick(undefined, title),
       tableNames: (id) => completion.get(id) ?? [],
@@ -390,12 +404,13 @@ export const dbConsole: Feature = {
         const cfg = await pick(item, '삭제할 DB 연결');
         if (!cfg) return;
         const yes = '삭제';
-        const answer = await vscode.window.showWarningMessage(`DB 연결 "${cfg.name}" 을 삭제할까요? 저장된 비밀번호도 지워집니다.`, { modal: true }, yes);
+        const dirtyNote = queryConsole.isDirty(cfg.id) ? ` 커밋하지 않은 변경 ${queryConsole.dirtyCount(cfg.id)}건은 롤백됩니다.` : '';
+        const answer = await vscode.window.showWarningMessage(`DB 연결 "${cfg.name}" 을 삭제할까요? 저장된 비밀번호도 지워집니다.${dirtyNote}`, { modal: true }, yes);
         if (answer !== yes) return;
-        await sessions.disconnect(cfg.id);
+        await sessions.disconnectAll(cfg.id);
         typed.delete(cfg.id);
         await store.remove(cfg.id);
-        await consoles.remove(cfg.id);
+        await consoles.removeAll(cfg.id);
         await history.remove(cfg.id);
       }),
 
@@ -415,10 +430,15 @@ export const dbConsole: Feature = {
         if (queryConsole.isDirty(cfg.id)) {
           // 접속을 닫으면 커밋하지 않은 변경은 롤백된다
           const go = '롤백하고 끊기';
-          const answer = await vscode.window.showWarningMessage(`${cfg.name} 에 커밋하지 않은 변경이 있습니다. 접속을 끊으면 롤백됩니다.`, { modal: true }, go);
+          const answer = await vscode.window.showWarningMessage(
+            `${cfg.name} 에 커밋하지 않은 변경 ${queryConsole.dirtyCount(cfg.id)}건이 있습니다. 접속을 끊으면 롤백됩니다.`,
+            { modal: true },
+            go
+          );
           if (answer !== go) return;
         }
-        await sessions.disconnect(cfg.id);
+        // 기본 접속과 콘솔별 접속을 모두 닫는다 (콘솔은 열어 둔다 — 실행하면 다시 접속)
+        await sessions.disconnectAll(cfg.id);
       }),
 
       cmd('refreshSchema', (item?: TreeNode) => {
@@ -521,6 +541,10 @@ export const dbConsole: Feature = {
       cmd('openConsole', async (item?: TreeNode) => {
         const cfg = await pick(item, '콘솔을 열 DB 연결');
         if (cfg) queryConsole.open(cfg);
+      }),
+      cmd('newConsole', async (item?: TreeNode) => {
+        const cfg = (item ? undefined : store.get(queryConsole.activeConnectionId() ?? '')) ?? (await pick(item, '콘솔을 하나 더 열 DB 연결'));
+        if (cfg) queryConsole.openNew(cfg);
       }),
       cmd('run', () => queryConsole.trigger('run')),
       cmd('explain', () => queryConsole.trigger('explain')),

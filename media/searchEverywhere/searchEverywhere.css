@@ -326,10 +326,6 @@ body {
 .badge.kind-symbols {
   color: var(--vscode-symbolIcon-methodForeground, #b180d7);
 }
-.badge.kind-actions {
-  color: var(--vscode-symbolIcon-eventForeground, #e2c08d);
-  border-color: transparent;
-}
 .badge.kind-text {
   color: var(--se-muted);
 }

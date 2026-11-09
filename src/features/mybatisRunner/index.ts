@@ -2,15 +2,15 @@ import * as vscode from 'vscode';
 import { Feature } from '../../core/feature';
 import { looksLikeMapper, parseMapper, statementAt } from './mapper/mapperDoc';
 import { MapperIndex } from './mapperIndex';
-import { OracleBridge } from '../../core/oracleBridge';
 import { RunnerStore } from './store';
-import { RunnerPanel, Deps, sendToConsole } from './ui/runnerPanel';
+import { consolePanel, Deps, sendToConsole } from './consoleLink';
+import { ParamInput } from './mapper/values';
 
 /**
- * MyBatis SQL 실행 — mapper XML 의 쿼리를 파라미터 값으로 풀어 실행 가능한 SQL 로 만들고
- * Oracle SQL Developer 워크시트로 보낸다.
- *  - 쿼리 위의 CodeLens: "▶ SQL 실행" (화면 열기) / "SQL 복사" (마지막 입력값으로 바로 복사)
- *  - 에디터 우클릭 / 명령 팔레트: 커서가 있는 쿼리 기준
+ * MyBatis SQL 실행 — mapper XML 의 쿼리를 DevBoost DB 콘솔에서 실행한다.
+ *  - 쿼리 위의 CodeLens: "▶ 콘솔에서 실행" / "SQL 복사" (마지막 입력값으로 값을 넣은 SQL)
+ *  - 에디터 우클릭·Ctrl+Alt+Enter: 커서가 있는 쿼리를 콘솔에서 실행
+ *  - 콘솔에서는 왼쪽 패널에서 파라미터 값을 바꾸면 if·foreach 를 다시 풀어 SQL 이 바뀐다 (consoleLink)
  */
 export const mybatisRunner: Feature = {
   id: 'mybatisRunner',
@@ -19,7 +19,6 @@ export const mybatisRunner: Feature = {
     const deps: Deps = {
       store: new RunnerStore(context.workspaceState),
       index: new MapperIndex(),
-      oracle: new OracleBridge(),
     };
 
     /** 명령 인자(uri, id) 또는 활성 편집기의 커서 위치로 대상 쿼리를 정한다 */
@@ -43,11 +42,6 @@ export const mybatisRunner: Feature = {
       return { uri: ed.document.uri, id: st.id };
     };
 
-    const open = vscode.commands.registerCommand('devBoost.mybatisRunner.open', (uri?: vscode.Uri, id?: string) => {
-      const t = target(uri, id);
-      if (t) RunnerPanel.show(context, deps, t.uri, t.id);
-    });
-
     const copy = vscode.commands.registerCommand('devBoost.mybatisRunner.copy', async (uri?: vscode.Uri, id?: string) => {
       const t = target(uri, id);
       if (!t) return;
@@ -56,7 +50,7 @@ export const mybatisRunner: Feature = {
       const st = doc?.statements.find((s) => s.id === t.id);
       if (!doc || !st) return;
       await deps.index.ensureBuilt();
-      const p = deps.store.prepare(doc, st, deps.index.resolver());
+      const p = deps.store.prepare(doc, st, deps.index.resolver(), 'literal', { ignoreOverrides: true });
       await vscode.env.clipboard.writeText(p.text);
       const unknown = p.result.branches.filter((b) => b.how === 'unknown').length;
       const empty = p.specs.filter((s) => (p.inputs[s.path]?.value ?? '') === '').length;
@@ -80,8 +74,13 @@ export const mybatisRunner: Feature = {
       const st = doc?.statements.find((s) => s.id === t.id);
       if (!doc || !st) return;
       await deps.index.ensureBuilt();
-      await sendToConsole(deps, doc, st);
+      if (!(await sendToConsole(deps, doc, st))) void vscode.window.showWarningMessage(`${st.id}: 마지막 입력값으로 만든 SQL 이 비어 있습니다.`);
     });
+
+    /** DB 콘솔 왼쪽 패널이 묻는다: (네임스페이스, id) 의 파라미터·SQL. set 이 있으면 값을 바꾼 뒤 */
+    const panel = vscode.commands.registerCommand('devBoost.mybatisRunner.consolePanel', (ns: string, id: string, set?: { path: string; input: ParamInput }) =>
+      consolePanel(deps, String(ns), String(id), set)
+    );
     const lens = new MapperCodeLens();
     const lensReg = vscode.languages.registerCodeLensProvider(
       [{ language: 'xml' }, { pattern: '**/*.xml' }],
@@ -92,8 +91,7 @@ export const mybatisRunner: Feature = {
     });
 
     return [
-      open, copy, runInConsole, lensReg, lens, cfgWatch, deps.index, deps.oracle,
-      { dispose: () => RunnerPanel.closeAll() },
+      copy, runInConsole, panel, lensReg, lens, cfgWatch, deps.index,
     ];
   },
 };
@@ -117,14 +115,11 @@ class MapperCodeLens implements vscode.CodeLensProvider, vscode.Disposable {
     for (const st of doc.statements) {
       const pos = document.positionAt(st.el.start);
       const range = new vscode.Range(pos, pos);
-      out.push(
-        new vscode.CodeLens(range, { title: '▶ SQL 실행', command: 'devBoost.mybatisRunner.open', arguments: [document.uri, st.id], tooltip: '파라미터를 넣어 SQL 을 만들고 Oracle 워크시트로 보냅니다' }),
-        new vscode.CodeLens(range, { title: 'SQL 복사', command: 'devBoost.mybatisRunner.copy', arguments: [document.uri, st.id], tooltip: '마지막으로 입력한 값으로 SQL 을 만들어 클립보드에 복사' })
-      );
       if (console)
         out.push(
-          new vscode.CodeLens(range, { title: '▶ 콘솔에서 실행', command: 'devBoost.mybatisRunner.runInConsole', arguments: [document.uri, st.id], tooltip: '마지막으로 입력한 값으로 SQL 을 만들어 DevBoost DB 콘솔에서 바로 실행 (결과는 쿼리 아래)' })
+          new vscode.CodeLens(range, { title: '▶ 콘솔에서 실행', command: 'devBoost.mybatisRunner.runInConsole', arguments: [document.uri, st.id], tooltip: 'DevBoost DB 콘솔에서 실행 — 파라미터 값은 콘솔 왼쪽 칸에서 바꾸면 if·foreach 까지 다시 풀립니다' })
         );
+      out.push(new vscode.CodeLens(range, { title: 'SQL 복사', command: 'devBoost.mybatisRunner.copy', arguments: [document.uri, st.id], tooltip: '마지막으로 입력한 값으로 SQL 을 만들어 클립보드에 복사' }));
     }
     return out;
   }

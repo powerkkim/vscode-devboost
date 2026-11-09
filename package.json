@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.19.1",
+  "version": "0.21.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -46,11 +46,6 @@
         "category": "Search Everywhere"
       },
       {
-        "command": "devBoost.searchEverywhere.actions",
-        "title": "액션",
-        "category": "Search Everywhere"
-      },
-      {
         "command": "devBoost.searchEverywhere.text",
         "title": "텍스트",
         "category": "Search Everywhere"
@@ -64,12 +59,6 @@
         "command": "devBoost.sourceAtlas.dump",
         "title": "분석 결과 JSON 보기 (열린 .vue 기준)",
         "category": "Source Atlas"
-      },
-      {
-        "command": "devBoost.mybatisRunner.open",
-        "title": "SQL 실행 화면 열기 (커서 위치 쿼리)",
-        "category": "MyBatis",
-        "icon": "$(play)"
       },
       {
         "command": "devBoost.mybatisRunner.copy",
@@ -158,6 +147,12 @@
         "title": "콘솔 열기",
         "category": "DB 콘솔",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "devBoost.dbConsole.newConsole",
+        "title": "새 콘솔 (콘솔 하나 더)",
+        "category": "DB 콘솔",
+        "icon": "$(add)"
       },
       {
         "command": "devBoost.dbConsole.run",
@@ -349,10 +344,6 @@
           "when": "config.devBoost.searchEverywhere.enabled"
         },
         {
-          "command": "devBoost.searchEverywhere.actions",
-          "when": "config.devBoost.searchEverywhere.enabled"
-        },
-        {
           "command": "devBoost.searchEverywhere.text",
           "when": "config.devBoost.searchEverywhere.enabled"
         },
@@ -363,10 +354,6 @@
         {
           "command": "devBoost.sourceAtlas.dump",
           "when": "config.devBoost.sourceAtlas.enabled && resourceExtname == .vue"
-        },
-        {
-          "command": "devBoost.mybatisRunner.open",
-          "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
         },
         {
           "command": "devBoost.mybatisRunner.copy",
@@ -430,6 +417,10 @@
         },
         {
           "command": "devBoost.dbConsole.openConsole",
+          "when": "config.devBoost.dbConsole.enabled"
+        },
+        {
+          "command": "devBoost.dbConsole.newConsole",
           "when": "config.devBoost.dbConsole.enabled"
         },
         {
@@ -536,11 +527,6 @@
           "group": "navigation@99"
         },
         {
-          "command": "devBoost.mybatisRunner.open",
-          "when": "config.devBoost.mybatisRunner.enabled && !config.devBoost.dbConsole.enabled && resourceExtname == .xml",
-          "group": "navigation@98"
-        },
-        {
           "command": "devBoost.mybatisRunner.runInConsole",
           "when": "config.devBoost.mybatisRunner.enabled && config.devBoost.dbConsole.enabled && resourceExtname == .xml",
           "group": "navigation@98"
@@ -580,13 +566,18 @@
           "group": "0_console@1"
         },
         {
+          "command": "devBoost.dbConsole.newConsole",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\./",
+          "group": "0_console@2"
+        },
+        {
           "command": "devBoost.dbConsole.connect",
           "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.disconnected/",
           "group": "inline@1"
         },
         {
           "command": "devBoost.dbConsole.disconnect",
-          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.connected/",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.(connected|disconnected\\.sessions)/",
           "group": "inline@1"
         },
         {
@@ -601,7 +592,7 @@
         },
         {
           "command": "devBoost.dbConsole.disconnect",
-          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.connected/",
+          "when": "view == devBoost.dbConsole.connections && viewItem =~ /^dbConnection\\.(connected|disconnected\\.sessions)/",
           "group": "1_session@1"
         },
         {
@@ -743,12 +734,6 @@
         "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && config.devBoost.dbConsole.enabled && resourceExtname == .xml"
       },
       {
-        "command": "devBoost.mybatisRunner.open",
-        "key": "ctrl+alt+enter",
-        "mac": "cmd+alt+enter",
-        "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && !config.devBoost.dbConsole.enabled && resourceExtname == .xml"
-      },
-      {
         "command": "devBoost.caseConverter.cycleNext",
         "key": "alt+shift+u",
         "mac": "alt+shift+u",
@@ -805,7 +790,7 @@
             "type": "boolean",
             "default": true,
             "order": 2,
-            "markdownDescription": "**MyBatis SQL 실행** — mapper XML 쿼리 위의 `▶ SQL 실행`으로 파라미터 값을 넣어 실행 가능한 SQL 을 만들고 Oracle 워크시트로 보냄 (`Ctrl+Alt+Enter`)"
+            "markdownDescription": "**MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔에서 실행 (쿼리 위 `▶ 콘솔에서 실행`, 우클릭, `Ctrl+Alt+Enter`). 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림"
           },
           "devBoost.dbSchema.enabled": {
             "type": "boolean",
@@ -1021,25 +1006,7 @@
           "devBoost.mybatisRunner.codeLens": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "mapper XML 의 각 쿼리 위에 `▶ SQL 실행` / `SQL 복사` 표시"
-          },
-          "devBoost.mybatisRunner.dimInactive": {
-            "type": "boolean",
-            "default": true,
-            "markdownDescription": "SQL 실행 화면이 열려 있는 동안, 현재 값으로 꺼진 `<if>`·`<when>` 을 XML 에서 흐리게 표시"
-          },
-          "devBoost.mybatisRunner.worksheetInsert": {
-            "type": "string",
-            "enum": [
-              "append",
-              "replace"
-            ],
-            "enumDescriptions": [
-              "워크시트 끝에 이어 붙이고 그 부분을 선택",
-              "워크시트 내용을 바꿈"
-            ],
-            "default": "append",
-            "markdownDescription": "Oracle 워크시트로 보낼 때 기존 내용 처리. 보낼 곳은 마지막으로 사용한 Oracle 워크시트(접속에서 `Open SQL Worksheet` 로 연 것)이고, 없으면 새 워크시트를 엽니다"
+            "markdownDescription": "mapper XML 의 각 쿼리 위에 `▶ 콘솔에서 실행` / `SQL 복사` 표시"
           }
         }
       },
@@ -1132,6 +1099,17 @@
             "default": 300,
             "minimum": 0,
             "markdownDescription": "열려 있는 DB 접속이 살아 있는지 **서버에 다녀와** 확인하는 간격(초). 기본 300초(5분). 끊긴 것을 알아채면 목록에서 접속 안 됨으로 바꾸고 알립니다. `0` 이면 서버에는 다녀오지 않습니다 (30 보다 작은 값은 30초로).\n\n이와 별개로 연결(소켓)이 닫혔는지는 30초마다 봅니다 — 서버에 요청을 보내지 않는 확인입니다.\n\n서버에 다녀오는 확인은 쉬는 접속을 끊는 방화벽이나 DB 의 쉬는 시간 제한(IDLE_TIME)에 걸리지 않고 접속이 유지되는 효과도 있습니다. 그것을 원하지 않으면 `0` 으로 두세요 (끊김은 다음에 쓸 때 알게 됩니다)."
+          },
+          "devBoost.dbConsole.sessionPerConsole": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "콘솔마다 따로 접속합니다 (기본). 콘솔 1 은 연결 목록(트리)과 접속을 같이 쓰고, 콘솔 2부터는 저마다 접속합니다 — 한 콘솔에서 긴 쿼리를 돌리는 동안 다른 콘솔을 쓸 수 있고, 커밋·롤백도 콘솔마다 따로입니다.\n\n콘솔 2부터의 접속은 처음 실행할 때 열고, 콘솔을 닫으면 닫습니다 (커밋하지 않은 변경이 있으면 커밋·롤백을 먼저 묻습니다). 끄면 모든 콘솔이 접속 하나를 같이 씁니다 (서버 접속 수를 늘리기 어려운 DB). 바꾼 값은 새로 여는 콘솔부터 적용됩니다."
+          },
+          "devBoost.dbConsole.idleCloseMinutes": {
+            "type": "number",
+            "default": 30,
+            "minimum": 0,
+            "markdownDescription": "콘솔 2부터의 접속을 이 시간(분) 동안 쓰지 않으면 닫습니다. 기본 30분. 콘솔은 그대로 두고, 다음에 실행하면 다시 접속합니다. 커밋하지 않은 변경이 있거나 실행 중이면 닫지 않습니다. `0` 이면 닫지 않습니다 (5 보다 작은 값은 5분으로).\n\n연결 목록의 기본 접속(콘솔 1)은 접속 끊기를 할 때까지 둡니다."
           },
           "devBoost.dbConsole.pageSize": {
             "type": "number",

@@ -107,7 +107,8 @@ export class RunnerStore {
     this.save(s);
   }
 
-  prepare(doc: MapperDoc, st: MapperStatement, resolveFragment: FragmentResolver, modeOverride?: 'literal' | 'bind'): Prepared {
+  /** opts.ignoreOverrides: 예전 실행 화면에서 지정한 분기 강제(켜기·끄기)를 쓰지 않음 — 콘솔은 값으로만 정한다 */
+  prepare(doc: MapperDoc, st: MapperStatement, resolveFragment: FragmentResolver, modeOverride?: 'literal' | 'bind', opts: { ignoreOverrides?: boolean } = {}): Prepared {
     const s = this.load();
     const key = stmtKey(doc, st);
     const saved = s.stmts[key] ?? { inputs: {}, overrides: {} };
@@ -124,7 +125,7 @@ export class RunnerStore {
     }
     const mode = modeOverride ?? s.mode;
     const params = buildParamObject(Object.fromEntries(Object.entries(inputs).map(([k, v]) => [k, { type: v.type, value: v.value }])));
-    const result = renderStatement(doc, st, params, { mode, overrides: saved.overrides, resolveFragment });
+    const result = renderStatement(doc, st, params, { mode, overrides: opts.ignoreOverrides ? {} : saved.overrides, resolveFragment });
     const text = mode === 'bind' ? buildBindScript(result.sql, result.binds, `${doc.namespace.split('.').pop() || doc.file}.${st.id} (바인드 변수)`) : result.sql;
     return { key, specs, inputs, result, mode, text };
   }

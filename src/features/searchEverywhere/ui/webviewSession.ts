@@ -318,9 +318,6 @@ export function toRow(item: SearchItem): ResultRow {
     case 'text':
       // description = 파일명:줄, detail = 상대경로
       return { ...base, right: item.description?.replace(/:(\d+)$/, ' $1'), footer: item.detail };
-    case 'actions':
-      // description = 넘어갈 화면 (명령 팔레트 / 설정 / 단축키)
-      return { ...base, right: item.description, footer: 'Enter: VS Code의 해당 화면을 검색어가 채워진 상태로 엽니다' };
   }
 }
 

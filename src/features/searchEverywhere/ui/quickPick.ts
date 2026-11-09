@@ -6,7 +6,7 @@ import { SearchService, SearchItem, SearchResult, TabId, GroupCount } from '../s
  * 코드 위에 바로 뜨지만 화면 구성은 VS Code 목록 그대로다.
  */
 
-/** 탭 정의: 모두 / 클래스 / 파일 / 심볼 / Mapper / 액션 / 텍스트 */
+/** 탭 정의: 모두 / 클래스 / 파일 / 심볼 / Mapper / Spring / 텍스트 */
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'all', label: '모두', icon: 'search' },
   { id: 'classes', label: '클래스', icon: 'symbol-class' },
@@ -14,7 +14,6 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'symbols', label: '심볼', icon: 'symbol-method' },
   { id: 'mappers', label: 'Mapper', icon: 'database' },
   { id: 'spring', label: 'Spring', icon: 'symbol-namespace' },
-  { id: 'actions', label: '액션', icon: 'zap' },
   { id: 'text', label: '텍스트', icon: 'whole-word' },
 ];
 
@@ -66,7 +65,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   // 우리가 정한 순서(점수·우선순위, 종류별 "더 보기" 위치)를 VS Code 가 라벨 일치도로 다시 섞지 않게
   (qp as { sortByLabel?: boolean }).sortByLabel = false;
   qp.matchOnDetail = false;
-  qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ m/ b/ a/ t/';
+  qp.placeholder = '검색어 입력 · 탭 전환: 오른쪽 위 아이콘 또는 접두어 c/ f/ s/ m/ b/ t/';
   const updateButtons = () => {
     qp.buttons = [
       ...TABS.map((t) => new TabButton(t.id, new vscode.ThemeIcon(t.icon), t.label)),
@@ -89,11 +88,11 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
     let text = qp.value;
 
     // 접두어로 탭 전환: "c/Foo" → 클래스 탭에서 Foo 검색
-    const prefix = /^([cfsmbat])\/(.*)$/.exec(text);
+    const prefix = /^([cfsmbt])\/(.*)$/.exec(text);
     let tab = currentTab;
     if (prefix) {
       tab = (
-        { c: 'classes', f: 'files', s: 'symbols', m: 'mappers', b: 'spring', a: 'actions', t: 'text' } as Record<string, TabId>
+        { c: 'classes', f: 'files', s: 'symbols', m: 'mappers', b: 'spring', t: 'text' } as Record<string, TabId>
       )[prefix[1]];
       text = prefix[2];
     }
@@ -166,7 +165,7 @@ export function openQuickPick(service: SearchService, initialTab: TabId) {
   qp.onDidAccept(async () => {
     const picked = qp.selectedItems[0];
     if (picked?.more) {
-      if (currentTab === 'all' && !/^[cfsmbat]\//.test(qp.value)) {
+      if (currentTab === 'all' && !/^[cfsmbt]\//.test(qp.value)) {
         currentTab = picked.more; // 모두 탭: 그 종류의 탭으로
         limit = undefined;
         updateTitle();
@@ -256,8 +255,6 @@ function kindLabel(kind: SearchItem['kind']): string {
       return 'Mapper';
     case 'spring':
       return 'Spring';
-    case 'actions':
-      return '액션';
     case 'text':
       return '텍스트';
     default:
