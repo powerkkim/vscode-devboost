@@ -5,7 +5,7 @@
 ```
 vscode-devboost/
 ├─ .github/workflows/
-│  └─ release.yml           태그 v* push: 테스트 → .vsix 를 GitHub Release에 첨부
+│  └─ release.yml           main 머지: 테스트 → 태그 v<버전> + .vsix 를 GitHub Release에 첨부
 ├─ .vscode/                 F5(launch.json), 컴파일 작업(tasks.json)
 ├─ src/
 │  ├─ extension.ts          진입점. 기능 목록(FEATURES)만 관리
@@ -121,8 +121,7 @@ npm test             # 컴파일 + 단위 테스트
 
 1. `package.json`의 `version`을 올린다
 2. `CHANGELOG.md`에 `## x.y.z - YYYY-MM-DD` 섹션을 쓴다 (이 내용이 Release 설명이 된다)
-3. `develop` → `main` 으로 합친다
-4. `main`에서 태그: `git tag vx.y.z && git push origin vx.y.z`
-5. GitHub Actions가 테스트 → `.vsix` 생성 → Release 첨부. 다음 경우엔 실패한다
-   - 태그가 달린 커밋이 `main`에 없을 때 (develop·feature 커밋에 잘못 단 태그)
-   - 태그와 `package.json` 버전이 다를 때
+3. `develop` → `main` PR 을 머지한다 — 끝. 태그는 달지 않는다
+4. GitHub Actions(Release)가 테스트 → `.vsix` 생성 → 머지 커밋에 태그 `vx.y.z` 를 만들고 Release 에 첨부한다
+   - 그 버전 태그가 이미 있으면(버전을 올리지 않은 머지) 릴리스를 건너뛴다
+   - `CHANGELOG.md` 에 `## x.y.z` 섹션이 없거나 테스트가 실패하면 실패하고 태그도 만들지 않는다 → 고쳐서 다시 머지하거나 Actions 에서 Run workflow

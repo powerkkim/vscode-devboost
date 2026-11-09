@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -252,6 +252,11 @@
         "title": "실행 기록",
         "category": "DB 콘솔",
         "icon": "$(history)"
+      },
+      {
+        "command": "devBoost.dbConsole.selectAll",
+        "title": "모두 선택",
+        "category": "DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.queryBook",
@@ -512,6 +517,10 @@
           "when": "false"
         },
         {
+          "command": "devBoost.dbConsole.selectAll",
+          "when": "false"
+        },
+        {
           "command": "devBoost.dbConsole.addToQueryBook",
           "when": "config.devBoost.dbConsole.enabled && activeWebviewPanelId == 'devBoostDbConsole'"
         },
@@ -756,6 +765,12 @@
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "activeWebviewPanelId == 'devBoostDbConsole' && config.devBoost.dbConsole.enabled"
+      },
+      {
+        "command": "devBoost.dbConsole.selectAll",
+        "key": "ctrl+a",
+        "mac": "cmd+a",
+        "when": "config.devBoost.dbConsole.enabled && activeWebviewPanelId == 'devBoostDbConsole'"
       },
       {
         "command": "devBoost.dbConsole.queryBookPick",
