@@ -526,6 +526,8 @@ export const dbConsole: Feature = {
       cmd('explain', () => queryConsole.trigger('explain')),
       cmd('selectStatement', () => queryConsole.trigger('selectStatement')),
       cmd('format', () => queryConsole.trigger('format')),
+      // Ctrl+A: VS Code 기본 '모두 선택' 은 화면 문서 전체를 고르려 해 편집기 선택을 흐트러뜨린다 → 콘솔이 직접
+      cmd('selectAll', () => queryConsole.trigger('selectAll')),
       cmd('queryBook', async (focusId?: string, connectionId?: string) => {
         const t = await bookTarget(connectionId);
         if (t) await bookPanel.open(t, typeof focusId === 'string' ? focusId : undefined);

@@ -1,35 +1,52 @@
-# 태그 v<버전> 을 push하면 빌드·테스트 후 GitHub Release에 .vsix를 첨부한다.
-# 예) git tag v0.8.0 && git push origin v0.8.0
-# 태그는 확인을 거친 main 커밋에만 단다. (main 에 없는 커밋이면 첫 단계에서 실패)
+# main 에 머지(push)되면 package.json 버전으로 태그 v<버전> 과 GitHub Release(.vsix 첨부)를 만든다.
+# 태그를 따로 달 필요가 없다. 버전을 올리지 않은 머지(그 버전 태그가 이미 있음)는 릴리스를 건너뛴다.
+# 손으로 다시 돌릴 때: Actions → Release → Run workflow (main)
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
+
+# main 에 연달아 머지돼도 릴리스는 하나씩 차례로
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      skip: ${{ steps.ver.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # main 기록과 비교하려면 전체 이력이 필요 (기본값 1 은 최신 커밋 하나만 받음)
+          fetch-depth: 0   # 태그 목록까지 받으려면 전체 이력이 필요
 
-      # 안전장치: 태그는 브랜치와 상관없이 커밋 하나에 붙으므로, develop 에서 잘못 단 태그도 그대로 릴리스될 수 있다.
-      # 태그가 붙은 커밋이 main 에 들어 있을 때(main 에서 과거로 거슬러 가면 만나는 커밋일 때)만 빌드한다.
-      - name: 태그가 main 에 머지된 커밋인지 확인
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: 버전 확인 (이미 릴리스한 버전이면 건너뜀)
+        id: ver
         run: |
-          git fetch --no-tags origin main
-          # HEAD = checkout 이 받은 태그의 커밋 (annotated 태그여도 커밋으로 풀려 있다)
-          if git merge-base --is-ancestor HEAD origin/main; then
-            echo "$GITHUB_REF_NAME → main 에 있는 커밋입니다. 빌드를 계속합니다."
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::notice::v$VERSION 은 이미 릴리스했습니다. package.json 버전을 올리지 않은 머지라 릴리스를 건너뜁니다."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::$GITHUB_REF_NAME 태그의 커밋($(git rev-parse --short HEAD))이 main 에 없습니다. develop → main 머지 후 main 에서 태그를 다세요."
-            exit 1
+            echo "v$VERSION 을 릴리스합니다."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 태그·Release 만들기
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
@@ -41,15 +58,6 @@ jobs:
 
       - run: npm ci
 
-      - name: 태그와 package.json 버전 일치 확인
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::태그($GITHUB_REF_NAME)와 package.json 버전($VERSION)이 다릅니다"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
       - name: 컴파일 + 테스트
         run: npm test
 
@@ -60,12 +68,19 @@ jobs:
             found && /^## / {exit}
             found {print}
           ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md 에 '## $VERSION' 섹션이 없습니다. 버전을 올렸으면 CHANGELOG 도 함께 써 주세요"
+            exit 1
+          fi
           cat release-notes.md
 
       - run: npx vsce package
 
+      # 이 머지 커밋에 태그 v<버전> 을 만들고 Release 를 연다 (GITHUB_TOKEN 으로 만든 태그는 다른 워크플로를 다시 부르지 않는다)
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
           name: DevBoost ${{ env.VERSION }}
           body_path: release-notes.md
           files: '*.vsix'
