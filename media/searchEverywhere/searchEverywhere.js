@@ -317,7 +317,7 @@
       main.className = 'main';
       const label = document.createElement('span');
       label.className = 'label';
-      appendHighlighted(label, r.label, query);
+      appendHighlighted(label, r.label, query, r.marks);
       main.appendChild(label);
       if (r.secondary) {
         const sec = document.createElement('span');
@@ -345,18 +345,23 @@
     updateFooter();
   }
 
-  /** 검색어와 일치하는 부분을 <mark>로 감싼다. 연속 일치가 없으면 글자 단위(퍼지)로 표시 */
-  function appendHighlighted(el, text, query) {
+  /**
+   * 검색어와 일치하는 부분을 <mark>로 감싼다. 연속 일치가 없으면 글자 단위(퍼지)로 표시.
+   * spans 가 오면(텍스트 결과: rg 가 실제로 맞춘 위치, Cc·W·.* 반영) 검색어를 다시 찾지 않고 그 위치만 칠한다
+   */
+  function appendHighlighted(el, text, query, spans) {
     const q = (query || '').trim();
-    if (!q) {
+    if (!q && !(spans && spans.length)) {
       el.textContent = text;
       return;
     }
     const lower = text.toLowerCase();
     const ql = q.toLowerCase();
-    const idx = lower.indexOf(ql);
+    const idx = spans && spans.length ? -2 : lower.indexOf(ql);
     const marks = new Array(text.length).fill(false);
-    if (idx >= 0) {
+    if (idx === -2) {
+      for (const [s, n] of spans) for (let k = s; k < s + n && k < text.length; k++) marks[k] = true;
+    } else if (idx >= 0) {
       for (let k = idx; k < idx + ql.length; k++) marks[k] = true;
     } else {
       // 퍼지: 검색어 글자가 순서대로 전부 있을 때만 표시 (일부만 맞으면 표시 안 함)
