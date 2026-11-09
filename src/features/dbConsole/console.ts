@@ -48,6 +48,7 @@ type FromWebview =
   | { type: 'book' }
   | { type: 'addToBook'; sql: string }
   | { type: 'newConsole' }
+  | { type: 'mapperPanel'; seq: number; ns: string; id: string; set?: { path: string; input: { type: string; value: string } } }
   | DialogMessage;
 
 /** 쿼리 아래에 붙는 결과 하나 (화면이 그린다) */
@@ -538,6 +539,17 @@ export class DbConsole implements vscode.Disposable {
         this.post(tab, { type: 'columns', name: m.name, columns: names });
         return;
       }
+      case 'mapperPanel': {
+        // MyBatis mapper 에서 온 문장: 왼쪽 패널의 파라미터·조건 상태와 다시 푼 SQL (MyBatis SQL 실행 기능이 답한다)
+        let reply: unknown;
+        try {
+          reply = await vscode.commands.executeCommand('devBoost.mybatisRunner.consolePanel', m.ns, m.id, m.set);
+        } catch {
+          reply = undefined;
+        }
+        this.post(tab, { type: 'mapperPanel', seq: m.seq, reply: reply ?? { ok: false, ns: m.ns, id: m.id, why: 'MyBatis SQL 실행 기능이 꺼져 있습니다' } });
+        return;
+      }
       case 'serverOutput':
         tab.serverOutput = m.on;
         await this.syncServerOutput(tab);
@@ -1004,15 +1016,19 @@ export class DbConsole implements vscode.Disposable {
   <button type="button" id="rollback">롤백</button>
 </div>
 <div class="params">
-  <span class="title">파라미터</span>
+  <span class="title" id="paramTitle">파라미터</span>
   <span id="paramList"></span>
   <button type="button" id="addParam">+ 파라미터</button>
+  <span id="mapperNote" class="muted small hidden">MyBatis 쿼리 — 값은 왼쪽 칸에서</span>
   <span class="spacer"></span>
   <label class="check hidden" id="confirmBox" title="파라미터가 있는 문장을 실행하면 먼저 값 칸으로 커서를 옮깁니다. 값을 보고 Enter(또는 실행을 한 번 더)를 누르면 실행합니다"><input type="checkbox" id="confirmEach" checked> 실행 전 값 확인</label>
   <label class="limit" title="조회 결과를 한 번에 가져오는 행 수 (10~5,000)">한 번에 <input type="number" id="pageSize" min="10" max="5000" step="100">행</label>
   <label class="limit" title="한 결과에 가져오는 최대 행 수 (100~200,000). '끝까지'도 여기까지만">최대 <input type="number" id="maxRows" min="100" max="200000" step="1000">행</label>
 </div>
-<div id="editor" data-vscode-context='{"webviewSection": "editor", "preventDefaultContextMenuItems": false}'></div>
+<div class="work">
+  <aside id="mapperPanel" class="mapper hidden" aria-label="MyBatis 파라미터"></aside>
+  <div id="editor" data-vscode-context='{"webviewSection": "editor", "preventDefaultContextMenuItems": false}'></div>
+</div>
 
 <div class="overlay hidden" id="overlay">
   <form class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="d-title" autocomplete="off" novalidate>

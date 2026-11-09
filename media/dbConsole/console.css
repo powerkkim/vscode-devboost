@@ -229,11 +229,123 @@ a {
   margin: 0;
 }
 
+/* 편집기 + (MyBatis 쿼리일 때) 왼쪽 파라미터 패널 */
+.work {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
 /* SQL 편집기 */
 #editor {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* MyBatis 파라미터 패널: 이름 · 값 · 타입 한 줄씩, 조건(if·foreach)에 쓰이는 값은 아래 묶음 */
+.mapper {
+  flex: none;
+  width: 280px;
+  min-width: 180px;
+  max-width: 60%;
+  resize: horizontal;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bar);
+  padding: 6px 0 10px;
+  font-size: 0.92em;
+}
+.mapper.folded {
+  width: 26px !important;
+  min-width: 26px;
+  resize: none;
+  overflow: hidden;
+}
+.mapper.folded > :not(.m-head) {
+  display: none;
+}
+.mapper.folded .m-title {
+  display: none;
+}
+.m-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 6px;
+  color: var(--muted);
+}
+.m-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-fold {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 2px;
+  cursor: pointer;
+}
+.m-sec {
+  margin: 8px 0 2px;
+  padding: 6px 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.85em;
+  color: var(--muted);
+}
+.m-row {
+  display: grid;
+  grid-template-columns: minmax(60px, 38%) minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px;
+}
+.m-name {
+  font-family: var(--mono);
+  color: var(--vscode-debugTokenExpression-name, #9cdcfe);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-row input {
+  font-family: var(--mono);
+  padding: 2px 6px;
+  border-radius: 2px;
+  min-width: 0;
+  width: 100%;
+}
+.m-row select {
+  font-size: 0.85em;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.m-row select option {
+  color: var(--vscode-dropdown-foreground, #f0f0f0);
+  background: var(--vscode-dropdown-background, #3c3c3c);
+}
+.m-status {
+  grid-column: 1 / -1;
+  margin-top: -2px;
+  font-size: 0.82em;
+  color: var(--muted);
+}
+.m-status.on {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+.m-msg {
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 0.88em;
+}
+.m-msg.warn {
+  color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
 /* 연결 추가·수정 팝업 */
