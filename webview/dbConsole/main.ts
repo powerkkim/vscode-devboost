@@ -354,6 +354,20 @@ $('run').addEventListener('click', () => start('run'));
 $('history').addEventListener('click', () => vscode.postMessage({ type: 'history' }));
 $('book').addEventListener('click', () => vscode.postMessage({ type: 'book' }));
 
+/**
+ * Ctrl+A (VS Code 단축키가 받아 'do' 로 돌려준다): 입력 칸에 있으면 그 칸의 글, 결과 표에 있으면 그대로, 아니면 편집기 전체
+ */
+function selectAll() {
+  const a = document.activeElement as HTMLElement | null;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && !editor.dom.contains(a)) {
+    (a as HTMLInputElement).select();
+    return;
+  }
+  if (a?.closest('.ir-grid, .overlay')) return;
+  editor.dispatch({ selection: { anchor: 0, head: editor.state.doc.length }, userEvent: 'select' });
+  editor.focus();
+}
+
 /** 고른 영역, 없으면 커서가 있는 문장 (사전에 추가할 글) */
 function pickedSql(): string {
   const { from, to } = editor.state.selection.main;
@@ -581,6 +595,7 @@ window.addEventListener('message', (event) => {
       if (m.what === 'selectStatement') selectStatement(editor, rules);
       else if (m.what === 'format') format();
       else if (m.what === 'addToBook') vscode.postMessage({ type: 'addToBook', sql: pickedSql() });
+      else if (m.what === 'selectAll') selectAll();
       else start(m.what);
       break;
     case 'inline':

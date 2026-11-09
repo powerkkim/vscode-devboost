@@ -316,7 +316,7 @@ export class DbConsole implements vscode.Disposable {
   }
 
   /** 단축키·명령: 보고 있는 콘솔에서 실행 / 실행계획 / 지금 문장 고르기 */
-  trigger(what: 'run' | 'explain' | 'selectStatement' | 'format' | 'addToBook' | 'bookPick') {
+  trigger(what: 'run' | 'explain' | 'selectStatement' | 'format' | 'addToBook' | 'bookPick' | 'selectAll') {
     const tab = this.activeTab();
     if (tab) this.post(tab, { type: 'do', what });
   }
