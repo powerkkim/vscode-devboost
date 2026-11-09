@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -64,12 +64,6 @@
         "command": "devBoost.sourceAtlas.dump",
         "title": "분석 결과 JSON 보기 (열린 .vue 기준)",
         "category": "Source Atlas"
-      },
-      {
-        "command": "devBoost.mybatisRunner.open",
-        "title": "SQL 실행 화면 열기 (커서 위치 쿼리)",
-        "category": "MyBatis",
-        "icon": "$(play)"
       },
       {
         "command": "devBoost.mybatisRunner.copy",
@@ -371,10 +365,6 @@
           "when": "config.devBoost.sourceAtlas.enabled && resourceExtname == .vue"
         },
         {
-          "command": "devBoost.mybatisRunner.open",
-          "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
-        },
-        {
           "command": "devBoost.mybatisRunner.copy",
           "when": "config.devBoost.mybatisRunner.enabled && resourceExtname == .xml"
         },
@@ -544,11 +534,6 @@
           "command": "devBoost.sourceAtlas.open",
           "when": "config.devBoost.sourceAtlas.enabled && resourceExtname == .vue",
           "group": "navigation@99"
-        },
-        {
-          "command": "devBoost.mybatisRunner.open",
-          "when": "config.devBoost.mybatisRunner.enabled && !config.devBoost.dbConsole.enabled && resourceExtname == .xml",
-          "group": "navigation@98"
         },
         {
           "command": "devBoost.mybatisRunner.runInConsole",
@@ -758,12 +743,6 @@
         "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && config.devBoost.dbConsole.enabled && resourceExtname == .xml"
       },
       {
-        "command": "devBoost.mybatisRunner.open",
-        "key": "ctrl+alt+enter",
-        "mac": "cmd+alt+enter",
-        "when": "editorTextFocus && config.devBoost.mybatisRunner.enabled && !config.devBoost.dbConsole.enabled && resourceExtname == .xml"
-      },
-      {
         "command": "devBoost.caseConverter.cycleNext",
         "key": "alt+shift+u",
         "mac": "alt+shift+u",
@@ -820,7 +799,7 @@
             "type": "boolean",
             "default": true,
             "order": 2,
-            "markdownDescription": "**MyBatis SQL 실행** — mapper XML 쿼리 위의 `▶ SQL 실행`으로 파라미터 값을 넣어 실행 가능한 SQL 을 만들고 Oracle 워크시트로 보냄 (`Ctrl+Alt+Enter`)"
+            "markdownDescription": "**MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔에서 실행 (쿼리 위 `▶ 콘솔에서 실행`, 우클릭, `Ctrl+Alt+Enter`). 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림"
           },
           "devBoost.dbSchema.enabled": {
             "type": "boolean",
@@ -1036,25 +1015,7 @@
           "devBoost.mybatisRunner.codeLens": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "mapper XML 의 각 쿼리 위에 `▶ SQL 실행` / `SQL 복사` 표시"
-          },
-          "devBoost.mybatisRunner.dimInactive": {
-            "type": "boolean",
-            "default": true,
-            "markdownDescription": "SQL 실행 화면이 열려 있는 동안, 현재 값으로 꺼진 `<if>`·`<when>` 을 XML 에서 흐리게 표시"
-          },
-          "devBoost.mybatisRunner.worksheetInsert": {
-            "type": "string",
-            "enum": [
-              "append",
-              "replace"
-            ],
-            "enumDescriptions": [
-              "워크시트 끝에 이어 붙이고 그 부분을 선택",
-              "워크시트 내용을 바꿈"
-            ],
-            "default": "append",
-            "markdownDescription": "Oracle 워크시트로 보낼 때 기존 내용 처리. 보낼 곳은 마지막으로 사용한 Oracle 워크시트(접속에서 `Open SQL Worksheet` 로 연 것)이고, 없으면 새 워크시트를 엽니다"
+            "markdownDescription": "mapper XML 의 각 쿼리 위에 `▶ 콘솔에서 실행` / `SQL 복사` 표시"
           }
         }
       },
