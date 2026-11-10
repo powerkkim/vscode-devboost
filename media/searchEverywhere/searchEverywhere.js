@@ -215,6 +215,7 @@
   }
 
   // ───────── 검색 ─────────
+  const RG_TABS = new Set(['text', 'mappers']);
   function search(immediate, keepLimit) {
     clearTimeout(debounce);
     if (!keepLimit) {
@@ -229,7 +230,9 @@
       $results.classList.add('busy');
       vscode.postMessage({ type: 'search', runId, tab, query: $query.value, options: readOptions(), limit });
     };
-    immediate ? run() : (debounce = setTimeout(run, 120));
+    // 텍스트·Mapper 탭은 키마다 rg 프로세스를 띄우므로 입력이 멈출 때까지 기다린다.
+    // 나머지 탭은 메모리의 색인에서 찾으므로 기다리지 않는다 (모두 탭의 텍스트 부분은 확장 쪽에서 따로 늦게 시작)
+    immediate || !RG_TABS.has(tab) ? run() : (debounce = setTimeout(run, 120));
   }
 
   // ───────── 결과 그리기 ─────────
