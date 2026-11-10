@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -284,6 +284,21 @@
         "command": "devBoost.dbConsole.runSql",
         "title": "SQL 을 콘솔에서 실행",
         "category": "DB 콘솔"
+      },
+      {
+        "command": "devBoost.sqlLog.pick",
+        "title": "최근 쿼리를 DB 콘솔로",
+        "category": "SQL 로그"
+      },
+      {
+        "command": "devBoost.sqlLog.clear",
+        "title": "최근 쿼리 목록 비우기",
+        "category": "SQL 로그"
+      },
+      {
+        "command": "devBoost.sqlLog.send",
+        "title": "쿼리를 DB 콘솔로",
+        "category": "SQL 로그"
       }
     ],
     "viewsContainers": {
@@ -517,6 +532,18 @@
         },
         {
           "command": "devBoost.dbConsole.runSql",
+          "when": "false"
+        },
+        {
+          "command": "devBoost.sqlLog.pick",
+          "when": "config.devBoost.sqlLog.enabled"
+        },
+        {
+          "command": "devBoost.sqlLog.clear",
+          "when": "config.devBoost.sqlLog.enabled"
+        },
+        {
+          "command": "devBoost.sqlLog.send",
           "when": "false"
         }
       ],
@@ -768,6 +795,12 @@
         "key": "ctrl+e",
         "mac": "cmd+e",
         "when": "activeWebviewPanelId == 'devBoostDbConsole' && config.devBoost.dbConsole.enabled"
+      },
+      {
+        "command": "devBoost.sqlLog.pick",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "config.devBoost.sqlLog.enabled"
       }
     ],
     "configuration": [
@@ -809,6 +842,12 @@
             "default": true,
             "order": 5,
             "markdownDescription": "**DB 콘솔** — Oracle(12.1 이상)에 직접 접속해 쿼리를 실행. 사이드바 DevBoost → `DB 연결`에서 연결을 만들고 콘솔을 열어, `Ctrl+Enter`로 커서가 있는 문장을 실행하면 결과가 그 문장 바로 아래에 나옴 (하단 패널 `DB 결과`에도 쌓임) (`Ctrl+E` 실행계획)"
+          },
+          "devBoost.sqlLog.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 6,
+            "markdownDescription": "**SQL 로그** — VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)의 MyBatis 로그에서 쿼리를 골라 `?` 자리에 값을 채워 둠. 상태바 `SQL n` 에 마우스를 올리거나 `Ctrl+Alt+L` 로 최근 쿼리를 골라 새 DB 콘솔에 옮김 (실행은 콘솔에서 직접)"
           }
         }
       },
@@ -1124,6 +1163,18 @@
             "minimum": 100,
             "maximum": 200000,
             "markdownDescription": "한 결과에 가져오는 최대 행 수 (100~200,000). `끝까지`도 여기까지만 가져옵니다. 화면은 보이는 행만 그리지만 가져온 행은 모두 메모리에 있으므로, 아주 큰 결과는 조건을 좁히거나 CSV 로 내보내세요. 콘솔 도구 줄에서도 바꿀 수 있습니다."
+          }
+        }
+      },
+      {
+        "title": "SQL 로그",
+        "properties": {
+          "devBoost.sqlLog.maxQueries": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50,
+            "description": "기억해 둘 최근 쿼리 수 (메모리에만 두고, VS Code 를 닫으면 사라짐)"
           }
         }
       }

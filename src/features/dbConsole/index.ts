@@ -628,7 +628,8 @@ export const dbConsole: Feature = {
       }),
 
       // params: 파라미터 칸에 미리 채울 값 (이름 → 값·타입). MyBatis mapper 실행이 :이름 과 함께 넘긴다
-      cmd('runSql', async (sqlText: string, opts?: { run?: boolean; pick?: boolean; params?: Record<string, BindInput> }) => {
+      // newConsole: 쓰던 콘솔에 붙이지 않고 그 연결의 콘솔을 하나 더 열어 넣는다 (SQL 로그에서 고른 쿼리)
+      cmd('runSql', async (sqlText: string, opts?: { run?: boolean; pick?: boolean; newConsole?: boolean; params?: Record<string, BindInput> }) => {
         if (!sqlText?.trim()) return;
         const list = store.list();
         if (!list.length) {
@@ -644,7 +645,7 @@ export const dbConsole: Feature = {
         }
         await context.workspaceState.update(KEY, cfg.id);
         const text = /;\s*$/.test(sqlText.trim()) ? sqlText.trim() : sqlText.trim() + ';';
-        queryConsole.insertText(cfg.id, text, { asBlock: true, run: opts?.run !== false, params: opts?.params });
+        queryConsole.insertText(cfg.id, text, { asBlock: true, run: opts?.run !== false, params: opts?.params, newConsole: opts?.newConsole });
       }),
     ];
   },
