@@ -84,6 +84,10 @@ const MAX_TEXT_FILE_SIZE = 1024 * 1024; // 1MB 넘는 파일은 텍스트 검색
  * 흔한 단어도 이 정도는 금방 모인다(수십 ms). 끝까지 다 모으면 큰 프로젝트에서 1초 가까이 걸린다.
  */
 const TEXT_COLLECT_MAX = 2000;
+/** 모두 탭에서 텍스트(rg) 검색을 시작하기 전에 기다리는 시간. 그사이 다음 글자가 들어오면 시작하지 않는다 */
+const ALL_TEXT_DELAY_MS = 150;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function config() {
   return vscode.workspace.getConfiguration('devBoost.searchEverywhere');
@@ -316,16 +320,22 @@ export class SearchService implements vscode.Disposable {
           const its = [...head, ...textEarly.slice(0, per)];
           if (its.length) onPartial({ items: its, timings: [...timings], totalMs: Math.round(performance.now() - start), groups: groupsOf(its), partial: true });
         };
+        // 텍스트만 rg 프로세스를 띄운다(디스크). 색인 결과는 키를 칠 때마다 바로 나가고,
+        // 텍스트는 입력이 잠깐 멈춘 뒤에 시작한다 — 이어 치는 동안에는 rg 를 띄우지 않는다
         const textP =
           query.length >= 3
-            ? measure(
-                '텍스트',
-                () =>
-                  this.searchText(query, per, isStale, sink('text'), (e) => {
-                    textEarly = e;
-                    sendPartial();
-                  }),
-                textNote
+            ? sleep(ALL_TEXT_DELAY_MS).then(() =>
+                isStale()
+                  ? ([] as SearchItem[])
+                  : measure(
+                      '텍스트',
+                      () =>
+                        this.searchText(query, per, isStale, sink('text'), (e) => {
+                          textEarly = e;
+                          sendPartial();
+                        }),
+                      textNote
+                    )
               )
             : Promise.resolve([] as SearchItem[]);
         const [indexed, members, files] = await Promise.all([
@@ -617,6 +627,14 @@ export class SearchService implements vscode.Disposable {
     const roots = this.fileRoots();
     if (idx && roots.length) {
       idx.ensure(roots, excludeGlobs()).catch(() => undefined);
+      // 첫 글자를 칠 때 채우던 캐시(소문자 이름·파일별 범위 판정)를 색인이 끝나는 대로 미리 채운다
+      if (!this.primed) {
+        this.primed = true;
+        void idx
+          .whenMembersDone()
+          .then(() => this.prime())
+          .catch(() => (this.primed = false));
+      }
     }
     void this.getFiles().catch(() => undefined);
     // mapper 색인은 클래스 색인이 끝난 뒤 (디스크를 동시에 훑지 않게)
@@ -758,52 +776,68 @@ export class SearchService implements vscode.Disposable {
       this.lastClassNote = wasReady ? `색인 ${all.length}개` : `색인 만듦 ${all.length}개 ${idx.lastBuildMs}ms`;
     }
 
-    // 이름 점수로 먼저 고르고 정렬한 뒤, 범위 필터는 위에서부터 필요한 만큼만 확인한다.
-    // 메서드까지 수만~수십만 개라, 글자가 순서대로 들어 있는지 소문자 이름으로 먼저 걸러 점수 계산을 줄인다
-    const q = query.toLowerCase();
-    const cands: { e: ClassEntry; score: number }[] = [];
-    for (const e of all) {
-      const lc = this.lowerName(e.name);
-      let ti = 0;
-      let ok = true;
-      for (let qi = 0; qi < q.length; qi++) {
-        const f = lc.indexOf(q[qi], ti);
-        if (f < 0) {
-          ok = false;
-          break;
-        }
-        ti = f + 1;
-      }
-      if (!ok) continue;
-      const score = fuzzyScore(query, e.name);
-      if (score >= 0) cands.push({ e, score });
-    }
-    cands.sort(
-      (a, b) =>
-        b.score - a.score ||
-        a.e.name.length - b.e.name.length ||
-        (a.e.name < b.e.name ? -1 : a.e.name > b.e.name ? 1 : 0) ||
-        (a.e.file < b.e.file ? -1 : a.e.file > b.e.file ? 1 : a.e.line - b.e.line)
-    );
     const changed = (await this.getChanged()).set;
     if (isStale()) {
       return [];
     }
-    const out: SearchItem[] = [];
-    // 범위 판정은 파일 단위라 파일별로 한 번만 계산 (전체 개수를 세려고 모든 후보를 확인한다).
-    // 최근 본/변경 범위가 아니면 결과가 파일 경로로만 정해지므로 다음 입력에서도 재사용한다
+    // 범위 판정은 파일 단위라 파일별로 한 번만 계산 (최근 본/변경 범위가 아니면 다음 입력에서도 재사용).
     const fileOk = this.classFileOkCache();
+    // 한 번 훑으면서 이름이 맞는 것 중 범위에 드는 것을 세고, 보여 줄 상위 limit 개만 순서대로 들고 있는다.
+    // 한두 글자 검색어는 후보가 수만 개라, 전부 정렬하면 그것만으로 수십 ms 가 든다 (보여 주는 건 수십 개)
+    const q = query.toLowerCase();
+    type Cand = { e: ClassEntry; score: number };
+    const before = (a: Cand, b: Cand) =>
+      b.score - a.score ||
+      a.e.name.length - b.e.name.length ||
+      (a.e.name < b.e.name ? -1 : a.e.name > b.e.name ? 1 : 0) ||
+      (a.e.file < b.e.file ? -1 : a.e.file > b.e.file ? 1 : a.e.line - b.e.line);
+    const top: Cand[] = [];
     let total = 0;
-    for (const { e } of cands) {
+    let named = 0;
+    let rejected: ClassEntry | undefined;
+    for (const e of all) {
+      // 글자가 순서대로 들어 있는지 소문자 이름으로 먼저 걸러 점수 계산을 줄인다
+      const lc = this.lowerName(e.name);
+      let ti = 0;
+      let hit = true;
+      for (let qi = 0; qi < q.length; qi++) {
+        const f = lc.indexOf(q[qi], ti);
+        if (f < 0) {
+          hit = false;
+          break;
+        }
+        ti = f + 1;
+      }
+      if (!hit) continue;
+      const score = fuzzyScore(query, e.name);
+      if (score < 0) continue;
+      named++;
       let ok = fileOk.get(e.file);
       if (ok === undefined) {
         const u = vscode.Uri.file(e.file);
         ok = !this.isExcluded(u) && this.pathAccepts(u) && scopeAccepts(this.options.scope, this.facts(u, changed));
         fileOk.set(e.file, ok);
       }
-      if (!ok) continue;
+      if (!ok) {
+        rejected ??= e;
+        continue;
+      }
       total++;
-      if (out.length >= limit) continue;
+      const c: Cand = { e, score };
+      if (top.length >= limit && before(c, top[top.length - 1]) >= 0) continue;
+      // 들어갈 자리를 이분 탐색으로 찾아 끼우고, 넘치면 꼴찌를 뺀다
+      let lo = 0;
+      let hi = top.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (before(c, top[mid]) < 0) hi = mid;
+        else lo = mid + 1;
+      }
+      top.splice(lo, 0, c);
+      if (top.length > limit) top.pop();
+    }
+    const out: SearchItem[] = [];
+    for (const { e } of top) {
       const uri = vscode.Uri.file(e.file);
       const isMember = e.kind === 'method' || e.kind === 'field' || e.kind === 'variable';
       out.push({
@@ -825,12 +859,12 @@ export class SearchService implements vscode.Disposable {
       });
     }
     count?.(total);
-    if (cands.length && !total) {
-      // 이름은 맞는데 모두 빠짐: 왜 빠졌는지 첫 번째 것으로 기록 (경로·범위 판정 문제를 찾기 위해)
-      const u = vscode.Uri.file(cands[0].e.file);
+    if (rejected && !total) {
+      // 이름은 맞는데 모두 빠짐: 왜 빠졌는지 하나를 골라 기록 (경로·범위 판정 문제를 찾기 위해)
+      const u = vscode.Uri.file(rejected.file);
       const f = this.facts(u, changed);
       this.logLine(
-        `[색인] "${query}" 이름이 맞는 ${cands.length}개가 모두 범위에서 빠짐. 예: ${cands[0].e.file} → ` +
+        `[색인] "${query}" 이름이 맞는 ${named}개가 모두 범위에서 빠짐. 예: ${rejected.file} → ` +
           `제외설정=${this.isExcluded(u)} 포함/제외경로=${!this.pathAccepts(u)} 프로젝트안=${f.inProject} 라이브러리=${f.isLibrary} 최근에연파일=${f.recentlyViewed} 상대경로(워크스페이스 폴더 기준)=${f.relPath} 범위=${this.options.scope}`
       );
     }
@@ -1099,6 +1133,13 @@ export class SearchService implements vscode.Disposable {
     }
     count?.(total);
     return out;
+  }
+
+  private primed = false;
+  /** 아무 글자로 한 번 훑어 캐시를 채운다 (결과는 버림). 색인 수만 개 기준 수십 ms, 한 번만 */
+  private async prime(): Promise<void> {
+    await this.searchIndexed('all', 'a', 1);
+    await this.getScopedFiles();
   }
 
   /** 이름 → 소문자 (같은 이름이 많아서 캐시) */

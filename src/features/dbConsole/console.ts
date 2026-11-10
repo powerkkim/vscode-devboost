@@ -95,6 +95,8 @@ interface ConsoleTab {
   ready: boolean;
   /** 화면이 준비되기 전에 보내려던 메시지 */
   queue: unknown[];
+  /** 연결을 붙이고 쓰던 SQL 을 채우는 중 (끝난 뒤에 넣어야 방금 넣은 글이 지워지지 않는다) */
+  binding?: Promise<void>;
   dialog?: FormDialog;
   /** 서버 출력을 켜 두었는지 (기억해 둔 값. 접속할 때 맞춘다) */
   serverOutput: boolean;
@@ -302,7 +304,7 @@ export class DbConsole implements vscode.Disposable {
     // 연결을 아직 정하지 않은 빈 콘솔이 있으면 그것을 쓴다
     const blank = [...this.tabs].find((t) => !t.connectionId);
     const tab = blank ?? this.create();
-    void this.bind(tab, cfg, no);
+    tab.binding = this.bind(tab, cfg, no).catch((e) => this.fail(tab, e));
     tab.panel.reveal(undefined, false);
     if (tab.key === cfg.id) void this.deps.ensureSession(cfg); // 기본 접속은 미리 (트리도 쓴다)
     return tab;
@@ -448,13 +450,22 @@ export class DbConsole implements vscode.Disposable {
   insertSnippet(connectionId: string, query: string, values: Record<string, string>, title: string) {
     const cfg = this.deps.store.get(connectionId);
     if (!cfg) return;
-    this.post(this.open(cfg), { type: 'snippet', query, values, title });
+    this.postAfterBind(this.open(cfg), { type: 'snippet', query, values, title });
   }
 
-  insertText(connectionId: string, text: string, opts: { asBlock?: boolean; run?: boolean; params?: Params } = {}) {
+  insertText(connectionId: string, text: string, opts: { asBlock?: boolean; run?: boolean; params?: Params; newConsole?: boolean } = {}) {
     const cfg = this.deps.store.get(connectionId);
     if (!cfg) return;
-    this.post(this.open(cfg), { type: 'insert', text, asBlock: !!opts.asBlock, run: !!opts.run, params: opts.params });
+    this.postAfterBind(opts.newConsole ? this.openNew(cfg) : this.open(cfg), { type: 'insert', text, asBlock: !!opts.asBlock, run: !!opts.run, params: opts.params });
+  }
+
+  /**
+   * 방금 연 콘솔은 쓰던 SQL 을 읽어 와 화면을 통째로 채운다(init). 그보다 먼저 보낸 글은 지워지므로,
+   * 넣을 글은 그 뒤에 보낸다
+   */
+  private postAfterBind(tab: ConsoleTab, msg: unknown) {
+    if (tab.binding) void tab.binding.then(() => this.post(tab, msg));
+    else this.post(tab, msg);
   }
 
   private fail(tab: ConsoleTab, e: unknown) {
