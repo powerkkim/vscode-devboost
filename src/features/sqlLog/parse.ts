@@ -5,6 +5,14 @@
  *   ... c.e.m.UserMapper.selectUser : ==> Parameters: 10(Integer), kim(String)
  *   ... c.e.m.UserMapper.selectUser : <==      Total: 1
  *   → SELECT * FROM TB_USER WHERE ID = 10 AND NM = 'kim'
+ *
+ * log4jdbc(jdbc.sqltiming · jdbc.sqlonly)는 값이 이미 들어간 SQL 을 여러 줄로 찍는다 — 그 덩어리를 그대로 가져온다:
+ *   ... DEBUG j.sqltiming -  sun.reflect.NativeMethodAccessorImpl.invoke0(null:-2)
+ *   10. SELECT USER_ID
+ *         FROM TB_USER
+ *        WHERE EMAIL = 'a@b.com'
+ *    {executed in 3 msec}
+ * 같은 요청에서 MyBatis 로그와 log4jdbc 로그가 둘 다 찍히면 한 건으로 합친다 (이름은 MyBatis, SQL·시간은 log4jdbc)
  */
 
 export interface LoggedQuery {
@@ -18,6 +26,10 @@ export interface LoggedQuery {
   rows?: number;
   /** ? 개수와 값 개수가 다를 때의 안내 */
   warn?: string;
+  /** 실행 시간 ms (log4jdbc 의 {executed in N msec}) */
+  ms?: number;
+  /** 실행 실패 (log4jdbc 의 {FAILED after N msec}) */
+  failed?: boolean;
 }
 
 export interface LogParam {
@@ -174,13 +186,22 @@ export function layoutSql(sql: string): string {
   return out;
 }
 
+/** 줄 머리의 시각. 2026-11-10 12:00:00 · 12:00:00.123 · 20170202 20:37:02.037 · [2026-11-10T… */
+const TIME_HEAD = /^\s*\[?(?:\d{2,4}[-/.:]\d{2}|\d{6,8}[ T_-]\d{2}:\d{2})/;
+/** 줄 머리의 로그 수준 (뒤에 글이 이어질 때만 — SQL 의 INFO, 같은 칼럼 줄과 구분) */
+const LEVEL_HEAD = /^\s*\[?\s*(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\]?\s+\S/;
+
+/** 로그 한 건이 시작하는 줄인가 (시각이나 로그 수준으로 시작) */
+function isLogHead(line: string): boolean {
+  return TIME_HEAD.test(line) || LEVEL_HEAD.test(line);
+}
+
 /** 새 로그 줄의 시작인가 (시각·로그 수준·예외 줄). 아니면 터미널 폭에서 잘려 넘어온 앞 줄의 나머지로 본다 */
 function startsRecord(line: string): boolean {
   return (
     line.includes('==>') ||
     line.includes('<==') ||
-    /^\s*\[?\d{2,4}[-/.:]\d{2}/.test(line) ||
-    /^\s*\[?\s*(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\b/.test(line) ||
+    isLogHead(line) ||
     /^\s*(at\s|Caused by|\.\.\. \d+ more|[a-z]+(\.[\w$]+)+(Exception|Error)\b)/.test(line) ||
     /^[>$#]\s|^\s*$/.test(line)
   );
@@ -191,17 +212,63 @@ function prefixKey(prefix: string): string {
   return prefix.replace(/^[\s\d\-/:.,TZ+[\]]+/, '').trim();
 }
 
-/** "... c.e.m.UserMapper.selectUser :" → "UserMapper.selectUser" */
+/** 줄 머리의 스레드 이름 "[http-nio-8080-exec-5]" (없으면 '') — 같은 요청의 로그끼리 묶는 데 쓴다 */
+function threadOf(prefix: string): string {
+  const m = /\[([^\]]*[A-Za-z][^\]]*)\]/.exec(prefix);
+  return m ? m[1].trim() : '';
+}
+
+/** "... c.e.m.UserMapper.selectUser :" → "UserMapper.selectUser". 로거 이름이 줄여 찍혀 클래스가 한두 글자면 메서드만 */
 function mapperOf(prefix: string): string {
   const all = prefix.match(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+/g);
   if (!all) return '';
   const parts = all[all.length - 1].split('.');
-  return parts.slice(-2).join('.');
+  const cls = parts[parts.length - 2];
+  return cls.length <= 2 ? parts[parts.length - 1] : parts.slice(-2).join('.');
+}
+
+/** log4jdbc 로그의 시작: 로거 이름(jdbc.sqltiming / 줄여서 j.sqltiming) 뒤에 호출 위치나 SQL 이 온다 */
+const JDBC_HEAD = /^(.*?)(?:\bjdbc|\bj)\.(sqltiming|sqlonly)\b\s*(?:[-:|]+\s?)?(.*)$/;
+/** log4jdbc 가 SQL 뒤에 붙이는 꼬리 */
+const JDBC_TAIL = /\{(executed in|FAILED after) (\d+) msec\}\s*$/;
+/** 호출 위치 줄. 예: sun.reflect.NativeMethodAccessorImpl.invoke0(null:-2) */
+const CALL_SITE = /^\s*[\w.$<>]+\([^()]*\)\s*$/;
+
+/** 두 SQL 이 같은 문장으로 보이는가: 주석·띄어쓰기를 빼고 앞머리(첫 값 앞까지, 최대 40자)가 같다 */
+function sameHead(a: string, b: string): boolean {
+  const head = (x: string) => {
+    const t = x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, '').toLowerCase();
+    const q = t.indexOf("'");
+    return t.slice(0, Math.min(40, q < 0 ? t.length : q));
+  };
+  const x = head(a);
+  const y = head(b);
+  const n = Math.min(x.length, y.length);
+  return n >= 6 && x.slice(0, n) === y.slice(0, n);
+}
+
+/** log4jdbc 가 찍은 여러 줄 SQL 을 다듬는다: 앞의 "10. " 번호와 빈 줄을 떼고, 둘째 줄부터 공통 들여쓰기를 뺀다 */
+function tidyBlock(lines: string[]): string {
+  const ls = lines.map((l) => l.replace(/\s+$/, ''));
+  while (ls.length && !ls[0].trim()) ls.shift();
+  while (ls.length && !ls[ls.length - 1].trim()) ls.pop();
+  if (!ls.length) return '';
+  ls[0] = ls[0].replace(/^\s*\d+\.\s/, '').trimStart();
+  let indent = Infinity;
+  for (let i = 1; i < ls.length; i++) {
+    if (ls[i].trim()) indent = Math.min(indent, ls[i].length - ls[i].trimStart().length);
+  }
+  if (indent !== Infinity && indent > 0) {
+    for (let i = 1; i < ls.length; i++) ls[i] = ls[i].slice(Math.min(indent, ls[i].length - ls[i].trimStart().length));
+  }
+  return ls.join('\n').replace(/;\s*$/, '');
 }
 
 /** 붙잡아 두는 줄·짝 없는 Preparing 의 상한 (로그가 끝없이 와도 메모리가 늘지 않게) */
 const MAX_LINE = 200_000;
 const MAX_OPEN = 50;
+
+type Source = 'mybatis' | 'sqlonly' | 'sqltiming';
 
 /**
  * 로그를 조각(chunk)으로 받아 완성된 쿼리를 돌려준다. 실행 하나(터미널 명령 하나)마다 하나씩 만든다.
@@ -211,10 +278,14 @@ export class LogReader {
   private buf = '';
   /** 아직 다음 줄을 기다리는 "==>" 줄 (터미널 폭에서 잘린 나머지가 이어질 수 있어서) */
   private held: string | undefined;
+  /** 읽는 중인 log4jdbc 덩어리 */
+  private block: { kind: 'sqlonly' | 'sqltiming'; thread: string; lines: string[]; size: number } | undefined;
   /** 열쇠 → Preparing 의 SQL */
   private open = new Map<string, { sql: string; mapper: string }>();
   /** 열쇠 → 방금 내보낸 쿼리 (Total 이 오면 건수를 적는다) */
   private last = new Map<string, LoggedQuery>();
+  /** 스레드 → 그 스레드에서 방금 내보낸 쿼리와, 그 쿼리를 본 로그 종류 (같은 실행의 다른 로그를 한 건으로 합친다) */
+  private byThread = new Map<string, { q: LoggedQuery; seen: Set<Source> }>();
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -235,17 +306,81 @@ export class LogReader {
   flush(): LoggedQuery[] {
     const out: LoggedQuery[] = [];
     this.release(out);
+    // sqlonly 는 꼬리가 없어 다음 로그가 와야 끝난다 → 로그가 멈췄으면 여기서 끝낸다
+    if (this.block?.kind === 'sqlonly') this.finishBlock(out);
     return out;
   }
 
   private line(line: string, out: LoggedQuery[]) {
+    if (this.block) {
+      const tail = JDBC_TAIL.exec(line);
+      if (tail) {
+        this.block.lines.push(line.slice(0, tail.index));
+        this.finishBlock(out, Number(tail[2]), tail[1] !== 'executed in');
+        return;
+      }
+      if (!isLogHead(line) && !line.includes('==>') && !line.includes('<==') && this.block.size < MAX_LINE) {
+        this.block.lines.push(line);
+        this.block.size += line.length;
+        return;
+      }
+      this.finishBlock(out); // 다음 로그가 시작됨 (sqlonly, 또는 꼬리를 못 본 sqltiming)
+    }
     if (this.held !== undefined && !startsRecord(line) && this.held.length < MAX_LINE) {
       this.held += line; // 폭에서 잘린 줄의 나머지
       return;
     }
     this.release(out);
-    if (line.includes('==>')) this.held = line;
-    else if (line.includes('<==')) this.total(line);
+    if (line.includes('==>')) {
+      this.held = line;
+      return;
+    }
+    if (line.includes('<==')) {
+      this.total(line);
+      return;
+    }
+    const j = line.indexOf('.sql') < 0 ? null : JDBC_HEAD.exec(line);
+    if (j && isLogHead(line)) {
+      this.block = { kind: j[2] as 'sqlonly' | 'sqltiming', thread: threadOf(j[1]), lines: [], size: 0 };
+      const rest = j[3];
+      const tail = JDBC_TAIL.exec(rest);
+      if (tail) {
+        // 한 줄로 찍힌 경우: SQL {executed in N msec}
+        this.block.lines.push(rest.slice(0, tail.index));
+        this.finishBlock(out, Number(tail[2]), tail[1] !== 'executed in');
+      } else if (rest.trim() && !CALL_SITE.test(rest)) {
+        this.block.lines.push(rest);
+      }
+    }
+  }
+
+  private finishBlock(out: LoggedQuery[], ms?: number, failed?: boolean) {
+    const b = this.block;
+    this.block = undefined;
+    if (!b) return;
+    const sql = tidyBlock(b.lines);
+    if (!sql) return;
+    const prev = this.byThread.get(b.thread);
+    if (prev && !prev.seen.has(b.kind) && sameHead(prev.q.sql, sql)) {
+      // 같은 실행을 다른 로그가 먼저 알려 줌 → 한 건으로. SQL 은 실제로 실행된 글(log4jdbc)로 바꾼다
+      prev.seen.add(b.kind);
+      prev.q.sql = sql;
+      prev.q.warn = undefined;
+      if (ms !== undefined) prev.q.ms = ms;
+      if (failed) prev.q.failed = true;
+      return;
+    }
+    const q: LoggedQuery = { sql, mapper: '', time: this.now() };
+    if (ms !== undefined) q.ms = ms;
+    if (failed) q.failed = true;
+    this.remember(b.thread, q, b.kind);
+    out.push(q);
+  }
+
+  private remember(thread: string, q: LoggedQuery, src: Source) {
+    this.byThread.delete(thread);
+    this.byThread.set(thread, { q, seen: new Set([src]) });
+    if (this.byThread.size > MAX_OPEN) this.byThread.delete(this.byThread.keys().next().value as string);
   }
 
   private release(out: LoggedQuery[]) {
@@ -273,6 +408,7 @@ export class LogReader {
     this.last.delete(key);
     this.last.set(key, q);
     if (this.last.size > MAX_OPEN) this.last.delete(this.last.keys().next().value as string);
+    this.remember(threadOf(m[1]), q, 'mybatis');
     out.push(q);
   }
 
@@ -319,8 +455,36 @@ export class QueryRing {
   }
 }
 
-/** 콘솔에 넣을 글: 어디서 온 쿼리인지 머리 주석 + 줄을 나눈 SQL */
+/**
+ * 목록에 보일 이름: mapper 메서드 → SQL 머리의 주석에 적힌 이름(SELECT /*"selectOneUser"*\/) → "SELECT TB_USER"
+ */
+export function queryTitle(q: LoggedQuery): string {
+  if (q.mapper) return q.mapper;
+  const c = /^\s*\w+\s*\/\*\s*["']?([\w.$-]{2,80})["']?\s*\*\//.exec(q.sql) ?? /^\s*\/\*\s*["']?([\w.$-]{2,80})["']?\s*\*\//.exec(q.sql);
+  if (c) return c[1];
+  const bare = q.sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  const verb = /^\s*([A-Za-z]+)/.exec(bare)?.[1].toUpperCase() ?? 'SQL';
+  const table =
+    verb === 'UPDATE'
+      ? /^\s*UPDATE\s+([\w.$#"]+)/i.exec(bare)
+      : verb === 'INSERT' || verb === 'MERGE'
+        ? /\bINTO\s+([\w.$#"]+)/i.exec(bare)
+        : /\bFROM\s+([\w.$#"]+)/i.exec(bare);
+  return table ? `${verb} ${table[1]}` : verb;
+}
+
+/** 이름 뒤에 붙는 짧은 정보: "12건 · 3ms · 실패" */
+export function queryInfo(q: LoggedQuery): string {
+  const parts: string[] = [];
+  if (q.rows !== undefined) parts.push(`${q.rows}건`);
+  if (q.ms !== undefined) parts.push(`${q.ms}ms`);
+  if (q.failed) parts.push('실패');
+  return parts.join(' · ');
+}
+
+/** 콘솔에 넣을 글: 어디서 온 쿼리인지 머리 주석 + SQL (한 줄로 찍힌 것만 줄을 나누고, 여러 줄로 찍힌 것은 그대로) */
 export function consoleText(q: LoggedQuery, timeText: string): string {
-  const head = `-- [로그 ${timeText}] ${q.mapper || 'SQL'}${q.rows !== undefined ? ` · ${q.rows}건` : ''}${q.warn ? ` · ${q.warn}` : ''}`;
-  return `${head}\n${layoutSql(q.sql)};`;
+  const info = queryInfo(q);
+  const head = `-- [로그 ${timeText}] ${queryTitle(q)}${info ? ` · ${info}` : ''}${q.warn ? ` · ${q.warn}` : ''}`;
+  return `${head}\n${q.sql.includes('\n') ? q.sql : layoutSql(q.sql)};`;
 }

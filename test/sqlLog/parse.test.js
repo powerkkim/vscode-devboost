@@ -142,3 +142,105 @@ test('콘솔에 넣을 글: 머리 주석은 mapper 머리 주석(-- 네임스�
   const { parseMapperHeader } = require(path.join(__dirname, '..', '..', 'out', 'features', 'mybatisRunner', 'mapper', 'consoleSql.js'));
   assert.strictEqual(parseMapperHeader(text.split('\n')[0]), undefined);
 });
+
+// ───────── log4jdbc (jdbc.sqltiming · jdbc.sqlonly) ─────────
+const { queryTitle, queryInfo } = require(path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js'));
+
+const T = '20170202 20:37:02.0';
+const SQLTIMING_BLOCK = [
+  T + '40 [http-nio-7070-exec-5] DEBUG j.sqltiming -  sun.reflect.NativeMethodAccessorImpl.invoke0(null:-2)',
+  '10. SELECT /*"selectOneUser"*/',
+  '                USER_ID,',
+  '                    EMAIL,',
+  '                    DELETE_YN,',
+  '                    SUPER_USER',
+  '           FROM LCUSRBASE',
+  "          WHERE EMAIL = 'abc@test.com'",
+  "            AND DELETE_YN = 'N'",
+  ' {executed in 3 msec}',
+  T + '45 [http-nio-7070-exec-5] INFO j.resultsettable - ',
+  '|--------|',
+  '|user_id |',
+  '',
+].join('\r\n');
+const TIDY = [
+  'SELECT /*"selectOneUser"*/',
+  '      USER_ID,',
+  '          EMAIL,',
+  '          DELETE_YN,',
+  '          SUPER_USER',
+  ' FROM LCUSRBASE',
+  "WHERE EMAIL = 'abc@test.com'",
+  "  AND DELETE_YN = 'N'",
+].join('\n');
+
+test('log4jdbc: j.sqltiming 덩어리 — 호출 위치·번호를 떼고, 들여쓰기를 줄이고, 실행 시간을 적는다', () => {
+  const got = read(SQLTIMING_BLOCK);
+  assert.strictEqual(got.length, 1);
+  assert.strictEqual(got[0].sql, TIDY);
+  assert.strictEqual(got[0].ms, 3);
+  assert.strictEqual(queryTitle(got[0]), 'selectOneUser');
+  assert.strictEqual(queryInfo(got[0]), '3ms');
+  // 여러 줄로 찍힌 SQL 은 줄을 다시 나누지 않는다
+  assert.strictEqual(consoleText(got[0], '20:37:02'), '-- [로그 20:37:02] selectOneUser · 3ms\n' + TIDY + ';');
+});
+
+test('log4jdbc: MyBatis 로그와 같이 찍히면 한 건 (이름은 MyBatis, SQL·시간은 log4jdbc, 건수는 Total)', () => {
+  const M = '[http-nio-7070-exec-5] DEBUG c.l.c.u.m.L.selectOneUserForLogin - ';
+  const got = read(
+    T + '30 ' + M + '==>  Preparing: SELECT /*"selectOneUser"*/ USER_ID, EMAIL, DELETE_YN, SUPER_USER FROM LCUSRBASE WHERE EMAIL = ? AND DELETE_YN = \'N\'\r\n' +
+      T + '37 ' + M + '==> Parameters: abc@test.com(String)\r\n' +
+      SQLTIMING_BLOCK +
+      T + '50 ' + M + '<==      Total: 1\r\n'
+  );
+  assert.strictEqual(got.length, 1);
+  assert.strictEqual(got[0].sql, TIDY);
+  assert.strictEqual(got[0].mapper, 'selectOneUserForLogin'); // 줄여 찍힌 클래스(L)는 뺀다
+  assert.strictEqual(got[0].ms, 3);
+  assert.strictEqual(got[0].rows, 1);
+  assert.strictEqual(queryInfo(got[0]), '1건 · 3ms');
+});
+
+test('log4jdbc: 이 시각 형식(20170202 20:37:02.037)에서 MyBatis 값 줄 뒤의 줄이 붙지 않는다', () => {
+  const M = '[exec-1] DEBUG c.e.m.UserMapper.selectUser - ';
+  const got = read(
+    T + '30 ' + M + '==>  Preparing: SELECT 1 FROM DUAL WHERE A = ?\n' + T + '31 ' + M + '==> Parameters: x(String)\n' + T + '32 [exec-1] INFO c.e.Other - hello\n'
+  );
+  assert.deepStrictEqual(got.map((q) => q.sql), ["SELECT 1 FROM DUAL WHERE A = 'x'"]);
+});
+
+test('log4jdbc: 한 줄로 찍힌 것, 실패, 이어지는 같은 쿼리, sqlonly + sqltiming 은 한 건', () => {
+  const H = '2026-11-12 00:20:01.123  INFO 1 --- [exec-1] jdbc.sqltiming : ';
+  const one = read(H + 'UPDATE TB_ORDER SET STATUS = \'DONE\' WHERE ORDER_NO = 1001 {executed in 12 msec}\n');
+  assert.deepStrictEqual(one.map((q) => [q.sql, q.ms, queryTitle(q)]), [["UPDATE TB_ORDER SET STATUS = 'DONE' WHERE ORDER_NO = 1001", 12, 'UPDATE TB_ORDER']]);
+  assert.strictEqual(consoleText(one[0], 't'), "-- [로그 t] UPDATE TB_ORDER · 12ms\nUPDATE TB_ORDER\nSET STATUS = 'DONE'\nWHERE ORDER_NO = 1001;");
+
+  const failed = read(H + 'SELECT X FROM NO_TABLE {FAILED after 2 msec}\n');
+  assert.strictEqual(failed[0].failed, true);
+  assert.strictEqual(queryInfo(failed[0]), '2ms · 실패');
+
+  // 같은 스레드에서 같은 쿼리가 두 번 실행되면 두 건으로 읽힌다 (목록에서 하나로 합치는 건 QueryRing)
+  const twice = read((H + 'SELECT 1 FROM DUAL {executed in 1 msec}\n').repeat(2));
+  assert.strictEqual(twice.length, 2);
+
+  const O = '2026-11-12 00:20:01.100  INFO 1 --- [exec-1] jdbc.sqlonly   : ';
+  const both = read(O + 'SELECT A\n  FROM TB_A\n WHERE X = 1\n' + H + 'SELECT A\n  FROM TB_A\n WHERE X = 1\n {executed in 4 msec}\n');
+  assert.strictEqual(both.length, 1);
+  assert.strictEqual(both[0].sql, 'SELECT A\n FROM TB_A\nWHERE X = 1');
+  assert.strictEqual(both[0].ms, 4);
+
+  // sqlonly 만 켜져 있으면 꼬리가 없다 → 로그가 멈췄을 때(flush) 끝난다
+  const only = new LogReader(() => 1);
+  assert.strictEqual(only.push(O + 'SELECT B\n  FROM TB_B\n').length, 0);
+  assert.deepStrictEqual(only.flush().map((q) => q.sql), ['SELECT B\nFROM TB_B']);
+});
+
+test('log4jdbc: SQL 안에 로그 수준 같은 낱말·빈 줄이 있어도 덩어리가 끊기지 않고, 다른 스레드와 섞이지 않는다', () => {
+  const got = read(
+    '12:00:00.001 [exec-1] DEBUG jdbc.sqltiming - \n3. SELECT INFO,\n       ERROR_CD\n\n  FROM TB_LOG\n {executed in 1 msec}\n' +
+      '12:00:00.002 [exec-2] DEBUG c.e.m.AMapper.selectA - ==>  Preparing: SELECT INFO, ERROR_CD FROM TB_LOG WHERE ID = ?\n' +
+      '12:00:00.003 [exec-2] DEBUG c.e.m.AMapper.selectA - ==> Parameters: 5(Integer)\n'
+  );
+  assert.deepStrictEqual(got.map((q) => q.sql), ['SELECT INFO,\n     ERROR_CD\n\nFROM TB_LOG', 'SELECT INFO, ERROR_CD FROM TB_LOG WHERE ID = 5']);
+  assert.strictEqual(queryTitle(got[0]), 'SELECT TB_LOG');
+});
