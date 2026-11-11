@@ -13,6 +13,7 @@
 | **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
+| **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.importJump.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -119,7 +120,8 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 
 - **MyBatis 로그** (`==> Preparing` / `==> Parameters`): `?` 자리에 값을 채웁니다
 - **log4jdbc 로그** (`jdbc.sqltiming`, `jdbc.sqlonly`): 값이 들어간 여러 줄 SQL 을 `{executed in N msec}` 까지 그대로 가져오고 실행 시간을 표시합니다
-- 둘 다 찍히는 쿼리는 한 건으로 합칩니다
+- **그 밖의 로그**: 로그 내용이 `SELECT`·`INSERT`·`UPDATE`·`DELETE`·`MERGE`·`WITH` 로 시작하면 다음 로그 줄 전까지를 쿼리로 읽습니다 (Hibernate, 사내 공통 로거 등). 값이 `?` 로 찍힌 것은 `? 값 없음` 으로 표시합니다
+- 같은 실행을 여러 로그가 찍으면 한 건으로 합칩니다
 
 ```
 ==>  Preparing: SELECT * FROM TB_USER WHERE DEPT_CD = ? AND REG_DT >= ?
@@ -141,6 +143,30 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
 - 개수: `devBoost.sqlLog.maxQueries`
+
+안 잡히는 로그가 있을 때
+- `devBoost.sqlLog.loggers` 에 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적습니다. 예: `["SQL_LOG"]` → 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리로 읽습니다
+- SQL 이 아닌 로그가 섞여 잡히면 `devBoost.sqlLog.autoDetect` 를 끕니다
+
+### import 따라가기
+
+`import { UserType } from '@/types/user'` 로 가져온 `UserType` 을 `Ctrl+클릭`했을 때 같은 파일의 import 줄로만 가고, 다시 누르면 쓰던 곳으로 돌아오는 경우가 있습니다. 프로젝트의 tsconfig 에 경로 별칭(`paths`)이 없어 편집기가 `@/…` 를 풀지 못할 때입니다. 이 기능은 설정 파일을 건드리지 않고 별칭을 직접 풀어 실제 선언을 찾습니다.
+
+- `Ctrl+클릭` — 실제 선언(type·interface·함수·상수·컴포넌트)으로 이동. import 줄의 이름이나 경로 글을 눌러도 됩니다
+- 마우스를 올리면 선언 내용을 미리 봅니다
+- `Ctrl+Alt+F12` — 실제 선언으로 바로 이동. `Ctrl+클릭`에서 import 줄과 실제 선언이 함께 목록으로 뜨면 이 키를 쓰세요
+- `index.ts` 가 다시 내보낸 것(`export * from './user'`)은 따라가서 실제 선언까지 갑니다
+- 템플릿의 컴포넌트 태그(`<UserCard>`, `<user-card>`)도 됩니다
+
+별칭은 `vite.config` 의 `resolve.alias` → `tsconfig`/`jsconfig` 의 `paths` → 관례(`@`·`~` → `src`) 순으로 찾습니다. 맞지 않으면 개인 설정에 적습니다.
+
+```json
+"devBoost.importJump.aliases": { "@": "src", "@comp": "src/components" }
+```
+
+- 편집기가 이미 다른 파일의 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않습니다
+- 미리 만드는 색인이 없습니다. 이름을 누르거나 올렸을 때 그 파일의 import 와 대상 파일만 읽습니다
+- 끄면(`devBoost.importJump.enabled`) 편집기 원래 동작 그대로입니다
 
 ## 설치
 

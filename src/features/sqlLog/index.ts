@@ -4,7 +4,7 @@ import { LogReader, LoggedQuery, QueryRing, consoleText, queryInfo, queryTitle }
 import { closeSqlLogPicker, showSqlLogPicker } from './picker';
 
 /**
- * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 MyBatis·log4jdbc 로그에서
+ * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 로그(MyBatis·log4jdbc·SQL 로 시작하는 로그)에서
  * 쿼리를 골라 값까지 채워 두고, 고르면 새 DB 콘솔에 옮긴다 (실행은 하지 않는다).
  *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
@@ -95,7 +95,7 @@ export const sqlLog: Feature = {
 
     /** 터미널 명령 하나의 출력을 끝까지 읽는다 */
     const consume = async (execution: vscode.TerminalShellExecution) => {
-      const reader = new LogReader();
+      const reader = new LogReader(Date.now, { auto: cfg().get<boolean>('autoDetect', true), keywords: cfg().get<string[]>('loggers', []) });
       let idle: ReturnType<typeof setTimeout> | undefined;
       const take = (found: LoggedQuery[]) => {
         for (const q of found) ring.add(q);

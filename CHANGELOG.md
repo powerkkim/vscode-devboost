@@ -1,6 +1,17 @@
 # Changelog
 
-## 0.23.0 - 2026-11-12
+## 0.25.0 - 2026-11-12
+- **import 따라가기 (새 기능)** — `import { UserType } from '@/types/user'` 처럼 경로 별칭으로 가져온 이름을 `Ctrl+클릭`하면 같은 파일의 import 줄이 아니라 실제 선언으로 이동 (Vue·TypeScript·JavaScript)
+  - 프로젝트의 tsconfig 에 별칭(`paths`)이 없어 편집기가 `@/…` 를 풀지 못할 때를 위한 것. 설정 파일은 건드리지 않고 별칭은 `vite.config` · `tsconfig` · 관례(`@`·`~` → `src`)에서 읽음. 안 맞으면 개인 설정 `devBoost.importJump.aliases`
+  - 마우스를 올리면 선언 내용(type·interface 본문, 함수)을 미리 보여 줌 (`devBoost.importJump.hover`)
+  - `index.ts` 에서 다시 내보낸 것(`export * from`, `export { A } from`)은 따라가서 실제 선언까지, 템플릿의 컴포넌트 태그(`<UserCard>`, `<user-card>`)도
+  - `Ctrl+Alt+F12` 는 실제 선언으로 바로 이동 (Ctrl+클릭에서 import 줄과 실제 선언이 같이 목록으로 뜰 때 쓰는 길)
+  - 편집기가 이미 다른 파일의 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않음. 끄기 `devBoost.importJump.enabled`
+  - 미리 만드는 색인 없음: 이름을 누르거나 올렸을 때 그 파일의 import 와 대상 파일만 읽음
+- **SQL 로그: 로거 이름을 몰라도 읽음** — 로그 내용이 `SELECT`·`INSERT`·`UPDATE`·`DELETE`·`MERGE`·`WITH` 로 시작하면(앞에 `/* 쿼리 id */` 주석이 있어도) 다음 로그 줄 전까지를 쿼리 한 건으로 읽음. Hibernate(`org.hibernate.SQL`, `Hibernate:`), 사내 공통 로거 등
+  - 값이 `?` 그대로 찍힌 쿼리는 목록에 `? 값 없음` 표시. 같은 실행을 MyBatis 로그도 찍으면 값이 채워진 쪽으로 한 건
+  - SQL 이 아닌 로그가 섞여 잡히면 `devBoost.sqlLog.autoDetect` 로 끔
+- **SQL 로그: 읽을 로그를 낱말로 지정** `devBoost.sqlLog.loggers` — 자동으로 안 잡히는 로그는 그 줄에 항상 있는 낱말(로거 이름 등)만 적으면, 그 뒤부터 다음 로그 줄 전까지를 읽음 (정규식 불필요)
 - **SQL 로그: 고르는 창** (`Ctrl+Alt+L`, 상태바 `SQL n` 클릭) — 한 줄짜리 목록 대신 왼쪽에 쿼리 목록, 오른쪽에 고른 쿼리의 전체 SQL
   - 제목은 SQL 머리 주석의 쿼리 id(`SELECT /*"selectOneUser"*/` → `selectOneUser`), 없으면 mapper 메서드. 둘이 다르면 mapper 메서드도 함께 표시하고, 주석은 옮긴 SQL 에 그대로 남김
   - 목록 한 건마다 종류(SELECT·INSERT·UPDATE·DELETE), 이름, 테이블, 건수·실행 시간, 그리고 넘어간 값이 보이는 조건 하나(`EMAIL = 'abc@test.com'`)

@@ -277,3 +277,83 @@ test('요약: 종류·테이블·값이 보이는 조건', () => {
   assert.deepStrictEqual(summarize('SELECT A FROM T1 A, T2 AS B, T3, T4 WHERE A.ID = B.ID').tables, 'T1, T2, T3, …');
   assert.deepStrictEqual(summarize('SELECT A FROM T1 A JOIN T6 ON 1 = 1').tables, 'T1, T6');
 });
+
+// ───────── 로거를 몰라도 읽기 (SQL 로 시작하는 로그) · 설정 낱말 ─────────
+const readWith = (text, options) => read(text, new LogReader(() => 1, options));
+
+test('자동: 로그 내용이 SQL 로 시작하면 다음 로그 줄 전까지 한 건 (한 줄 · 여러 줄 · 주석 먼저)', () => {
+  const H = '2026-11-12 00:20:01.123  INFO 1 --- [exec-1] c.e.common.SqlLogger : ';
+  const got = read(
+    H + "SELECT A.ID FROM TB_A A WHERE A.CD = 'X'\n" +
+      H + '/* orderList */ SELECT O.NO\n         FROM TB_ORDER O\n        WHERE O.NO = 7\n' +
+      H + 'done\n' +
+      '12:00:01 [exec-2] DEBUG c.e.Dao - \n    update TB_A\n       set NM = 1\n     where ID = 2\n' +
+      '12:00:02 [exec-2] INFO c.e.App - next\n'
+  );
+  assert.deepStrictEqual(got.map((q) => q.sql), [
+    "SELECT A.ID FROM TB_A A WHERE A.CD = 'X'",
+    '/* orderList */ SELECT O.NO\n FROM TB_ORDER O\nWHERE O.NO = 7',
+    'update TB_A\n   set NM = 1\n where ID = 2',
+  ]);
+  assert.strictEqual(queryTitle(got[1]), 'orderList');
+  assert.strictEqual(got[0].unbound, undefined);
+});
+
+test('자동: Hibernate 로그 — 한 줄(로거)·여러 줄(Hibernate:), 값이 없는 ? 는 표시', () => {
+  const got = read(
+    '2026-11-12T00:20:01.123+09:00 DEBUG 1 --- [nio-8080-exec-1] org.hibernate.SQL : select u1_0.id,u1_0.name from users u1_0 where u1_0.id=?\n' +
+      'Hibernate: \n    select\n        u1_0.id\n    from\n        users u1_0\n    where\n        u1_0.email=?\n' +
+      'Hibernate: insert into users (name) values (?)\n'
+  );
+  assert.deepStrictEqual(got.map((q) => q.sql), [
+    'select u1_0.id,u1_0.name from users u1_0 where u1_0.id=?',
+    'select\n    u1_0.id\nfrom\n    users u1_0\nwhere\n    u1_0.email=?',
+    'insert into users (name) values (?)',
+  ]);
+  assert.strictEqual(got[0].unbound, true);
+  assert.strictEqual(queryInfo(got[0]), '? 값 없음');
+});
+
+test('자동: SQL 이 아닌 로그는 읽지 않는다', () => {
+  const H = '2026-11-12 00:20:01.123  INFO 1 --- [main] c.e.App : ';
+  const got = read(
+    H + 'Update done for user 7\n' +
+      H + 'select a profile with --spring.profiles.active\n' +
+      H + 'with great power\n' +
+      H + 'Started App in 3.2 seconds\n' +
+      '20170202 20:37:02.045 [exec-5] INFO j.resultsettable - \n|--------|\n|user_id |\n|--------|\n' +
+      H + '\njava.lang.IllegalStateException: select failed\n\tat c.e.App.main(App.java:1)\n'
+  );
+  assert.deepStrictEqual(got, []);
+});
+
+test('자동: 같은 실행을 MyBatis 도 찍으면 한 건 — 값이 채워진 SQL 을 남긴다 (순서가 어느 쪽이어도)', () => {
+  const M = '12:00:00.001 [exec-1] DEBUG c.e.m.AMapper.selectA - ';
+  const R = '12:00:00.000 [exec-1] DEBUG c.e.SqlTrace - ';
+  const prep = M + '==>  Preparing: SELECT A FROM TB_A WHERE ID = ?\n' + M + '==> Parameters: 5(Integer)\n';
+  const raw = R + 'SELECT A FROM TB_A WHERE ID = ?\n';
+  for (const text of [raw + prep, prep + raw]) {
+    const got = read(text + M + '<==      Total: 1\n');
+    assert.deepStrictEqual(got.map((q) => [q.sql, q.mapper, q.unbound, q.rows]), [['SELECT A FROM TB_A WHERE ID = 5', 'AMapper.selectA', undefined, 1]]);
+  }
+});
+
+test('설정 낱말: 그 낱말이 있는 로그 줄부터 다음 로그 줄 전까지 (자동을 꺼도, SQL 로 시작하지 않아도)', () => {
+  const text =
+    '12:00:00.001 [exec-1] INFO SQL_LOG ▶ [selectA] 3ms\n  SELECT A\n    FROM TB_A\n' +
+    '12:00:00.002 [exec-1] INFO c.e.App - SELECT B FROM TB_B\n' +
+    '12:00:00.003 [exec-1] INFO c.e.App - bye\n';
+  assert.deepStrictEqual(readWith(text, { auto: false, keywords: ['SQL_LOG ▶'] }).map((q) => q.sql), ['[selectA] 3ms\nSELECT A\n  FROM TB_A']);
+  assert.deepStrictEqual(readWith(text, { auto: false }).map((q) => q.sql), []);
+  assert.deepStrictEqual(readWith(text, {}).map((q) => q.sql), ['SELECT B FROM TB_B']);
+});
+
+test('자동을 켜도 MyBatis · log4jdbc 로그는 한 번씩만 읽힌다', () => {
+  const got = read(
+    T + '30 [http-nio-7070-exec-5] DEBUG c.l.c.u.m.L.selectOneUserForLogin - ==>  Preparing: SELECT /*"selectOneUser"*/ USER_ID, EMAIL, DELETE_YN, SUPER_USER FROM LCUSRBASE WHERE EMAIL = ? AND DELETE_YN = \'N\'\r\n' +
+      T + '37 [http-nio-7070-exec-5] DEBUG c.l.c.u.m.L.selectOneUserForLogin - ==> Parameters: abc@test.com(String)\r\n' +
+      SQLTIMING_BLOCK
+  );
+  assert.strictEqual(got.length, 1);
+  assert.strictEqual(got[0].sql, TIDY);
+});
