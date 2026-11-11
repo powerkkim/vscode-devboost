@@ -456,12 +456,21 @@ export class QueryRing {
 }
 
 /**
- * 목록에 보일 이름: mapper 메서드 → SQL 머리의 주석에 적힌 이름(SELECT /*"selectOneUser"*\/) → "SELECT TB_USER"
+ * SQL 머리 주석에 적힌 쿼리 id. 예: SELECT /*"selectOneUser"*\/ … · /* UserMapper.selectUser *\/ SELECT …
+ * (mapper XML 에서 쿼리를 찾을 때 쓰는 이름이라 목록의 제목으로 삼는다. 설명 글 주석은 id 로 보지 않는다)
+ */
+export function queryId(sql: string): string {
+  const c = /^\s*\w+\s*\/\*\s*["']?([\w.$-]{2,80})["']?\s*\*\//.exec(sql) ?? /^\s*\/\*\s*["']?([\w.$-]{2,80})["']?\s*\*\//.exec(sql);
+  return c ? c[1] : '';
+}
+
+/**
+ * 목록에 보일 이름: SQL 머리 주석의 쿼리 id → mapper 메서드 → "SELECT TB_USER"
  */
 export function queryTitle(q: LoggedQuery): string {
+  const id = queryId(q.sql);
+  if (id) return id;
   if (q.mapper) return q.mapper;
-  const c = /^\s*\w+\s*\/\*\s*["']?([\w.$-]{2,80})["']?\s*\*\//.exec(q.sql) ?? /^\s*\/\*\s*["']?([\w.$-]{2,80})["']?\s*\*\//.exec(q.sql);
-  if (c) return c[1];
   const bare = q.sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
   const verb = /^\s*([A-Za-z]+)/.exec(bare)?.[1].toUpperCase() ?? 'SQL';
   const table =
@@ -473,6 +482,95 @@ export function queryTitle(q: LoggedQuery): string {
   return table ? `${verb} ${table[1]}` : verb;
 }
 
+/** 제목이 주석의 쿼리 id 일 때, 그와 다른 mapper 메서드 이름 (같거나 없으면 '') */
+export function queryMapper(q: LoggedQuery): string {
+  const id = queryId(q.sql);
+  if (!id || !q.mapper) return '';
+  const method = q.mapper.slice(q.mapper.lastIndexOf('.') + 1);
+  return method === id || q.mapper === id ? '' : q.mapper;
+}
+
+/** 따옴표·괄호 밖(맨 바깥)에서 낱말 kw 가 시작하는 자리들을 찾는다. kw 는 대문자 정규식 조각 */
+function topLevel(sql: string, kw: RegExp): { index: number; text: string }[] {
+  const out: { index: number; text: string }[] = [];
+  let depth = 0;
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < sql.length && !(sql[j] === c && sql[j + 1] !== c)) j += sql[j] === c ? 2 : 1;
+      i = j;
+    } else if (c === '(') depth++;
+    else if (c === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /[A-Za-z]/.test(c) && (i === 0 || !/[\w$#.]/.test(sql[i - 1]))) {
+      kw.lastIndex = i;
+      const m = kw.exec(sql);
+      if (m) {
+        out.push({ index: i, text: m[0] });
+        i += m[0].length - 1;
+      }
+    }
+  }
+  return out;
+}
+
+export interface QuerySummary {
+  /** SELECT · INSERT · UPDATE · DELETE · MERGE … (대문자) */
+  verb: string;
+  /** 나오는 테이블 (최대 3개, 그 뒤는 …) */
+  tables: string;
+  /** 이 실행을 알아볼 조건: WHERE 의 조건 중 값이 들어 있는 첫 번째 것 (INSERT 는 VALUES …) */
+  cond: string;
+}
+
+/** 목록에서 쿼리를 알아보기 위한 요약 — 종류, 테이블, 넘어간 값이 보이는 조건 하나 */
+export function summarize(sql: string): QuerySummary {
+  const bare = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ').replace(/\s+/g, ' ').trim();
+  const verb = /^([A-Za-z]+)/.exec(bare)?.[1].toUpperCase() ?? 'SQL';
+  const names: string[] = [];
+  // FROM A a, B b 처럼 쉼표로 이은 것까지 (별칭은 버린다)
+  const re = /\b(?:FROM|JOIN|INTO|UPDATE)\s+((?:[A-Za-z_][\w.$#]*(?:\s+(?:AS\s+)?[A-Za-z_]\w*)?\s*,\s*)*[A-Za-z_][\w.$#]*)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(bare))) {
+    for (const part of m[1].split(',')) {
+      const n = part.trim().split(/\s+/)[0];
+      if (n && !/^(SELECT|SET|ONLY|TABLE|LATERAL)$/i.test(n) && !names.includes(n)) names.push(n);
+    }
+  }
+  const tables = names.slice(0, 3).join(', ') + (names.length > 3 ? ', …' : '');
+
+  let cond = '';
+  if (verb === 'INSERT') {
+    const v = topLevel(bare, /VALUES(?![\w$#])/iy)[0];
+    if (v) cond = bare.slice(v.index);
+  } else {
+    const w = topLevel(bare, /WHERE(?![\w$#])/iy)[0];
+    if (w) {
+      let body = bare.slice(w.index + 5);
+      const end = topLevel(body, /(?:GROUP\s+BY|ORDER\s+(?:SIBLINGS\s+)?BY|HAVING|UNION|MINUS|INTERSECT|START\s+WITH|CONNECT\s+BY|FOR\s+UPDATE|LIMIT|OFFSET|FETCH)(?![\w$#])/iy)[0];
+      if (end) body = body.slice(0, end.index);
+      // 맨 바깥 AND/OR 로 나눈다 (BETWEEN a AND b 는 한 조건)
+      const cuts = topLevel(body, /(?:AND|OR|BETWEEN)(?![\w$#])/iy);
+      const parts: string[] = [];
+      let from = 0;
+      let between = false;
+      for (const c of cuts) {
+        const t = c.text.toUpperCase();
+        if (t === 'BETWEEN') between = true;
+        else if (t === 'AND' && between) between = false;
+        else {
+          parts.push(body.slice(from, c.index));
+          from = c.index + c.text.length;
+        }
+      }
+      parts.push(body.slice(from));
+      const conds = parts.map((x) => x.trim()).filter(Boolean);
+      cond = conds.find((x) => /'|(?<![\w$#.])\d/.test(x.replace(/^\s*1\s*=\s*1\s*$/, ''))) ?? conds[0] ?? '';
+    }
+  }
+  return { verb, tables, cond: cond.length > 120 ? cond.slice(0, 119) + '…' : cond };
+}
+
 /** 이름 뒤에 붙는 짧은 정보: "12건 · 3ms · 실패" */
 export function queryInfo(q: LoggedQuery): string {
   const parts: string[] = [];
@@ -482,9 +580,15 @@ export function queryInfo(q: LoggedQuery): string {
   return parts.join(' · ');
 }
 
-/** 콘솔에 넣을 글: 어디서 온 쿼리인지 머리 주석 + SQL (한 줄로 찍힌 것만 줄을 나누고, 여러 줄로 찍힌 것은 그대로) */
+/** 보여 주고 옮길 SQL 모양: 한 줄로 찍힌 것만 줄을 나누고, 여러 줄로 찍힌 것은 그대로 */
+export function displaySql(q: LoggedQuery): string {
+  return q.sql.includes('\n') ? q.sql : layoutSql(q.sql);
+}
+
+/** 콘솔에 넣을 글: 어디서 온 쿼리인지 머리 주석 + SQL */
 export function consoleText(q: LoggedQuery, timeText: string): string {
   const info = queryInfo(q);
-  const head = `-- [로그 ${timeText}] ${queryTitle(q)}${info ? ` · ${info}` : ''}${q.warn ? ` · ${q.warn}` : ''}`;
-  return `${head}\n${q.sql.includes('\n') ? q.sql : layoutSql(q.sql)};`;
+  const mapper = queryMapper(q);
+  const head = `-- [로그 ${timeText}] ${queryTitle(q)}${mapper ? ` (${mapper})` : ''}${info ? ` · ${info}` : ''}${q.warn ? ` · ${q.warn}` : ''}`;
+  return `${head}\n${displaySql(q)};`;
 }

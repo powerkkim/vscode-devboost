@@ -144,7 +144,7 @@ test('콘솔에 넣을 글: 머리 주석은 mapper 머리 주석(-- 네임스�
 });
 
 // ───────── log4jdbc (jdbc.sqltiming · jdbc.sqlonly) ─────────
-const { queryTitle, queryInfo } = require(path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js'));
+const { queryTitle, queryInfo, queryMapper } = require(path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js'));
 
 const T = '20170202 20:37:02.0';
 const SQLTIMING_BLOCK = [
@@ -199,6 +199,12 @@ test('log4jdbc: MyBatis 로그와 같이 찍히면 한 건 (이름은 MyBatis, S
   assert.strictEqual(got[0].ms, 3);
   assert.strictEqual(got[0].rows, 1);
   assert.strictEqual(queryInfo(got[0]), '1건 · 3ms');
+  // 제목은 SQL 머리 주석의 쿼리 id, mapper 메서드는 다를 때만 곁들인다
+  assert.strictEqual(queryTitle(got[0]), 'selectOneUser');
+  assert.strictEqual(queryMapper(got[0]), 'selectOneUserForLogin');
+  assert.match(consoleText(got[0], 't'), /^-- \[로그 t\] selectOneUser \(selectOneUserForLogin\) · 1건 · 3ms\n/);
+  assert.strictEqual(queryMapper({ sql: 'SELECT /* selectA */ 1 FROM DUAL', mapper: 'AMapper.selectA', time: 0 }), '');
+  assert.strictEqual(queryTitle({ sql: 'SELECT /* 사용자 조회 */ 1 FROM DUAL', mapper: 'AMapper.selectA', time: 0 }), 'AMapper.selectA');
 });
 
 test('log4jdbc: 이 시각 형식(20170202 20:37:02.037)에서 MyBatis 값 줄 뒤의 줄이 붙지 않는다', () => {
@@ -243,4 +249,31 @@ test('log4jdbc: SQL 안에 로그 수준 같은 낱말·빈 줄이 있어도 덩
   );
   assert.deepStrictEqual(got.map((q) => q.sql), ['SELECT INFO,\n     ERROR_CD\n\nFROM TB_LOG', 'SELECT INFO, ERROR_CD FROM TB_LOG WHERE ID = 5']);
   assert.strictEqual(queryTitle(got[0]), 'SELECT TB_LOG');
+});
+
+// ───────── 목록 요약 ─────────
+const { summarize } = require(path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js'));
+
+test('요약: 종류·테이블·값이 보이는 조건', () => {
+  assert.deepStrictEqual(summarize(TIDY), { verb: 'SELECT', tables: 'LCUSRBASE', cond: "EMAIL = 'abc@test.com'" });
+  assert.deepStrictEqual(
+    summarize("SELECT R.ROLE_ID FROM LCUSRROLE UR JOIN LCROLEBASE R ON R.ROLE_ID = UR.ROLE_ID WHERE 1 = 1 AND R.USE_YN IS NOT NULL AND UR.USER_ID = 'U0012' ORDER BY 1"),
+    { verb: 'SELECT', tables: 'LCUSRROLE, LCROLEBASE', cond: "UR.USER_ID = 'U0012'" }
+  );
+  assert.deepStrictEqual(summarize("UPDATE TB_ORDER SET STATUS = 'DONE' WHERE ORDER_NO = 1001"), { verb: 'UPDATE', tables: 'TB_ORDER', cond: 'ORDER_NO = 1001' });
+  assert.deepStrictEqual(summarize("INSERT INTO LCLOGINHIST (USER_ID, LOGIN_IP) VALUES ('U0012', '10.0.0.7')"), {
+    verb: 'INSERT',
+    tables: 'LCLOGINHIST',
+    cond: "VALUES ('U0012', '10.0.0.7')",
+  });
+  assert.deepStrictEqual(summarize('DELETE FROM LCTOKEN WHERE EXPIRE_DT < SYSDATE'), { verb: 'DELETE', tables: 'LCTOKEN', cond: 'EXPIRE_DT < SYSDATE' });
+  // 서브쿼리 안의 WHERE·AND, 따옴표 안의 낱말, BETWEEN 의 AND 에 속지 않는다
+  assert.deepStrictEqual(
+    summarize("SELECT A.ID, (SELECT COUNT(*) FROM T2 WHERE T2.ID = A.ID AND T2.X = 9) C FROM TB_A A WHERE A.NM = ' WHERE x AND y' AND A.DT BETWEEN 1 AND 2 GROUP BY A.ID"),
+    { verb: 'SELECT', tables: 'T2, TB_A', cond: "A.NM = ' WHERE x AND y'" }
+  );
+  assert.deepStrictEqual(summarize('SELECT A FROM T1 WHERE DT BETWEEN SYSDATE - 7 AND SYSDATE OR X IS NULL').cond, 'DT BETWEEN SYSDATE - 7 AND SYSDATE');
+  assert.deepStrictEqual(summarize('SELECT 1 FROM DUAL'), { verb: 'SELECT', tables: 'DUAL', cond: '' });
+  assert.deepStrictEqual(summarize('SELECT A FROM T1 A, T2 AS B, T3, T4 WHERE A.ID = B.ID').tables, 'T1, T2, T3, …');
+  assert.deepStrictEqual(summarize('SELECT A FROM T1 A JOIN T6 ON 1 = 1').tables, 'T1, T6');
 });
