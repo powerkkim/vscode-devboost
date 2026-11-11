@@ -54,7 +54,16 @@ jobs:
           cache: npm
 
       - name: ripgrep 설치 (텍스트 검색 테스트용)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+        # apt 저장소가 안 잡히는 날이 있어 GitHub 릴리스에서 먼저 받고, 안 되면 apt 로 받는다
+        run: |
+          if command -v rg >/dev/null; then rg --version | head -1; exit 0; fi
+          RG=14.1.1
+          if curl -fsSL --retry 3 "https://github.com/BurntSushi/ripgrep/releases/download/${RG}/ripgrep-${RG}-x86_64-unknown-linux-musl.tar.gz" | tar xz -C "$RUNNER_TEMP"; then
+            sudo install "$RUNNER_TEMP/ripgrep-${RG}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+          fi
+          rg --version | head -1
 
       - run: npm ci
 
