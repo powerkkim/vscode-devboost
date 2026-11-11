@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0 - 2026-11-12
+- **SQL 로그: 로거 이름을 몰라도 읽음** — 로그 내용이 `SELECT`·`INSERT`·`UPDATE`·`DELETE`·`MERGE`·`WITH` 로 시작하면(앞에 `/* 쿼리 id */` 주석이 있어도) 다음 로그 줄 전까지를 쿼리 한 건으로 읽음. Hibernate(`org.hibernate.SQL`, `Hibernate:`), 사내 공통 로거 등
+  - 값이 `?` 그대로 찍힌 쿼리는 목록에 `? 값 없음` 표시. 같은 실행을 MyBatis 로그도 찍으면 값이 채워진 쪽으로 한 건
+  - SQL 이 아닌 로그가 섞여 잡히면 `devBoost.sqlLog.autoDetect` 로 끔
+- **SQL 로그: 읽을 로그를 낱말로 지정** `devBoost.sqlLog.loggers` — 자동으로 안 잡히는 로그는 그 줄에 항상 있는 낱말(로거 이름 등)만 적으면, 그 뒤부터 다음 로그 줄 전까지를 읽음 (정규식 불필요)
+
 ## 0.23.0 - 2026-11-12
 - **SQL 로그: 고르는 창** (`Ctrl+Alt+L`, 상태바 `SQL n` 클릭) — 한 줄짜리 목록 대신 왼쪽에 쿼리 목록, 오른쪽에 고른 쿼리의 전체 SQL
   - 제목은 SQL 머리 주석의 쿼리 id(`SELECT /*"selectOneUser"*/` → `selectOneUser`), 없으면 mapper 메서드. 둘이 다르면 mapper 메서드도 함께 표시하고, 주석은 옮긴 SQL 에 그대로 남김

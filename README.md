@@ -119,7 +119,8 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 
 - **MyBatis 로그** (`==> Preparing` / `==> Parameters`): `?` 자리에 값을 채웁니다
 - **log4jdbc 로그** (`jdbc.sqltiming`, `jdbc.sqlonly`): 값이 들어간 여러 줄 SQL 을 `{executed in N msec}` 까지 그대로 가져오고 실행 시간을 표시합니다
-- 둘 다 찍히는 쿼리는 한 건으로 합칩니다
+- **그 밖의 로그**: 로그 내용이 `SELECT`·`INSERT`·`UPDATE`·`DELETE`·`MERGE`·`WITH` 로 시작하면 다음 로그 줄 전까지를 쿼리로 읽습니다 (Hibernate, 사내 공통 로거 등). 값이 `?` 로 찍힌 것은 `? 값 없음` 으로 표시합니다
+- 같은 실행을 여러 로그가 찍으면 한 건으로 합칩니다
 
 ```
 ==>  Preparing: SELECT * FROM TB_USER WHERE DEPT_CD = ? AND REG_DT >= ?
@@ -141,6 +142,10 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
 - 개수: `devBoost.sqlLog.maxQueries`
+
+안 잡히는 로그가 있을 때
+- `devBoost.sqlLog.loggers` 에 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적습니다. 예: `["SQL_LOG"]` → 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리로 읽습니다
+- SQL 이 아닌 로그가 섞여 잡히면 `devBoost.sqlLog.autoDetect` 를 끕니다
 
 ## 설치
 

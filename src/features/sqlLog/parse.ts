@@ -30,6 +30,15 @@ export interface LoggedQuery {
   ms?: number;
   /** 실행 실패 (log4jdbc 의 {FAILED after N msec}) */
   failed?: boolean;
+  /** 값이 채워지지 않은 ? 가 남아 있다 (값을 따로 찍지 않는 로그) */
+  unbound?: boolean;
+}
+
+export interface LogReaderOptions {
+  /** 로거 이름을 몰라도, 로그 내용이 SQL 로 시작하면 다음 로그 줄 전까지를 쿼리로 읽는다 (기본 켬) */
+  auto?: boolean;
+  /** 이 낱말이 들어 있는 로그 줄부터 다음 로그 줄 전까지를 쿼리로 읽는다 (자동으로 안 잡히는 로거용) */
+  keywords?: string[];
 }
 
 export interface LogParam {
@@ -193,7 +202,7 @@ const LEVEL_HEAD = /^\s*\[?\s*(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\]?\s+\S/;
 
 /** 로그 한 건이 시작하는 줄인가 (시각이나 로그 수준으로 시작) */
 function isLogHead(line: string): boolean {
-  return TIME_HEAD.test(line) || LEVEL_HEAD.test(line);
+  return TIME_HEAD.test(line) || LEVEL_HEAD.test(line) || line.startsWith('Hibernate: ') || line === 'Hibernate:';
 }
 
 /** 새 로그 줄의 시작인가 (시각·로그 수준·예외 줄). 아니면 터미널 폭에서 잘려 넘어온 앞 줄의 나머지로 본다 */
@@ -238,7 +247,8 @@ const CALL_SITE = /^\s*[\w.$<>]+\([^()]*\)\s*$/;
 function sameHead(a: string, b: string): boolean {
   const head = (x: string) => {
     const t = x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, '').toLowerCase();
-    const q = t.indexOf("'");
+    // 첫 값(따옴표)이나 ? 앞까지만 — 한쪽은 값이 채워지고 한쪽은 ? 그대로일 수 있다
+    const q = t.search(/['?]/);
     return t.slice(0, Math.min(40, q < 0 ? t.length : q));
   };
   const x = head(a);
@@ -253,13 +263,18 @@ function tidyBlock(lines: string[]): string {
   while (ls.length && !ls[0].trim()) ls.shift();
   while (ls.length && !ls[ls.length - 1].trim()) ls.pop();
   if (!ls.length) return '';
-  ls[0] = ls[0].replace(/^\s*\d+\.\s/, '').trimStart();
+  // 첫 줄이 로그 줄에 붙어 찍혔거나 번호("10. ")로 시작하면 첫 줄은 들여쓰기가 없다 → 둘째 줄부터 맞춘다.
+  // 첫 줄도 들여 찍혔으면(SQL 이 다음 줄부터 시작) 모든 줄을 같이 당긴다
+  const numbered = /^\s*\d+\.\s/.test(ls[0]);
+  const first = numbered || !/^\s/.test(ls[0]) ? 1 : 0;
+  ls[0] = ls[0].replace(/^\s*\d+\.\s/, '');
+  if (first === 1) ls[0] = ls[0].trimStart();
   let indent = Infinity;
-  for (let i = 1; i < ls.length; i++) {
+  for (let i = first; i < ls.length; i++) {
     if (ls[i].trim()) indent = Math.min(indent, ls[i].length - ls[i].trimStart().length);
   }
   if (indent !== Infinity && indent > 0) {
-    for (let i = 1; i < ls.length; i++) ls[i] = ls[i].slice(Math.min(indent, ls[i].length - ls[i].trimStart().length));
+    for (let i = first; i < ls.length; i++) ls[i] = ls[i].slice(Math.min(indent, ls[i].length - ls[i].trimStart().length));
   }
   return ls.join('\n').replace(/;\s*$/, '');
 }
@@ -268,7 +283,29 @@ function tidyBlock(lines: string[]): string {
 const MAX_LINE = 200_000;
 const MAX_OPEN = 50;
 
-type Source = 'mybatis' | 'sqlonly' | 'sqltiming';
+type Source = 'mybatis' | 'sqlonly' | 'sqltiming' | 'generic' | 'custom';
+type BlockKind = Exclude<Source, 'mybatis'>;
+
+const VERB = String.raw`(?:select|insert\s+into|update|delete|merge\s+into|with)\b`;
+/** 로그 줄에서 내용이 SQL 로 시작하는 자리: 구분자(: - ] > |) 뒤나 줄 머리, 앞에 번호·주석이 있어도 된다 */
+const SQL_IN_HEAD = new RegExp(String.raw`(?:^|[:\-\]>|]\s+|\s{2,})(?:\d+\.\s+)?((?:\/\*.*?\*\/\s*)*${VERB}.*)$`, 'i');
+/** 내용 없이 끝난 로그 줄 (SQL 이 다음 줄부터 찍힌다) */
+const EMPTY_HEAD = /(?:[:\-|>]\s*|\]\s*)$/;
+/** 덩어리의 첫 줄이 SQL 로 시작하는가 */
+const SQL_FIRST = new RegExp(String.raw`^\s*(?:\d+\.\s+)?(?:\/\*.*?\*\/\s*)*(?:${VERB}|\/\*)`, 'i');
+
+/** 문장 모양까지 SQL 인가 ("Update done for user" 같은 평범한 로그를 거른다) */
+function looksLikeSql(text: string): boolean {
+  const t = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ').trim();
+  return /^(?:select\b[\s\S]*\bfrom\s+[\w."$#(]|insert\s+into\s+[\w."$#]+\s*(?:\(|values\b|select\b)|update\s+[\w."$#]+(?:\s+\w+)?\s+set\s+[\w."$#]+\s*=|delete\s+from\s+[\w."$#]+(?:\s|$)|merge\s+into\s+[\w."$#]+|with\s+[\w"$#]+(?:\s*\([^)]*\))?\s+as\s*\()/i.test(
+    t
+  );
+}
+
+/** 값이 안 채워진 ? 가 있는가 (따옴표·주석 안은 빼고) */
+function hasPlaceholder(sql: string): boolean {
+  return sql.includes('?') && bindSql(sql, []).placeholders > 0;
+}
 
 /**
  * 로그를 조각(chunk)으로 받아 완성된 쿼리를 돌려준다. 실행 하나(터미널 명령 하나)마다 하나씩 만든다.
@@ -278,8 +315,8 @@ export class LogReader {
   private buf = '';
   /** 아직 다음 줄을 기다리는 "==>" 줄 (터미널 폭에서 잘린 나머지가 이어질 수 있어서) */
   private held: string | undefined;
-  /** 읽는 중인 log4jdbc 덩어리 */
-  private block: { kind: 'sqlonly' | 'sqltiming'; thread: string; lines: string[]; size: number } | undefined;
+  /** 읽는 중인 여러 줄 SQL 덩어리 (log4jdbc, 또는 SQL 로 시작하는 로그) */
+  private block: { kind: BlockKind; thread: string; lines: string[]; size: number; needSql?: boolean } | undefined;
   /** 열쇠 → Preparing 의 SQL */
   private open = new Map<string, { sql: string; mapper: string }>();
   /** 열쇠 → 방금 내보낸 쿼리 (Total 이 오면 건수를 적는다) */
@@ -287,7 +324,16 @@ export class LogReader {
   /** 스레드 → 그 스레드에서 방금 내보낸 쿼리와, 그 쿼리를 본 로그 종류 (같은 실행의 다른 로그를 한 건으로 합친다) */
   private byThread = new Map<string, { q: LoggedQuery; seen: Set<Source> }>();
 
-  constructor(private readonly now: () => number = Date.now) {}
+  private readonly auto: boolean;
+  private readonly keywords: string[];
+
+  constructor(
+    private readonly now: () => number = Date.now,
+    options: LogReaderOptions = {}
+  ) {
+    this.auto = options.auto !== false;
+    this.keywords = (options.keywords ?? []).map((k) => k.trim()).filter(Boolean);
+  }
 
   push(chunk: string): LoggedQuery[] {
     const out: LoggedQuery[] = [];
@@ -306,8 +352,8 @@ export class LogReader {
   flush(): LoggedQuery[] {
     const out: LoggedQuery[] = [];
     this.release(out);
-    // sqlonly 는 꼬리가 없어 다음 로그가 와야 끝난다 → 로그가 멈췄으면 여기서 끝낸다
-    if (this.block?.kind === 'sqlonly') this.finishBlock(out);
+    // 꼬리({executed in …})가 없는 덩어리는 다음 로그가 와야 끝난다 → 로그가 멈췄으면 여기서 끝낸다
+    if (this.block && this.block.kind !== 'sqltiming') this.finishBlock(out);
     return out;
   }
 
@@ -320,11 +366,20 @@ export class LogReader {
         return;
       }
       if (!isLogHead(line) && !line.includes('==>') && !line.includes('<==') && this.block.size < MAX_LINE) {
+        if (this.block.needSql) {
+          // 내용 없이 끝난 로그 줄 다음: 첫 줄이 SQL 로 시작해야 쿼리로 본다 (표·예외 줄 같은 다른 출력이면 그만둔다)
+          if (!line.trim() || CALL_SITE.test(line)) return;
+          if (!SQL_FIRST.test(line)) {
+            this.block = undefined;
+            return;
+          }
+          this.block.needSql = false;
+        }
         this.block.lines.push(line);
         this.block.size += line.length;
         return;
       }
-      this.finishBlock(out); // 다음 로그가 시작됨 (sqlonly, 또는 꼬리를 못 본 sqltiming)
+      this.finishBlock(out); // 다음 로그가 시작됨 (꼬리가 없는 덩어리, 또는 꼬리를 못 본 sqltiming)
     }
     if (this.held !== undefined && !startsRecord(line) && this.held.length < MAX_LINE) {
       this.held += line; // 폭에서 잘린 줄의 나머지
@@ -351,7 +406,35 @@ export class LogReader {
       } else if (rest.trim() && !CALL_SITE.test(rest)) {
         this.block.lines.push(rest);
       }
+      return;
     }
+    if (!isLogHead(line)) return;
+    const thread = threadOf(line);
+    // 설정에 적은 낱말이 있는 로그: 그 낱말 뒤부터 다음 로그 줄 전까지
+    for (const k of this.keywords) {
+      const at = line.indexOf(k);
+      if (at < 0) continue;
+      const rest = line.slice(at + k.length).replace(/^[\s:\-|>\]]+/, '');
+      this.block = { kind: 'custom', thread, lines: [], size: 0 };
+      if (rest.trim() && !CALL_SITE.test(rest)) this.inline(rest, out);
+      return;
+    }
+    if (!this.auto) return;
+    const m = SQL_IN_HEAD.exec(line);
+    if (m) {
+      this.block = { kind: 'generic', thread, lines: [], size: 0 };
+      this.inline(m[1], out);
+    } else if (EMPTY_HEAD.test(line)) {
+      this.block = { kind: 'generic', thread, lines: [], size: 0, needSql: true };
+    }
+  }
+
+  /** 로그 줄에 같이 찍힌 SQL 첫 줄을 덩어리에 넣는다 (같은 줄에 꼬리까지 있으면 거기서 끝) */
+  private inline(text: string, out: LoggedQuery[]) {
+    if (!this.block) return;
+    const tail = JDBC_TAIL.exec(text);
+    this.block.lines.push(tail ? text.slice(0, tail.index) : text);
+    if (tail) this.finishBlock(out, Number(tail[2]), tail[1] !== 'executed in');
   }
 
   private finishBlock(out: LoggedQuery[], ms?: number, failed?: boolean) {
@@ -359,18 +442,24 @@ export class LogReader {
     this.block = undefined;
     if (!b) return;
     const sql = tidyBlock(b.lines);
-    if (!sql) return;
+    if (!sql || (b.kind === 'generic' && !looksLikeSql(sql))) return;
+    const unbound = hasPlaceholder(sql);
     const prev = this.byThread.get(b.thread);
     if (prev && !prev.seen.has(b.kind) && sameHead(prev.q.sql, sql)) {
-      // 같은 실행을 다른 로그가 먼저 알려 줌 → 한 건으로. SQL 은 실제로 실행된 글(log4jdbc)로 바꾼다
+      // 같은 실행을 다른 로그가 먼저 알려 줌 → 한 건으로. 값이 들어 있는 쪽의 SQL 을 남긴다
+      // (둘 다 값이 있으면 나중 것 — log4jdbc 처럼 실제로 실행된 글)
       prev.seen.add(b.kind);
-      prev.q.sql = sql;
-      prev.q.warn = undefined;
+      if (!unbound || prev.q.unbound) {
+        prev.q.sql = sql;
+        prev.q.warn = undefined;
+        prev.q.unbound = unbound || undefined;
+      }
       if (ms !== undefined) prev.q.ms = ms;
       if (failed) prev.q.failed = true;
       return;
     }
     const q: LoggedQuery = { sql, mapper: '', time: this.now() };
+    if (unbound) q.unbound = true;
     if (ms !== undefined) q.ms = ms;
     if (failed) q.failed = true;
     this.remember(b.thread, q, b.kind);
@@ -408,7 +497,19 @@ export class LogReader {
     this.last.delete(key);
     this.last.set(key, q);
     if (this.last.size > MAX_OPEN) this.last.delete(this.last.keys().next().value as string);
-    this.remember(threadOf(m[1]), q, 'mybatis');
+    const thread = threadOf(m[1]);
+    const prev = this.byThread.get(thread);
+    if (prev && prev.q.unbound && !prev.seen.has('mybatis') && sameHead(prev.q.sql, q.sql)) {
+      // 같은 실행의 SQL 을 값 없이 먼저 찍은 로그가 있었다 → 그 건에 값·이름을 채운다
+      prev.seen.add('mybatis');
+      prev.q.sql = q.sql;
+      prev.q.mapper = q.mapper;
+      prev.q.warn = q.warn;
+      prev.q.unbound = undefined;
+      this.last.set(key, prev.q);
+      return;
+    }
+    this.remember(thread, q, 'mybatis');
     out.push(q);
   }
 
@@ -577,6 +678,7 @@ export function queryInfo(q: LoggedQuery): string {
   if (q.rows !== undefined) parts.push(`${q.rows}건`);
   if (q.ms !== undefined) parts.push(`${q.ms}ms`);
   if (q.failed) parts.push('실패');
+  if (q.unbound) parts.push('? 값 없음');
   return parts.join(' · ');
 }
 
