@@ -1,16 +1,19 @@
 import * as vscode from 'vscode';
 import { Feature } from '../../core/feature';
-import { LogReader, LoggedQuery, QueryRing, consoleText } from './parse';
+import { LogReader, LoggedQuery, QueryRing, consoleText, queryInfo, queryTitle } from './parse';
+import { closeSqlLogPicker, showSqlLogPicker } from './picker';
 
 /**
- * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 MyBatis 로그에서
+ * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 MyBatis·log4jdbc 로그에서
  * 쿼리를 골라 값까지 채워 두고, 고르면 새 DB 콘솔에 옮긴다 (실행은 하지 않는다).
- *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 목록
+ *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
  * 터미널 출력은 VS Code 의 셸 통합으로 읽는다. 기능이 켜진 뒤에 시작한 명령부터 읽고, 쿼리는 메모리에만 둔다.
  */
 
-type Entry = LoggedQuery & { id: number };
+
+/** 목록을 여는 기본 단축키 (package.json 의 keybindings 와 같게). 사용자가 바꾼 키는 확장에서 읽을 수 없다 */
+const PICK_KEY = process.platform === 'darwin' ? 'Cmd+Alt+L' : 'Ctrl+Alt+L';
 
 /** 로그가 이만큼 멈추면 붙잡아 둔 마지막 줄을 처리하고 화면을 맞춘다 */
 const IDLE_MS = 300;
@@ -34,7 +37,7 @@ function oneLine(sql: string, max: number): string {
 export const sqlLog: Feature = {
   id: 'sqlLog',
   name: 'SQL 로그',
-  start() {
+  start(context) {
     const ring = new QueryRing(cfg().get<number>('maxQueries', 10));
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
     status.command = 'devBoost.sqlLog.pick';
@@ -53,16 +56,18 @@ export const sqlLog: Feature = {
       md.appendMarkdown('**최근 쿼리** — 누르면 새 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
       for (const q of list) {
         const arg = encodeURIComponent(JSON.stringify([q.id]));
-        const head = `${timeText(q.time)} ${q.mapper || 'SQL'}${q.rows !== undefined ? ` · ${q.rows}건` : ''}`;
+        const info = queryInfo(q);
+        const head = `${timeText(q.time)} ${queryTitle(q)}${info ? ` · ${info}` : ''}`;
         md.appendMarkdown(`[$(arrow-right) ${head.replace(/[[\]\\]/g, '\\$&')}](command:devBoost.sqlLog.send?${arg})  \n`);
         md.appendMarkdown(`\`${oneLine(q.sql, 90).replace(/`/g, "'")}\`\n\n`);
       }
+      md.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기`);
       status.tooltip = md;
       status.show();
     };
 
-    /** 고른 쿼리를 새 DB 콘솔에 넣는다. DB 콘솔을 꺼 뒀으면 클립보드로 */
-    const send = async (q: Entry | undefined) => {
+    /** 고른 쿼리를 새 DB 콘솔에 넣는다 (실행은 하지 않는다). DB 콘솔을 꺼 뒀으면 클립보드로 */
+    const send = async (q: LoggedQuery | undefined) => {
       if (!q) {
         void vscode.window.showInformationMessage('그 쿼리는 목록에서 밀려났습니다. 목록을 다시 열어 주세요.');
         return;
@@ -77,24 +82,15 @@ export const sqlLog: Feature = {
       }
     };
 
-    const pick = async () => {
-      const list = ring.items();
-      if (!list.length) {
+    /** 고르는 창을 연다 — 연 순간의 목록 그대로 (그 뒤 들어온 쿼리는 다시 열면 보인다) */
+    const pick = () => {
+      if (!ring.items().length) {
         void vscode.window.showInformationMessage(
-          '아직 읽은 쿼리가 없습니다. VS Code 터미널에서 서버를 실행하고(MyBatis 로그 수준 DEBUG) 화면을 한 번 조회해 보세요.'
+          '아직 읽은 쿼리가 없습니다. VS Code 터미널에서 서버를 실행하고(SQL 로그가 찍히는 상태로) 화면을 한 번 조회해 보세요.'
         );
         return;
       }
-      const chosen = await vscode.window.showQuickPick(
-        list.map((q) => ({
-          label: `$(database) ${q.mapper || 'SQL'}`,
-          description: `${timeText(q.time)}${q.rows !== undefined ? ` · ${q.rows}건` : ''}${q.warn ? ' · 값 개수 확인 필요' : ''}`,
-          detail: oneLine(q.sql, 300),
-          id: q.id,
-        })),
-        { title: '최근 쿼리 (새 것부터)', placeHolder: '고르면 새 DB 콘솔에 옮깁니다 — 실행은 콘솔에서 직접', matchOnDetail: true, matchOnDescription: true }
-      );
-      if (chosen) await send(ring.get(chosen.id));
+      showSqlLogPicker(context, { items: () => ring.items(), send, timeText });
     };
 
     /** 터미널 명령 하나의 출력을 끝까지 읽는다 */
@@ -127,7 +123,7 @@ export const sqlLog: Feature = {
     };
 
     const subs: vscode.Disposable[] = [
-      { dispose: () => (disposed = true) },
+      { dispose: () => ((disposed = true), closeSqlLogPicker()) },
       status,
       vscode.commands.registerCommand('devBoost.sqlLog.pick', pick),
       vscode.commands.registerCommand('devBoost.sqlLog.send', (id: number) => send(ring.get(Number(id)))),

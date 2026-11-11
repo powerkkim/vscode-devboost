@@ -12,7 +12,7 @@
 | **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
 | **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
-| **SQL 로그** — 터미널에서 실행한 서버의 MyBatis 로그에서 쿼리를 골라 `?` 에 값을 채워 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
+| **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -115,7 +115,11 @@ DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙
 
 ### SQL 로그
 
-VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-boot:run`) MyBatis 로그의 쿼리를 읽어, `?` 자리에 값을 채운 SQL 로 기억해 둡니다.
+VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-boot:run`) 로그의 쿼리를 읽어 기억해 둡니다.
+
+- **MyBatis 로그** (`==> Preparing` / `==> Parameters`): `?` 자리에 값을 채웁니다
+- **log4jdbc 로그** (`jdbc.sqltiming`, `jdbc.sqlonly`): 값이 들어간 여러 줄 SQL 을 `{executed in N msec}` 까지 그대로 가져오고 실행 시간을 표시합니다
+- 둘 다 찍히는 쿼리는 한 건으로 합칩니다
 
 ```
 ==>  Preparing: SELECT * FROM TB_USER WHERE DEPT_CD = ? AND REG_DT >= ?
@@ -123,14 +127,17 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 → SELECT * FROM TB_USER WHERE DEPT_CD = 'D001' AND REG_DT >= TIMESTAMP '2026-11-01 00:00:00.0'
 ```
 
-- 상태바 `SQL n` 에 마우스를 올리면 최근 쿼리(새 것부터, 기본 10개). 하나를 누르면 **새 DB 콘솔**에 옮깁니다
-- `Ctrl+Alt+L` (명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`) 로 목록을 열어 글자로 걸러 고를 수도 있습니다
+- `Ctrl+Alt+L` 또는 상태바 `SQL n` 을 누르면 **고르는 창**이 열립니다 (명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`)
+  - 왼쪽 목록: 종류, 이름, 테이블, 건수·실행 시간, 넘어간 값이 보이는 조건 하나 / 오른쪽: 고른 쿼리의 전체 SQL
+  - 찾기 칸에 테이블·칼럼·값을 적으면 SQL 전체에서 찾습니다. `↑` `↓` 로 옮기고 `Enter` 로 **새 DB 콘솔**에 옮깁니다. `Ctrl+C` 는 복사
+  - 창을 연 순간의 목록(기본 10개, 새 것부터)을 그대로 보여 줍니다. 그 뒤 들어온 쿼리는 닫고 다시 열면 보입니다
+- 상태바 `SQL n` 에 마우스를 올리면 최근 쿼리를 한 줄씩 보고 바로 옮길 수도 있습니다
 - 옮기기만 하고 실행하지 않습니다. 콘솔에서 확인한 뒤 `Ctrl+Enter` 로 직접 실행
 - 숫자는 그대로, 글자는 따옴표, 날짜는 `DATE '…'`·`TIMESTAMP '…'`, `null` 은 `NULL`
 - 여러 요청이 섞여 찍혀도 같은 요청의 쿼리와 값끼리 맞춥니다
 
 조건
-- MyBatis 로그 수준이 DEBUG 여야 쿼리가 찍힙니다 (예: `logging.level.com.example.mapper=debug`)
+- 쿼리가 로그에 찍혀야 합니다: MyBatis 는 mapper 로그 수준 DEBUG (예: `logging.level.com.example.mapper=debug`), log4jdbc 는 `jdbc.sqltiming` 또는 `jdbc.sqlonly` 로거
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
 - 개수: `devBoost.sqlLog.maxQueries`

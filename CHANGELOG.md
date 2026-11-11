@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.23.0 - 2026-11-12
+- **SQL 로그: 고르는 창** (`Ctrl+Alt+L`, 상태바 `SQL n` 클릭) — 한 줄짜리 목록 대신 왼쪽에 쿼리 목록, 오른쪽에 고른 쿼리의 전체 SQL
+  - 제목은 SQL 머리 주석의 쿼리 id(`SELECT /*"selectOneUser"*/` → `selectOneUser`), 없으면 mapper 메서드. 둘이 다르면 mapper 메서드도 함께 표시하고, 주석은 옮긴 SQL 에 그대로 남김
+  - 목록 한 건마다 종류(SELECT·INSERT·UPDATE·DELETE), 이름, 테이블, 건수·실행 시간, 그리고 넘어간 값이 보이는 조건 하나(`EMAIL = 'abc@test.com'`)
+  - 찾기는 SQL 전체에서 — 테이블·칼럼·값 어느 것으로든, 띄어 쓰면 모두 포함하는 것만
+  - `↑` `↓` 이동, `Enter` 새 콘솔로 옮기기(실행은 직접), `Ctrl+C` 복사, `Esc` 닫기
+  - 창을 연 순간의 목록 그대로 — 그 뒤 들어온 쿼리는 닫고 다시 열면 보임 (고르는 동안 목록이 밀리지 않음)
+- **SQL 로그: log4jdbc 로그(`jdbc.sqltiming`·`jdbc.sqlonly`)도 읽음** — 여러 줄로 찍힌 SQL 을 `{executed in N msec}` 까지 한 건으로 가져오고, 목록에 실행 시간 표시. 여러 줄 SQL 은 찍힌 모양 그대로 콘솔에 옮김
+  - MyBatis 로그와 log4jdbc 로그가 같이 찍히는 쿼리는 한 건으로 합침 (이름은 mapper 메서드, SQL·시간은 log4jdbc)
+  - mapper 이름이 없는 쿼리는 SQL 머리 주석의 이름(`SELECT /*"selectOneUser"*/`)이나 `SELECT TB_USER` 로 표시
+- **SQL 로그: 일부 쿼리만 잡히던 것 고침** — 줄 머리 시각이 `20170202 20:37:02.037` 모양이면 새 로그 줄로 알아보지 못해, 값 줄 뒤에 다음 로그가 이어 붙었음
+- **SQL 로그: 상태바 `SQL n` 에 마우스를 올리면 단축키(`Ctrl+Alt+L`) 안내**
+
 ## 0.22.0 - 2026-11-11
 - **SQL 로그 (새 기능)** — VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)의 MyBatis 로그에서 쿼리를 읽어 `?` 자리에 값을 채워 둠
   - 상태바 `SQL n` 에 마우스를 올리면 최근 쿼리 10개(새 것부터), 누르면 새 DB 콘솔에 옮김. `Ctrl+Alt+L` 로 목록을 열어 고를 수도 있음

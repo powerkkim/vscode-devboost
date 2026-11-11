@@ -1,0 +1,37 @@
+html, body { height: 100%; }
+body { margin: 0; padding: 0; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); background: var(--vscode-editor-background); }
+.wrap { display: flex; flex-direction: column; height: 100vh; max-width: 1100px; margin: 0 auto; box-sizing: border-box; padding: 10px 12px 6px; }
+.top { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; }
+#filter { flex: 1; box-sizing: border-box; padding: 6px 8px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; font: inherit; outline: none; }
+#filter:focus { border-color: var(--vscode-focusBorder); }
+.count { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+.main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(260px, 5fr) minmax(0, 7fr); border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, #8884)); border-radius: 4px; overflow: hidden; }
+#list { overflow-y: auto; border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, #8884)); }
+.row { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, #8882)); }
+.row:hover { background: var(--vscode-list-hoverBackground); }
+.row.on { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.row .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .m, .row .w { margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.8; font-size: 0.92em; }
+.row .w { font-family: var(--vscode-editor-font-family); opacity: 0.65; }
+.verb { display: inline-block; min-width: 3.6em; text-align: center; margin-right: 7px; padding: 0 5px; border-radius: 3px; font-family: var(--vscode-editor-font-family); font-size: 0.85em; font-weight: 600; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
+.verb.SELECT { background: var(--vscode-charts-blue, #3794ff); color: #fff; }
+.verb.INSERT { background: var(--vscode-charts-green, #3fb950); color: #fff; }
+.verb.UPDATE, .verb.MERGE { background: var(--vscode-charts-orange, #d18616); color: #fff; }
+.verb.DELETE { background: var(--vscode-charts-red, #f14c4c); color: #fff; }
+.right { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#head { padding: 7px 12px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, #8884)); color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#head .warn { color: var(--vscode-editorWarning-foreground); }
+#sql { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 10px 12px; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); line-height: 1.5; white-space: pre; tab-size: 4; }
+#sql .k { color: var(--vscode-symbolIcon-keywordForeground, var(--vscode-charts-blue)); }
+#sql .s { color: var(--vscode-debugTokenExpression-string, var(--vscode-charts-orange)); }
+#sql .c { color: var(--vscode-descriptionForeground); font-style: italic; }
+#sql .n { color: var(--vscode-debugTokenExpression-number, var(--vscode-charts-green)); }
+.acts { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, #8884)); }
+button { font: inherit; padding: 4px 12px; border-radius: 3px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.primary:hover { background: var(--vscode-button-hoverBackground); }
+.foot { display: flex; gap: 16px; padding: 6px 2px 0; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.foot .sp { flex: 1; }
+kbd { font-family: var(--vscode-editor-font-family); font-size: 0.9em; padding: 0 5px; border: 1px solid var(--vscode-keybindingLabel-border, #8886); border-radius: 3px; background: var(--vscode-keybindingLabel-background, transparent); }
+.empty { padding: 24px 12px; color: var(--vscode-descriptionForeground); }

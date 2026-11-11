@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -847,7 +847,7 @@
             "type": "boolean",
             "default": true,
             "order": 6,
-            "markdownDescription": "**SQL 로그** — VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)의 MyBatis 로그에서 쿼리를 골라 `?` 자리에 값을 채워 둠. 상태바 `SQL n` 에 마우스를 올리거나 `Ctrl+Alt+L` 로 최근 쿼리를 골라 새 DB 콘솔에 옮김 (실행은 콘솔에서 직접)"
+            "markdownDescription": "**SQL 로그** — VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)의 SQL 로그(MyBatis `==> Preparing`, log4jdbc `jdbc.sqltiming`·`jdbc.sqlonly`)에서 쿼리를 골라 둠. MyBatis 로그는 `?` 자리에 값을 채움. `Ctrl+Alt+L` 이나 상태바 `SQL n` 으로 여는 창에서 전체 SQL 을 보며 골라 새 DB 콘솔에 옮김 (실행은 콘솔에서 직접)"
           }
         }
       },
