@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -299,6 +299,11 @@
         "command": "devBoost.sqlLog.send",
         "title": "쿼리를 DB 콘솔로",
         "category": "SQL 로그"
+      },
+      {
+        "command": "devBoost.importJump.go",
+        "title": "실제 선언으로 이동",
+        "category": "import 따라가기"
       }
     ],
     "viewsContainers": {
@@ -545,6 +550,10 @@
         {
           "command": "devBoost.sqlLog.send",
           "when": "false"
+        },
+        {
+          "command": "devBoost.importJump.go",
+          "when": "config.devBoost.importJump.enabled && editorTextFocus"
         }
       ],
       "editor/context": [
@@ -801,6 +810,12 @@
         "key": "ctrl+alt+l",
         "mac": "cmd+alt+l",
         "when": "config.devBoost.sqlLog.enabled"
+      },
+      {
+        "command": "devBoost.importJump.go",
+        "key": "ctrl+alt+f12",
+        "mac": "cmd+alt+f12",
+        "when": "config.devBoost.importJump.enabled && editorTextFocus"
       }
     ],
     "configuration": [
@@ -848,6 +863,12 @@
             "default": true,
             "order": 6,
             "markdownDescription": "**SQL 로그** — VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)의 SQL 로그(MyBatis `==> Preparing`, log4jdbc `jdbc.sqltiming`·`jdbc.sqlonly`, 그 밖에 SQL 로 시작하는 로그)에서 쿼리를 골라 둠. MyBatis 로그는 `?` 자리에 값을 채움. `Ctrl+Alt+L` 이나 상태바 `SQL n` 으로 여는 창에서 전체 SQL 을 보며 골라 새 DB 콘솔에 옮김 (실행은 콘솔에서 직접)"
+          },
+          "devBoost.importJump.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 7,
+            "markdownDescription": "**import 따라가기** — `import { UserType } from '@/types/user'` 처럼 경로 별칭(`@/…`)으로 가져온 이름을 `Ctrl+클릭`하면 같은 파일의 import 줄이 아니라 실제 선언으로 이동하고, 마우스를 올리면 선언 내용을 보여 줌 (Vue·TypeScript·JavaScript). 프로젝트 설정 파일은 건드리지 않음. 편집기가 이미 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않음. 끄면 편집기 원래 동작 그대로"
           }
         }
       },
@@ -1191,6 +1212,26 @@
             "minimum": 1,
             "maximum": 50,
             "description": "기억해 둘 최근 쿼리 수 (메모리에만 두고, VS Code 를 닫으면 사라짐)"
+          }
+        }
+      },
+      {
+        "title": "import 따라가기",
+        "properties": {
+          "devBoost.importJump.aliases": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "order": 1,
+            "markdownDescription": "경로 별칭 → 폴더 (프로젝트 폴더 기준). 비워 두면 `vite.config` 의 `resolve.alias`, `tsconfig` 의 `paths`, 관례(`@`·`~` → `src`) 순으로 찾음. 예: `{ \"@\": \"src\", \"@comp\": \"src/components\" }`"
+          },
+          "devBoost.importJump.hover": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "description": "가져온 이름에 마우스를 올리면 선언 내용(type·interface 본문, 함수 등)을 보여 줌"
           }
         }
       }
