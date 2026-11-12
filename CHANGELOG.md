@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.26.0 - 2026-11-12
+- **API 콘솔 (새 기능)** `Ctrl+Alt+A` — API 요청을 모음으로 저장해 두고 보내 보는 화면
+  - 왼쪽 목록: 모음 → 폴더 → 요청. 이름 바꾸기(두 번 누르기), 복제, 끌어서 옮기기, 이름·주소로 찾기, 최근 실행 기록
+  - 요청: 메서드 · 주소 · 파라미터 · 헤더 · 본문(JSON · 글 · form · 파일 첨부), 인증(Bearer · Basic), 요청마다 메모
+  - 응답: 상태 · 시간 · 크기, JSON 접어 보기 / 원문, 응답에서 찾기, 헤더, 실제로 보낸 요청, 복사, 예시로 저장
+  - 환경: `{{baseUrl}}` · `{{token}}` 같은 변수 묶음을 로컬 · 개발 · 운영으로 바꿔 가며. 환경마다 "보내기 전에 확인"을 켤 수 있음
+  - 로그인 응답의 쿠키(세션)는 닫을 때까지 이어 보냄
+  - cURL: 브라우저 개발자 도구의 "Copy as cURL" 을 주소 칸에 붙여넣으면 요청이 채워짐. 요청을 cURL 로 복사
+  - 가져오기: Postman 모음(v2) · 환경 파일, 내보낸 파일 / 내보내기: 모음 전체나 폴더 하나 (환경 변수의 값은 넣지 않음)
+  - 저장한 것은 이 컴퓨터에만 두고 프로젝트 폴더는 건드리지 않음. 요청은 확장이 직접 보내 CORS 제약이 없음
+  - 설정: `devBoost.apiConsole.timeoutSeconds` · `followRedirects` · `insecureTls` · `maxResponseMb`, 끄기 `devBoost.apiConsole.enabled`
+
 ## 0.25.0 - 2026-11-12
 - **import 따라가기 (새 기능)** — `import { UserType } from '@/types/user'` 처럼 경로 별칭으로 가져온 이름을 `Ctrl+클릭`하면 같은 파일의 import 줄이 아니라 실제 선언으로 이동 (Vue·TypeScript·JavaScript)
   - 프로젝트의 tsconfig 에 별칭(`paths`)이 없어 편집기가 `@/…` 를 풀지 못할 때를 위한 것. 설정 파일은 건드리지 않고 별칭은 `vite.config` · `tsconfig` · 관례(`@`·`~` → `src`)에서 읽음. 안 맞으면 개인 설정 `devBoost.importJump.aliases`
