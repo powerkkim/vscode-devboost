@@ -2,7 +2,7 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -304,6 +304,11 @@
         "command": "devBoost.importJump.go",
         "title": "실제 선언으로 이동",
         "category": "import 따라가기"
+      },
+      {
+        "command": "devBoost.apiConsole.open",
+        "title": "열기",
+        "category": "API 콘솔"
       }
     ],
     "viewsContainers": {
@@ -554,6 +559,10 @@
         {
           "command": "devBoost.importJump.go",
           "when": "config.devBoost.importJump.enabled && editorTextFocus"
+        },
+        {
+          "command": "devBoost.apiConsole.open",
+          "when": "config.devBoost.apiConsole.enabled"
         }
       ],
       "editor/context": [
@@ -816,6 +825,12 @@
         "key": "ctrl+alt+f12",
         "mac": "cmd+alt+f12",
         "when": "config.devBoost.importJump.enabled && editorTextFocus"
+      },
+      {
+        "command": "devBoost.apiConsole.open",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "config.devBoost.apiConsole.enabled"
       }
     ],
     "configuration": [
@@ -869,6 +884,12 @@
             "default": true,
             "order": 7,
             "markdownDescription": "**import 따라가기** — `import { UserType } from '@/types/user'` 처럼 경로 별칭(`@/…`)으로 가져온 이름을 `Ctrl+클릭`하면 같은 파일의 import 줄이 아니라 실제 선언으로 이동하고, 마우스를 올리면 선언 내용을 보여 줌 (Vue·TypeScript·JavaScript). 프로젝트 설정 파일은 건드리지 않음. 편집기가 이미 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않음. 끄면 편집기 원래 동작 그대로"
+          },
+          "devBoost.apiConsole.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 8,
+            "markdownDescription": "**API 콘솔** — API 요청을 모음(폴더)으로 저장해 두고 보내 보는 화면 (`Ctrl+Alt+A`). 메서드·주소·파라미터·헤더·본문(JSON · form · 파일 첨부), 환경 변수 `{{baseUrl}}`, 실행 기록, cURL 붙여넣기·복사, Postman 모음 가져오기. 저장한 것은 이 컴퓨터에만 두고 프로젝트 폴더는 건드리지 않음"
           }
         }
       },
@@ -1232,6 +1253,39 @@
             "default": true,
             "order": 2,
             "description": "가져온 이름에 마우스를 올리면 선언 내용(type·interface 본문, 함수 등)을 보여 줌"
+          }
+        }
+      },
+      {
+        "title": "API 콘솔",
+        "properties": {
+          "devBoost.apiConsole.timeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 1,
+            "maximum": 600,
+            "order": 1,
+            "description": "응답을 기다리는 시간(초)"
+          },
+          "devBoost.apiConsole.followRedirects": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "description": "3xx 응답의 이동 주소를 따라감 (최대 5번)"
+          },
+          "devBoost.apiConsole.insecureTls": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "description": "사설 인증서를 쓰는 https 서버(개발 서버)에도 보냄. 켜면 서버 인증서를 확인하지 않음"
+          },
+          "devBoost.apiConsole.maxResponseMb": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 100,
+            "order": 4,
+            "description": "응답 본문을 받는 최대 크기(MB). 넘으면 앞부분만 받음"
           }
         }
       }

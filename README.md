@@ -14,6 +14,7 @@
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
 | **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.importJump.enabled` |
+| **API 콘솔** — API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기) | `Ctrl+Alt+A` | `devBoost.apiConsole.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -167,6 +168,22 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 편집기가 이미 다른 파일의 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않습니다
 - 미리 만드는 색인이 없습니다. 이름을 누르거나 올렸을 때 그 파일의 import 와 대상 파일만 읽습니다
 - 끄면(`devBoost.importJump.enabled`) 편집기 원래 동작 그대로입니다
+
+### API 콘솔
+
+`Ctrl+Alt+A` (명령 `API 콘솔: 열기`) 로 엽니다. 자주 쓰는 API 를 모음으로 저장해 두고, 값만 바꿔 가며 보내 봅니다.
+
+- **목록** — 모음 → 폴더 → 요청으로 정리합니다 (예: `결재 처리`, `메일 발송`). 두 번 누르면 이름 바꾸기, 끌어서 옮기기, `⋯` 에서 복제 · 내보내기 · 삭제
+- **요청** — 메서드, 주소, 파라미터, 헤더, 본문(JSON · 글 · form · 파일 첨부), 인증(Bearer · Basic), 메모. `Ctrl+Enter` 로 보냅니다
+- **응답** — 상태 · 시간 · 크기, JSON 접어 보기, 응답에서 찾기(`Enter` 다음), 헤더, 실제로 보낸 요청. `예시로 저장` 하면 요청과 함께 남습니다
+- **환경** — `{{baseUrl}}`, `{{token}}` 같은 변수 묶음. 로컬 · 개발 · 운영을 만들어 바꿔 씁니다. 운영처럼 되돌릴 수 없는 곳은 "보내기 전에 확인"을 켜 두세요
+- **쿠키** — 로그인 응답이 준 쿠키(세션)는 화면을 닫을 때까지 이어 보냅니다. `⋯ → 쿠키 비우기`
+- **cURL** — 브라우저 개발자 도구에서 `Copy as cURL` 한 것을 주소 칸에 붙여넣으면 요청이 채워집니다. 반대로 `⋯ → cURL 로 복사`
+- **가져오기 · 내보내기** — Postman 모음(v2) · 환경 파일을 가져옵니다. 내보내기 파일에는 환경 변수의 이름만 들어가고 값은 들어가지 않습니다
+
+저장한 모음 · 환경 · 기록은 이 컴퓨터의 VS Code 저장 폴더에만 두고, 프로젝트 폴더에는 아무것도 만들지 않습니다. 환경 변수의 값(토큰 등)도 그 파일에 글 그대로 저장됩니다.
+
+- 응답 대기 시간 `devBoost.apiConsole.timeoutSeconds`, 사설 인증서 서버 `devBoost.apiConsole.insecureTls`, 큰 응답 `devBoost.apiConsole.maxResponseMb`
 
 ## 설치
 

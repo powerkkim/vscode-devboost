@@ -9,6 +9,7 @@ import { dbConsole } from './features/dbConsole';
 import { Sessions } from './features/dbConsole/sessions';
 import { sqlLog } from './features/sqlLog';
 import { importJump } from './features/importJump';
+import { apiConsole } from './features/apiConsole';
 
 /**
  * 새 기능을 추가할 때는
@@ -16,7 +17,7 @@ import { importJump } from './features/importJump';
  *  2) 아래 배열에 추가
  *  3) package.json 에 devBoost.<기능>.enabled 설정과 커맨드(when 조건 포함) 추가
  */
-const FEATURES: Feature[] = [searchEverywhere, sourceAtlas, mybatisRunner, dbSchema, caseConverter, dbConsole, sqlLog, importJump];
+const FEATURES: Feature[] = [searchEverywhere, sourceAtlas, mybatisRunner, dbSchema, caseConverter, dbConsole, sqlLog, importJump, apiConsole];
 
 /** 현재 켜져 있는 기능 → 그 기능이 등록한 Disposable 목록 */
 const running = new Map<string, vscode.Disposable[]>();
