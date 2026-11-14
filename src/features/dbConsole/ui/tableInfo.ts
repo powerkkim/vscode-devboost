@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
 import type { CollectedSchema } from '../driver/types';
+import { newNonce } from '../../../core/webview';
 
 /** 테이블 정보 화면에 넣을 것 */
 export interface TableInfoData {
@@ -118,7 +118,7 @@ export class TableInfoPanel {
       this.open.set(key, p);
     }
     const css = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'dbConsole', 'tableInfo.css'));
-    panel.webview.html = tableInfoHtml(data, { cspSource: panel.webview.cspSource, nonce: randomBytes(16).toString('base64'), css: String(css) });
+    panel.webview.html = tableInfoHtml(data, { cspSource: panel.webview.cspSource, nonce: newNonce(), css: String(css) });
     panel.reveal();
   }
 

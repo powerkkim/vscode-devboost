@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { LoggedQuery, consoleText, displaySql, queryInfo, queryMapper, queryTitle, summarize } from './parse';
+import { newNonce } from '../../../core/webview';
 
 /**
  * 최근 쿼리를 고르는 창: 왼쪽 목록(종류·쿼리 id·테이블·조건), 오른쪽에 고른 쿼리의 전체 SQL.
@@ -18,13 +19,6 @@ interface Deps {
 }
 
 let current: vscode.WebviewPanel | undefined;
-
-function nonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let s = '';
-  for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
 
 export function closeSqlLogPicker() {
   current?.dispose();
@@ -93,7 +87,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
 
   const css = panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'picker.css'));
   const js = panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'picker.js'));
-  const n = nonce();
+  const n = newNonce();
   panel.webview.html = `<!DOCTYPE html>
 <html lang="ko">
 <head>

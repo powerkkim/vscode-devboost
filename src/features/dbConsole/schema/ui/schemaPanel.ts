@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
 import { OracleBridge } from '../worksheet/oracleBridge';
 import { buildCollectSql, normalizePrefixes } from '../collectSql';
 import { ImportPart, importText } from '../importer';
@@ -8,6 +7,7 @@ import { buildTableDoc, buildTableDocXlsx, localDate, tableDocXlsxName } from '.
 import { SchemaFile } from '../types';
 import { decodeText } from '../csv';
 import { SchemaStore } from '../schemaStore';
+import { newNonce } from '../../../../core/webview';
 
 /**
  * DB 스키마 화면 (Webview). 위: 수집(① 범위 → ② 수집 쿼리 → ③ 저장), 아래: 가져온 데이터 + 테이블 정의서 추출.
@@ -396,7 +396,7 @@ export class SchemaPanel {
     const base = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'dbConsole', 'schema');
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'schema.js'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'schema.css'));
-    const nonce = randomBytes(16).toString('base64');
+    const nonce = newNonce();
     return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${wv.cspSource}; script-src 'nonce-${nonce}';">

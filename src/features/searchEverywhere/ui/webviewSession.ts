@@ -3,6 +3,7 @@ import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { SearchService, SearchItem, SearchResult, TabId } from '../search/searchService';
 import { SearchOptions, SCOPES, isScopeId } from '../search/scope';
+import { newNonce } from '../../../core/webview';
 
 /**
  * Webview 화면(media/searchEverywhere.js)과 확장 사이의 공통 로직.
@@ -246,7 +247,7 @@ export class WebviewSession {
     const mediaRoot = vscode.Uri.joinPath(extensionUri, 'media');
     const css = this.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'searchEverywhere', 'searchEverywhere.css'));
     const js = this.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'searchEverywhere', 'searchEverywhere.js'));
-    const nonce = makeNonce();
+    const nonce = newNonce();
     return /* html */ `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -340,13 +341,4 @@ export function selectedText(): string {
   }
   const text = editor.document.getText(editor.selection);
   return text.includes('\n') ? '' : text.trim().slice(0, 200);
-}
-
-function makeNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let s = '';
-  for (let i = 0; i < 32; i++) {
-    s += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return s;
 }

@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
 import type { Cell, Column, DbKind, RowCursor } from '../driver/types';
 import { toCsv } from '../schema/csv';
 import { guessTable, toInsertSql } from '../sql/insertSql';
+import { newNonce } from '../../../core/webview';
 
 export const RESULTS_VIEW_ID = 'devBoost.dbConsole.results';
 /** 한 결과에 싣는 최대 행 수의 한도 (설정 maxRows 는 이 안에서). 행은 모두 메모리에 있으므로 끝없이 두지 않는다 */
@@ -355,7 +355,7 @@ export class ResultView implements vscode.WebviewViewProvider, vscode.Disposable
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'results.js'));
     const grid = wv.asWebviewUri(vscode.Uri.joinPath(base, 'grid.css'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'results.css'));
-    const nonce = randomBytes(16).toString('base64');
+    const nonce = newNonce();
     return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${wv.cspSource}; script-src 'nonce-${nonce}';">

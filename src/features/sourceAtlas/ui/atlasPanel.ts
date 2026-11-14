@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { randomBytes } from 'crypto';
 import { atlasOptions, clearAtlasCaches, loadPipeline } from '../lazy';
+import { newNonce } from '../../../core/webview';
 
 /**
  * Atlas 화면(Webview). 한 번에 하나만 띄우고, 다시 열면 같은 패널에서 새 파일을 분석한다.
@@ -139,7 +139,7 @@ export class AtlasPanel {
     const base = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'sourceAtlas');
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'app.js'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'app.css'));
-    const nonce = randomBytes(16).toString('base64');
+    const nonce = newNonce();
     // Vue Flow 가 노드 위치를 style 속성으로 주므로 style-src 는 'unsafe-inline' 이 필요하다. 스크립트는 nonce 로만 허용.
     return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">

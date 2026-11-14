@@ -7,7 +7,7 @@ import { consolePanel, Deps, sendToConsole } from './consoleLink';
 import { ParamInput } from './mapper/values';
 
 /**
- * MyBatis SQL 실행 — mapper XML 의 쿼리를 DevBoost DB 콘솔에서 실행한다.
+ * Mapper 쿼리 실행 (DB 콘솔 묶음) — MyBatis mapper XML 의 쿼리를 DevBoost DB 콘솔에서 실행한다.
  *  - 쿼리 위의 CodeLens: "▶ 콘솔에서 실행" / "SQL 복사" (마지막 입력값으로 값을 넣은 SQL)
  *  - 에디터 우클릭·Ctrl+Alt+Enter: 커서가 있는 쿼리를 콘솔에서 실행
  *  - 콘솔에서는 왼쪽 패널에서 파라미터 값을 바꾸면 if·foreach 를 다시 풀어 SQL 이 바뀐다 (consoleLink)
@@ -66,10 +66,6 @@ export const mybatisRunner: Feature = {
     const runInConsole = vscode.commands.registerCommand('devBoost.mybatisRunner.runInConsole', async (uri?: vscode.Uri, id?: string) => {
       const t = target(uri, id);
       if (!t) return;
-      if (!vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('enabled', true)) {
-        void vscode.window.showWarningMessage('DB 콘솔이 꺼져 있습니다 (설정 devBoost.dbConsole.enabled).');
-        return;
-      }
       const text = (await vscode.workspace.openTextDocument(t.uri)).getText();
       const doc = parseMapper(text, t.uri.fsPath);
       const st = doc?.statements.find((s) => s.id === t.id);
@@ -88,7 +84,7 @@ export const mybatisRunner: Feature = {
       lens
     );
     const cfgWatch = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('devBoost.dbConsole.mybatis.codeLens') || e.affectsConfiguration('devBoost.dbConsole.enabled')) lens.refresh();
+      if (e.affectsConfiguration('devBoost.dbConsole.mybatis.codeLens')) lens.refresh();
     });
 
     return [
@@ -112,14 +108,12 @@ class MapperCodeLens implements vscode.CodeLensProvider, vscode.Disposable {
     const doc = parseMapper(text, document.uri.fsPath);
     if (!doc) return [];
     const out: vscode.CodeLens[] = [];
-    const console = vscode.workspace.getConfiguration('devBoost.dbConsole').get<boolean>('enabled', true);
     for (const st of doc.statements) {
       const pos = document.positionAt(st.el.start);
       const range = new vscode.Range(pos, pos);
-      if (console)
-        out.push(
-          new vscode.CodeLens(range, { title: '▶ 콘솔에서 실행', command: 'devBoost.mybatisRunner.runInConsole', arguments: [document.uri, st.id], tooltip: 'DevBoost DB 콘솔에서 실행 — 파라미터 값은 콘솔 왼쪽 칸에서 바꾸면 if·foreach 까지 다시 풀립니다' })
-        );
+      out.push(
+        new vscode.CodeLens(range, { title: '▶ 콘솔에서 실행', command: 'devBoost.mybatisRunner.runInConsole', arguments: [document.uri, st.id], tooltip: 'DevBoost DB 콘솔에서 실행 — 파라미터 값은 콘솔 왼쪽 칸에서 바꾸면 if·foreach 까지 다시 풀립니다' })
+      );
       out.push(new vscode.CodeLens(range, { title: 'SQL 복사', command: 'devBoost.mybatisRunner.copy', arguments: [document.uri, st.id], tooltip: '마지막으로 입력한 값으로 SQL 을 만들어 클립보드에 복사' }));
     }
     return out;

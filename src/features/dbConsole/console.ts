@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { randomBytes } from 'crypto';
 import { DbConnectionConfig, kindOf } from './connection/config';
 import type { RowCursor, RunResult } from './driver/types';
 import type { DbSession } from './driver/session';
@@ -14,6 +13,7 @@ import { BindInput, bindValuesFor, toDriverSql } from './sql/binds';
 import { MAX_ROWS_LIMIT, ResultData, ResultView } from './ui/resultView';
 import { CsvSink, streamCsv } from './csvExport';
 import { FormActions, FormDialog, DialogMessage } from './ui/formDialog';
+import { newNonce } from '../../core/webview';
 
 /** 콘솔 화면(Webview 패널)의 종류 — package.json 의 단축키 조건(activeWebviewPanelId)과 같아야 한다 */
 export const CONSOLE_VIEW_TYPE = 'devBoostDbConsole';
@@ -997,7 +997,7 @@ export class DbConsole implements vscode.Disposable {
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'console.js'));
     const grid = wv.asWebviewUri(vscode.Uri.joinPath(base, 'grid.css'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'console.css'));
-    const nonce = randomBytes(16).toString('base64');
+    const nonce = newNonce();
     // 편집기(CodeMirror)가 실행 중에 <style> 을 넣으므로 스타일에도 nonce 를 허용한다
     // data-vscode-context: 오른쪽 클릭 메뉴(webview/context)에 콘솔 명령을 붙이고, 잘라내기·복사·붙여넣기는 그대로 둔다
     return `<!DOCTYPE html>

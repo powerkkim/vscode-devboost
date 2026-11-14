@@ -1,5 +1,5 @@
 /**
- * 실행 로그에서 MyBatis 쿼리를 골라 값까지 채운 SQL 로 만든다. vscode 모듈에 의존하지 않아 단독 테스트가 가능하다.
+ * SQL 로그 (DB 콘솔 묶음) — 실행 로그에서 쿼리를 골라 값까지 채운 SQL 로 만든다. vscode 모듈에 의존하지 않아 단독 테스트가 가능하다.
  *
  *   ... c.e.m.UserMapper.selectUser : ==>  Preparing: SELECT * FROM TB_USER WHERE ID = ? AND NM = ?
  *   ... c.e.m.UserMapper.selectUser : ==> Parameters: 10(Integer), kim(String)
@@ -99,6 +99,20 @@ export function literal(p: LogParam): string {
   return quote(v);
 }
 
+/** 따옴표 글의 닫는 따옴표 자리 (여는 따옴표가 i 에 있다). '' 는 따옴표 한 글자로 본다. 닫히지 않았으면 글의 끝 */
+function quoteEnd(text: string, i: number): number {
+  const q = text[i];
+  let j = i + 1;
+  while (j < text.length) {
+    if (text[j] === q) {
+      if (text[j + 1] === q) j++;
+      else break;
+    }
+    j++;
+  }
+  return j;
+}
+
 /** SQL 의 ? 자리에 값을 차례로 넣는다. 따옴표 안·주석 안의 ? 는 건드리지 않는다 */
 export function bindSql(sql: string, params: LogParam[]): { sql: string; placeholders: number } {
   let out = '';
@@ -107,14 +121,7 @@ export function bindSql(sql: string, params: LogParam[]): { sql: string; placeho
     const c = sql[i];
     if (c === "'" || c === '"') {
       // 따옴표 글: 닫는 따옴표까지 ('' 는 따옴표 한 글자)
-      let j = i + 1;
-      while (j < sql.length) {
-        if (sql[j] === c) {
-          if (sql[j + 1] === c) j++;
-          else break;
-        }
-        j++;
-      }
+      const j = quoteEnd(sql, i);
       out += sql.slice(i, j + 1);
       i = j;
     } else if (c === '-' && sql[i + 1] === '-') {
@@ -154,14 +161,7 @@ export function layoutSql(sql: string): string {
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < s.length) {
-        if (s[j] === c) {
-          if (s[j + 1] === c) j++;
-          else break;
-        }
-        j++;
-      }
+      const j = quoteEnd(s, i);
       out += s.slice(i, j + 1);
       i = j;
       continue;
@@ -598,9 +598,7 @@ function topLevel(sql: string, kw: RegExp): { index: number; text: string }[] {
   for (let i = 0; i < sql.length; i++) {
     const c = sql[i];
     if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < sql.length && !(sql[j] === c && sql[j + 1] !== c)) j += sql[j] === c ? 2 : 1;
-      i = j;
+      i = quoteEnd(sql, i);
     } else if (c === '(') depth++;
     else if (c === ')') depth = Math.max(0, depth - 1);
     else if (depth === 0 && /[A-Za-z]/.test(c) && (i === 0 || !/[\w$#.]/.test(sql[i - 1]))) {
