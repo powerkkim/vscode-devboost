@@ -32,6 +32,10 @@ export interface ApiRequest {
   note: string;
   /** 예시로 남겨 둔 응답 */
   example?: { status: number; body: string; savedAt: number };
+  /** 주소의 {id} 자리에 넣을 값 (이름은 주소에서 나온다) */
+  pathVars?: KeyValue[];
+  /** Controller 에서 만든 요청이면 "클래스#메서드" — 같은 것을 두 번 만들지 않으려고 */
+  origin?: string;
 }
 
 export interface ApiFolder {
@@ -112,6 +116,8 @@ export function normalizeData(raw: unknown): ApiData {
     },
     note: String(r.note ?? ''),
     ...(r.example && typeof r.example === 'object' ? { example: { status: Number(r.example.status) || 0, body: String(r.example.body ?? ''), savedAt: Number(r.example.savedAt) || 0 } } : {}),
+    ...(Array.isArray(r.pathVars) && r.pathVars.length ? { pathVars: kv(r.pathVars) } : {}),
+    ...(typeof r.origin === 'string' && r.origin ? { origin: r.origin } : {}),
   });
   const node = (n: unknown): ApiNode | undefined => {
     if (!n || typeof n !== 'object') return undefined;
@@ -179,6 +185,42 @@ export interface BuiltRequest {
   body?: Buffer;
   /** 채우지 못한 변수 이름 */
   missing: string[];
+  /** 값이 비어 있는 경로 자리 이름 ({id}) */
+  missingPath: string[];
+}
+
+/** 주소의 {id} · {id:[0-9]+} 자리 (Spring 의 경로 변수 모양). {{변수}} 는 아니다 */
+const PATH_VAR = /(?<!\{)\{([A-Za-z_][\w.-]*)(?::[^{}]*)?\}(?!\})/g;
+
+/** 주소에 나온 경로 자리 이름 (나온 순서, 겹치면 한 번) */
+export function pathNames(url: string): string[] {
+  const head = url.split(/[?#]/)[0];
+  const out: string[] = [];
+  for (const m of head.matchAll(PATH_VAR)) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+/** 주소가 바뀌었을 때 경로 값 표를 맞춘다: 있는 이름의 값은 두고, 새 이름은 빈 값으로, 사라진 이름은 뺀다 */
+export function syncPathVars(url: string, rows: KeyValue[] | undefined): KeyValue[] {
+  return pathNames(url).map((name) => rows?.find((r) => r.key === name) ?? { key: name, value: '', enabled: true });
+}
+
+/** {id} 자리에 값을 넣는다. 값이 없는 자리는 그대로 두고 missing 에 적는다 */
+export function fillPath(url: string, rows: KeyValue[] | undefined, vars: Variables, missingVars?: Set<string>, missingPath?: Set<string>): string {
+  const cut = url.search(/[?#]/);
+  const head = cut < 0 ? url : url.slice(0, cut);
+  const tail = cut < 0 ? '' : url.slice(cut);
+  return (
+    head.replace(PATH_VAR, (all, name: string) => {
+      const row = rows?.find((r) => r.key === name);
+      const value = row ? fill(row.value, vars, missingVars).trim() : '';
+      if (!value) {
+        missingPath?.add(name);
+        return all;
+      }
+      return encodeURIComponent(value);
+    }) + tail
+  );
 }
 
 export interface FileReader {
@@ -253,7 +295,9 @@ export function buildRequest(req: ApiRequest, vars: Variables, readFile: FileRea
       headers['Content-Type'] = 'multipart/form-data; boundary=' + boundary;
     }
   }
-  return { method, url: buildUrl(req.url, req.params, vars, missing), headers, body, missing: [...missing] };
+  const missingPath = new Set<string>();
+  const url = buildUrl(fillPath(req.url, req.pathVars, vars, missing, missingPath), req.params, vars, missing);
+  return { method, url, headers, body, missing: [...missing], missingPath: [...missingPath] };
 }
 
 /* ------------------------------------------------------------------ cURL */
@@ -675,6 +719,39 @@ export class CookieJar {
       .sort((a, b) => b.path.length - a.path.length)
       .map((c) => `${c.name}=${c.value}`)
       .join('; ');
+  }
+
+  /**
+   * 브라우저가 보낸 Cookie 헤더("a=1; b=2")를 그 호스트의 쿠키로 받아 둔다 (브라우저의 로그인 상태를 이어받기).
+   * 속성(경로·만료)은 알 수 없으므로 그 호스트의 모든 경로에 보낸다. 바뀐 개수를 돌려준다.
+   */
+  absorb(url: string, cookieHeader: string): number {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      return 0;
+    }
+    const domain = u.hostname.toLowerCase();
+    let changed = 0;
+    for (const part of cookieHeader.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq <= 0) continue;
+      const name = part.slice(0, eq).trim();
+      const value = part.slice(eq + 1).trim();
+      if (!name) continue;
+      const old = this.cookies.find((c) => c.name === name && c.domain === domain && c.path === '/');
+      if (old) {
+        if (old.value !== value) {
+          old.value = value;
+          changed++;
+        }
+      } else {
+        this.cookies.push({ name, value, domain, hostOnly: true, path: '/', secure: false });
+        changed++;
+      }
+    }
+    return changed;
   }
 
   count(): number {

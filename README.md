@@ -14,7 +14,7 @@
 | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
 | **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.importJump.enabled` |
-| **API 콘솔** — API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기) | `Ctrl+Alt+A` | `devBoost.apiConsole.enabled` |
+| **API 콘솔** — API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기). Controller 메서드에서 바로 열기, 브라우저 캡처로 실제 호출과 로그인 상태 이어받기 | `Ctrl+Alt+A` / Controller 위 `API 콘솔` | `devBoost.apiConsole.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -180,10 +180,31 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - **쿠키** — 로그인 응답이 준 쿠키(세션)는 화면을 닫을 때까지 이어 보냅니다. `⋯ → 쿠키 비우기`
 - **cURL** — 브라우저 개발자 도구에서 `Copy as cURL` 한 것을 주소 칸에 붙여넣으면 요청이 채워집니다. 반대로 `⋯ → cURL 로 복사`
 - **가져오기 · 내보내기** — Postman 모음(v2) · 환경 파일을 가져옵니다. 내보내기 파일에는 환경 변수의 이름만 들어가고 값은 들어가지 않습니다
+- **경로 값** — 주소에 `{id}` 처럼 적으면 파라미터 탭에 그 자리의 값을 넣는 칸이 생깁니다
+
+#### Controller 에서 바로 열기
+
+Controller(Java) 파일의 `@GetMapping` · `@PostMapping` 같은 매핑 메서드 위에 `API 콘솔  GET /api/…` 이 보입니다. 누르면 그 요청이 채워져 열립니다 (우클릭 `이 요청을 API 콘솔에서 열기` 도 같습니다).
+
+- 주소는 `{{baseUrl}}` + context-path + 클래스 경로 + 메서드 경로. 환경에 `baseUrl` 이 없으면 `application.yml` 의 포트로 `http://localhost:포트` 를 넣어 둡니다
+- `@PathVariable` 은 경로 값, `@RequestParam` 과 검색 조건 객체의 필드는 파라미터(선택 값은 꺼 둠), `@RequestHeader` 는 헤더
+- `@RequestBody` 는 DTO 의 필드를 읽어 JSON 뼈대로, `MultipartFile` · `@RequestPart` 는 파일 첨부로
+- Controller 이름의 폴더에 들어갑니다. 이미 넣은 요청이면 그 요청을 엽니다. 클래스 위의 `API 콘솔에 모두 넣기` 는 한 번에 넣습니다
+- DTO 를 찾지 못했거나 경로가 상수로 적혀 있으면 요청의 메모 탭에 적어 둡니다
+
+#### 브라우저 캡처
+
+왼쪽의 `브라우저 캡처` → `캡처 시작` 을 누르면 전용 브라우저(Chrome, 없으면 Edge)가 열립니다. 처음 한 번 열 주소를 묻습니다. 거기서 평소처럼 로그인하고 화면을 쓰면 서버 호출(XHR · fetch)이 목록에 쌓입니다.
+
+- 호출을 고르면 응답 · 응답 헤더 · 요청 헤더 · 요청 본문이 보입니다. `요청으로 열기` 는 같은 요청을 만들어 바로 고치고 다시 보낼 수 있게 하고, `모음에 넣기` 는 저장합니다
+- **인증 이어받기** — 브라우저가 보낸 토큰 헤더(`Authorization`, `X-XSRF-TOKEN` 등)와 쿠키를 기억해 두었다가 같은 호스트로 보내는 요청에 붙입니다 (포트는 가리지 않습니다: 화면 서버 `localhost:5173` 에서 본 토큰을 백엔드 `localhost:8080` 에도). 요청에 같은 헤더를 직접 적었으면 그것을 씁니다. 위쪽의 `인증 이어받는 중` 을 누르면 내용 확인 · 끄기 · 지우기
+- 헤더 값이나 응답 JSON 의 값을 누르면 `환경 변수로 저장` 할 수 있습니다
+- 브라우저를 띄울 수 없는 환경(원격 창, 회사 정책)이면 개발자 도구의 네트워크 탭에서 저장한 HAR 파일을 `HAR` 로 불러옵니다
+- 캡처용 브라우저는 전용 프로필을 씁니다 (평소 쓰는 브라우저의 로그인 · 확장과 섞이지 않습니다). `캡처 끝내기` 를 누르거나 브라우저를 닫으면 끝납니다. 이어받은 인증은 VS Code 의 비밀 저장소에 두고, `이어받은 인증 지우기` 로 지웁니다
 
 저장한 모음 · 환경 · 기록은 이 컴퓨터의 VS Code 저장 폴더에만 두고, 프로젝트 폴더에는 아무것도 만들지 않습니다. 환경 변수의 값(토큰 등)도 그 파일에 글 그대로 저장됩니다.
 
-- 응답 대기 시간 `devBoost.apiConsole.timeoutSeconds`, 사설 인증서 서버 `devBoost.apiConsole.insecureTls`, 큰 응답 `devBoost.apiConsole.maxResponseMb`
+- 응답 대기 시간 `devBoost.apiConsole.timeoutSeconds`, 사설 인증서 서버 `devBoost.apiConsole.insecureTls`, 큰 응답 `devBoost.apiConsole.maxResponseMb`, Controller 위 표시 `devBoost.apiConsole.codeLens`, 캡처용 브라우저 `devBoost.apiConsole.capture.browserPath`
 
 ## 설치
 

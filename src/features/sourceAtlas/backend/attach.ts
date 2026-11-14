@@ -25,12 +25,12 @@ interface Endpoint {
   segs: string[];
 }
 
-const MAPPING_ANN: Record<string, string> = {
+export const MAPPING_ANN: Record<string, string> = {
   GetMapping: 'GET', PostMapping: 'POST', PutMapping: 'PUT', DeleteMapping: 'DELETE', PatchMapping: 'PATCH', RequestMapping: 'ANY',
 };
 
 /** 어노테이션 인자에서 경로 문자열들과 HTTP 메서드들을 읽는다 */
-function readMapping(ann: Ann): { paths: string[]; methods: string[] } {
+export function readMapping(ann: Ann): { paths: string[]; methods: string[] } {
   const args = ann.args;
   const parts: string[] = [];
   let depth = 0, cur = '', inStr = false;
