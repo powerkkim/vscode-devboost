@@ -8,7 +8,9 @@ import { closeSqlLogPicker, showSqlLogPicker } from './picker';
  * 쿼리를 골라 값까지 채워 두고, 고르면 새 DB 콘솔에 옮긴다 (실행은 하지 않는다).
  *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
- * 터미널 출력은 VS Code 의 셸 통합으로 읽는다. 기능이 켜진 뒤에 시작한 명령부터 읽고, 쿼리는 메모리에만 둔다.
+ * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 디버그 콘솔 출력,
+ * 그리고 사용자가 고른 로그(`SQL 로그: 고른 로그에서 읽기` — 이미 떠 있는 서버의 로그). 쿼리는 메모리에만 둔다.
+ * 상태바는 늘 보이고, 쿼리가 없으면 왜 없는지(읽는 곳 · 셸 통합이 없는 터미널 · 읽은 줄 수)를 알려 준다.
  * 수집 필터(include · exclude 낱말, 같은 쿼리 id 는 최신 하나만)는 모을 때 걸러, 필요 없는 공통 쿼리가 자리를 차지하지 않게 한다.
  */
 
@@ -52,15 +54,43 @@ export const sqlLog: Feature = {
     status.name = 'DevBoost SQL 로그';
     let disposed = false;
 
+    /** 지금 읽고 있는 곳 (터미널 명령 · 디버그 세션) → 읽은 줄 수 */
+    const sources = new Map<object, { label: string; lines: number }>();
+    /** 지금까지 읽은 줄 수 (끝난 것 포함) */
+    let linesRead = 0;
+
+    /** 쿼리가 없을 때 까닭과 할 일 (상태바 · 목록 열기에서 같이 쓴다) */
+    const diagnose = (): string[] => {
+      const out: string[] = [];
+      const reading = [...sources.values()];
+      if (reading.length) {
+        out.push(`읽는 중: ${reading.map((r) => `${r.label} (${r.lines}줄)`).join(', ')}`);
+        if (!ring.items().length && !ring.excluded) {
+          out.push(
+            linesRead
+              ? '로그는 읽고 있지만 SQL 로그를 아직 찾지 못했습니다. 화면을 한 번 조회해 보고, 그래도 없으면 설정 loggers 에 SQL 로그 줄의 로거 이름을 적어 주세요.'
+              : '아직 출력이 없습니다. 화면을 한 번 조회해 보세요.'
+          );
+        }
+      } else {
+        out.push('읽고 있는 터미널 명령 · 디버그 세션이 없습니다. 이 기능이 켜지기 전에 띄운 서버는 읽지 못합니다 — 서버를 VS Code 터미널에서 다시 띄우거나, 터미널에서 로그를 드래그하고 우클릭 → "SQL 로그 — 고른 로그에서 읽기".');
+      }
+      const noShell = vscode.window.terminals.filter((t) => 'shellIntegration' in t && !t.shellIntegration).map((t) => t.name);
+      if (noShell.length) out.push(`셸 통합이 없는 터미널(읽지 못함): ${noShell.join(', ')} — 명령 프롬프트(cmd)이거나 셸 통합이 꺼진 터미널입니다. PowerShell · Git Bash 터미널에서 띄워 주세요.`);
+      if (typeof vscode.window.onDidStartTerminalShellExecution !== 'function') out.push('이 VS Code 는 터미널 출력을 읽지 못합니다 (1.93 이상 필요). 고른 로그에서 읽기는 됩니다.');
+      return out;
+    };
+
     const refresh = () => {
       const list = ring.items();
-      if (!list.length && !ring.excluded) {
-        status.hide();
-        return;
-      }
       status.text = `$(database) SQL ${list.length}`;
       const md = new vscode.MarkdownString(undefined, true);
-      md.isTrusted = { enabledCommands: ['devBoost.sqlLog.send'] };
+      md.isTrusted = { enabledCommands: ['devBoost.sqlLog.send', 'devBoost.sqlLog.readSelection'] };
+      if (!list.length) {
+        md.appendMarkdown('**SQL 로그** — 모은 쿼리가 없습니다\n\n');
+        for (const line of diagnose()) md.appendMarkdown(`- ${line.replace(/[[\]\\*_`]/g, '\\$&')}\n`);
+        md.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection)\n\n');
+      }
       if (ring.excluded) md.appendMarkdown(`$(filter) 수집 필터로 뺀 쿼리 ${ring.excluded}개 (설정 \`exclude\` · \`include\`)\n\n`);
       if (list.length) md.appendMarkdown('**최근 쿼리** — 누르면 새 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
       for (const q of list) {
@@ -70,7 +100,7 @@ export const sqlLog: Feature = {
         md.appendMarkdown(`[$(arrow-right) ${head.replace(/[[\]\\]/g, '\\$&')}](command:devBoost.sqlLog.send?${arg})  \n`);
         md.appendMarkdown(`\`${oneLine(q.sql, 90).replace(/`/g, "'")}\`\n\n`);
       }
-      md.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기`);
+      if (list.length) md.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기`);
       status.tooltip = md;
       status.show();
     };
@@ -94,11 +124,10 @@ export const sqlLog: Feature = {
     /** 고르는 창을 연다 — 연 순간의 목록 그대로 (그 뒤 들어온 쿼리는 다시 열면 보인다) */
     const pick = () => {
       if (!ring.items().length) {
-        void vscode.window.showInformationMessage(
-          ring.excluded
-            ? `모은 쿼리가 없습니다. 읽은 쿼리 ${ring.excluded}개는 모두 수집 필터에 걸렸습니다 (설정 devBoost.dbConsole.sqlLog.exclude · include).`
-            : '아직 읽은 쿼리가 없습니다. VS Code 터미널에서 서버를 실행하고(SQL 로그가 찍히는 상태로) 화면을 한 번 조회해 보세요.'
-        );
+        const why = ring.excluded
+          ? `읽은 쿼리 ${ring.excluded}개는 모두 수집 필터에 걸렸습니다 (설정 devBoost.dbConsole.sqlLog.exclude · include).`
+          : diagnose().join(' ');
+        void vscode.window.showInformationMessage(`모은 쿼리가 없습니다. ${why}`, '고른 로그에서 읽기').then((a) => a && readSelection());
         return;
       }
       showSqlLogPicker(context, { items: () => ring.items(), send, timeText, excluded: () => ring.excluded, exclude, accepts: (q) => ring.accepts(q) });
@@ -118,39 +147,132 @@ export const sqlLog: Feature = {
       await cfg().update('exclude', next, where);
     };
 
-    /** 터미널 명령 하나의 출력을 끝까지 읽는다 */
-    const consume = async (execution: vscode.TerminalShellExecution) => {
-      const reader = new LogReader(Date.now, { auto: cfg().get<boolean>('autoDetect', true), keywords: cfg().get<string[]>('loggers', []) });
+    const newReader = () => new LogReader(Date.now, { auto: cfg().get<boolean>('autoDetect', true), keywords: cfg().get<string[]>('loggers', []) });
+
+    /**
+     * 출력 한 줄기(터미널 명령 하나 · 디버그 세션 하나)를 읽는 곳. push 로 글을 넣고 끝나면 end.
+     * 로그가 IDLE_MS 동안 멈추면 붙잡아 둔 마지막 줄을 처리하고 화면을 맞춘다 (건수 <== Total 은 쿼리보다 늦게 온다)
+     */
+    const openSource = (key: object, label: string) => {
+      const reader = newReader();
+      const source = { label, lines: 0 };
+      sources.set(key, source);
+      refresh();
       let idle: ReturnType<typeof setTimeout> | undefined;
       const take = (found: LoggedQuery[]) => {
         for (const q of found) ring.add(q);
       };
-      try {
-        for await (const chunk of execution.read()) {
-          if (disposed) break;
+      return {
+        push(chunk: string) {
+          if (disposed) return;
+          const n = chunk.split('\n').length - 1;
+          source.lines += n;
+          linesRead += n;
           take(reader.push(chunk));
           if (idle) clearTimeout(idle);
           idle = setTimeout(() => {
             if (disposed) return;
             take(reader.flush());
-            refresh(); // 건수(<== Total)는 쿼리보다 늦게 오므로 멈췄을 때 한 번에 맞춘다
+            refresh();
           }, IDLE_MS);
+        },
+        end() {
+          if (idle) clearTimeout(idle);
+          sources.delete(key);
+          if (disposed) return;
+          take(reader.flush());
+          refresh();
+        },
+      };
+    };
+
+    /** 터미널 명령 하나의 출력을 끝까지 읽는다 */
+    const consume = async (execution: vscode.TerminalShellExecution, terminal: vscode.Terminal) => {
+      const src = openSource(execution, `터미널 "${terminal.name}"`);
+      try {
+        for await (const chunk of execution.read()) {
+          if (disposed) break;
+          src.push(chunk);
         }
       } catch {
         // 터미널이 닫히는 등으로 읽기가 끊김
       } finally {
-        if (idle) clearTimeout(idle);
-        if (!disposed) {
-          take(reader.flush());
-          refresh();
-        }
+        src.end();
       }
+    };
+
+    /**
+     * Run · Debug 로 띄운 서버: 디버그 콘솔로 나가는 출력(output 이벤트)을 엿본다.
+     * 출력이 터미널로 가는 설정(console: integratedTerminal)이면 여기로는 오지 않고 터미널 쪽에서 읽힌다
+     */
+    const debugTracker: vscode.DebugAdapterTrackerFactory = {
+      createDebugAdapterTracker(session) {
+        let src: ReturnType<typeof openSource> | undefined;
+        return {
+          onDidSendMessage(m: { type?: string; event?: string; body?: { category?: string; output?: string } }) {
+            if (m.type !== 'event' || m.event !== 'output' || !m.body?.output) return;
+            const cat = m.body.category ?? 'console';
+            if (cat !== 'stdout' && cat !== 'stderr' && cat !== 'console') return;
+            (src ??= openSource(session, `디버그 "${session.name}"`)).push(m.body.output);
+          },
+          onWillStopSession: () => src?.end(),
+          onExit: () => src?.end(),
+        };
+      },
+    };
+
+    /**
+     * 고른 로그에서 읽기: 터미널에서 고른 글 → 편집기에서 고른 글 → 클립보드 순으로 찾아 쿼리를 넣는다.
+     * 터미널의 고른 글은 복사 명령으로만 가져올 수 있어, 잠깐 클립보드를 쓰고 원래 내용으로 돌려 둔다
+     */
+    const readSelection = async () => {
+      const before = await vscode.env.clipboard.readText();
+      let text = '';
+      let from = '터미널에서 고른 글';
+      try {
+        await vscode.env.clipboard.writeText('');
+        await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+        text = await vscode.env.clipboard.readText();
+      } catch {
+        // 터미널이 없으면 다음 곳에서 찾는다
+      } finally {
+        await vscode.env.clipboard.writeText(before);
+      }
+      const editor = vscode.window.activeTextEditor;
+      if (!text.trim() && editor && !editor.selection.isEmpty) {
+        text = editor.document.getText(editor.selection);
+        from = '편집기에서 고른 글';
+      }
+      if (!text.trim()) {
+        text = before;
+        from = '클립보드';
+      }
+      if (!text.trim()) {
+        void vscode.window.showInformationMessage('읽을 로그가 없습니다. 터미널에서 SQL 로그(==> Preparing 줄부터 <== Total 까지)를 드래그해 고른 뒤 다시 실행하세요.');
+        return;
+      }
+      const reader = newReader();
+      const found = [...reader.push(text.endsWith('\n') ? text : text + '\n'), ...reader.flush()];
+      const before2 = ring.excluded;
+      const added = found.filter((q) => ring.add(q)).length;
+      refresh();
+      const skipped = ring.excluded - before2;
+      if (!found.length) {
+        void vscode.window.showInformationMessage(`${from}에서 SQL 로그를 찾지 못했습니다. ==> Preparing 줄이 들어 있게 골라 주세요.`);
+        return;
+      }
+      void vscode.window.showInformationMessage(`${from}에서 쿼리 ${added}개를 넣었습니다${skipped ? ` (수집 필터로 ${skipped}개 뺌)` : ''}.`);
+      if (added) pick();
     };
 
     const subs: vscode.Disposable[] = [
       { dispose: () => ((disposed = true), closeSqlLogPicker()) },
       status,
       vscode.commands.registerCommand('devBoost.sqlLog.pick', pick),
+      vscode.commands.registerCommand('devBoost.sqlLog.readSelection', readSelection),
+      vscode.debug.registerDebugAdapterTrackerFactory('*', debugTracker),
+      vscode.window.onDidOpenTerminal(refresh),
+      vscode.window.onDidCloseTerminal(refresh),
       vscode.commands.registerCommand('devBoost.sqlLog.send', (id: number) => send(ring.get(Number(id)))),
       vscode.commands.registerCommand('devBoost.sqlLog.clear', () => {
         ring.clear();
@@ -170,8 +292,10 @@ export const sqlLog: Feature = {
     ];
     // 터미널 출력 읽기는 VS Code 1.93 부터 (그 전 버전에서는 명령만 등록되고 쿼리는 모이지 않는다)
     if (typeof vscode.window.onDidStartTerminalShellExecution === 'function') {
-      subs.push(vscode.window.onDidStartTerminalShellExecution((e) => void consume(e.execution)));
+      subs.push(vscode.window.onDidStartTerminalShellExecution((e) => void consume(e.execution, e.terminal)));
     }
+    if (typeof vscode.window.onDidChangeTerminalShellIntegration === 'function') subs.push(vscode.window.onDidChangeTerminalShellIntegration(refresh));
+    refresh();
     return subs;
   },
 };
