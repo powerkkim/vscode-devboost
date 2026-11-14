@@ -87,6 +87,17 @@
     } else {
       $sql.textContent = '';
     }
+    // 수집 제외 단추: 쿼리 id · 테이블
+    const $ex = $('exclBtns');
+    $ex.textContent = '';
+    for (const x of q ? q.excludes : []) {
+      const b = document.createElement('button');
+      b.className = 'small ' + x.kind;
+      b.textContent = x.word;
+      b.title = (x.kind === 'query' ? '이 쿼리' : '이 테이블') + '가 든 쿼리는 앞으로 모으지 않음';
+      b.addEventListener('click', () => vscode.postMessage({ type: 'exclude', word: x.word }));
+      $ex.appendChild(b);
+    }
     const on = $list.querySelector('.row.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
   }
@@ -134,9 +145,28 @@
     else return;
     e.preventDefault();
   });
+  function filtered(n) {
+    $('filtered').textContent = n ? `수집 필터로 뺀 쿼리 ${n}` : '';
+  }
+
   window.addEventListener('message', (e) => {
     const m = e.data;
+    if (m.type === 'excluded') {
+      const $note = $('note');
+      if (m.error) {
+        $note.textContent = '제외하지 못했습니다: ' + m.error;
+        $note.className = 'err';
+        return;
+      }
+      all = all.filter((q) => !m.ids.includes(q.id));
+      $note.textContent = `"${m.word}" 수집 제외${m.ids.length ? ` · 목록에서 ${m.ids.length}개 뺌` : ''}`;
+      $note.className = 'ok';
+      filtered(m.excluded);
+      applyFilter();
+      return;
+    }
     if (m.type === 'init') {
+      filtered(m.excluded);
       all = m.items.map((q) => Object.assign(q, { search: [q.title, q.mapper, q.verb, q.tables, q.sql].join('\n').toLowerCase() }));
       $('opened').textContent = m.openedAt + ' 에 연 목록';
       $filter.value = '';

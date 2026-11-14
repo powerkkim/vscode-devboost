@@ -151,6 +151,18 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
 - 개수: `devBoost.dbConsole.sqlLog.maxQueries`
 
+필요 없는 쿼리 빼기 (수집 필터)
+- 공통코드 · 세션 확인처럼 늘 찍히는 쿼리가 최근 목록을 채우면, 모을 때부터 뺍니다 (뺀 쿼리는 자리를 차지하지 않음)
+- 고르는 창에서 쿼리를 고르고 아래 `수집 제외` 의 쿼리 id · 테이블 단추를 누르면 바로 빠지고 설정에 더해집니다
+- 직접 적기: `devBoost.dbConsole.sqlLog.exclude` (빼기) · `include` (적은 것만 모으기). 쿼리 id · mapper 이름 · SQL 글에서 찾고, 대소문자 무시 · 낱말 단위 · `*` 는 이름 글자 여럿
+
+```json
+"devBoost.dbConsole.sqlLog.exclude": ["selectCommonCode", "CommonMapper", "TB_COMM*"]
+```
+
+- 같은 쿼리는 최근 한 건만: `devBoost.dbConsole.sqlLog.latestOnly`
+- 뺀 개수는 상태바 `SQL n` 에 마우스를 올리면 보입니다
+
 안 잡히는 로그가 있을 때
 - `devBoost.dbConsole.sqlLog.loggers` 에 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적습니다. 예: `["SQL_LOG"]` → 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리로 읽습니다
 - SQL 이 아닌 로그가 섞여 잡히면 `devBoost.dbConsole.sqlLog.autoDetect` 를 끕니다

@@ -3,7 +3,7 @@
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서, JavaScript · 정규식 작업대 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -1193,6 +1193,30 @@
             "minimum": 1,
             "maximum": 50,
             "description": "기억해 둘 최근 쿼리 수 (메모리에만 두고, VS Code 를 닫으면 사라짐)"
+          },
+          "devBoost.dbConsole.sqlLog.exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 4,
+            "markdownDescription": "수집 제외 — 이 낱말이 든 쿼리는 모으지 않음 (최근 쿼리 자리를 차지하지 않게). 쿼리 id(SQL 머리 주석) · mapper 이름 · SQL 글(테이블 이름 등)에서 찾음. 대소문자 무시, 낱말 단위(`TB_USER` 는 `TB_USER_ROLE` 에 맞지 않음), `*` 는 이름 글자 여럿. 예: `[\"selectCommonCode\", \"CommonMapper\", \"TB_COMM*\", \"*Session*\"]`. 고르는 창의 `수집 제외` 단추로도 더해짐"
+          },
+          "devBoost.dbConsole.sqlLog.include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 5,
+            "markdownDescription": "수집 포함 — 적으면 이 낱말 가운데 하나가 든 쿼리만 모음 (비우면 모두). 찾는 곳 · 규칙은 `exclude` 와 같고, `exclude` 가 먼저. 예: 지금 만드는 화면의 mapper 만 보고 싶을 때 `[\"OrderMapper\", \"TB_ORDER*\"]`"
+          },
+          "devBoost.dbConsole.sqlLog.latestOnly": {
+            "type": "boolean",
+            "default": false,
+            "order": 6,
+            "markdownDescription": "같은 쿼리(같은 쿼리 id · mapper 메서드)는 가장 최근 한 건만 남김. 화면을 여러 번 조회해도 목록이 같은 쿼리로 채워지지 않음"
           }
         }
       },

@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
-import { LoggedQuery, consoleText, displaySql, queryInfo, queryMapper, queryTitle, summarize } from './parse';
+import { LoggedQuery, consoleText, displaySql, excludeWords, queryInfo, queryMapper, queryTitle, summarize } from './parse';
 import { newNonce } from '../../../core/webview';
 
 /**
  * 최근 쿼리를 고르는 창: 왼쪽 목록(종류·쿼리 id·테이블·조건), 오른쪽에 고른 쿼리의 전체 SQL.
  * 창을 연 순간의 목록을 그대로 보여 준다 — 그 뒤에 들어온 쿼리는 다시 열어야 보인다 (고르는 동안 목록이 밀리지 않게).
  * 다른 곳을 누르면 닫힌다.
+ * 고른 쿼리의 쿼리 id · 테이블을 "수집 제외" 에 더할 수 있다 — 더하면 이 창의 목록에서도 그 쿼리들을 뺀다.
  */
 
 type Entry = LoggedQuery & { id: number };
@@ -16,6 +17,12 @@ interface Deps {
   /** 고른 쿼리를 DB 콘솔로 */
   send: (q: LoggedQuery) => Promise<void>;
   timeText: (ms: number) => string;
+  /** 수집 필터로 뺀 쿼리 수 */
+  excluded: () => number;
+  /** 낱말을 수집 제외에 더한다 */
+  exclude: (word: string) => Promise<void>;
+  /** 지금 필터를 통과하는지 */
+  accepts: (q: LoggedQuery) => boolean;
 }
 
 let current: vscode.WebviewPanel | undefined;
@@ -27,7 +34,7 @@ export function closeSqlLogPicker() {
 export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
   current?.dispose(); // 다시 열면 최신 목록으로
   // 연 순간의 목록 (쿼리 객체는 건수·시간이 나중에 채워질 수 있어 값으로 떠 둔다)
-  const snapshot: Entry[] = deps.items().map((q) => ({ ...q }));
+  let snapshot: Entry[] = deps.items().map((q) => ({ ...q }));
   const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media', 'dbConsole', 'sqlLog');
   const panel = vscode.window.createWebviewPanel(
     'devBoost.sqlLog',
@@ -44,6 +51,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
     panel.webview.postMessage({
       type: 'init',
       openedAt: deps.timeText(Date.now()),
+      excluded: deps.excluded(),
       items: snapshot.map((q) => ({
         id: q.id,
         title: queryTitle(q),
@@ -53,11 +61,12 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
         time: deps.timeText(q.time),
         warn: q.warn ?? '',
         sql: displaySql(q),
+        excludes: excludeWords(q),
       })),
     });
 
   panel.webview.onDidReceiveMessage(
-    async (m: { type: string; id?: number }) => {
+    async (m: { type: string; id?: number; word?: string }) => {
       const q = snapshot.find((x) => x.id === m.id);
       if (m.type === 'ready') {
         void post();
@@ -66,6 +75,16 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       } else if (m.type === 'copy' && q) {
         await vscode.env.clipboard.writeText(consoleText(q, deps.timeText(q.time)));
         void panel.webview.postMessage({ type: 'copied' });
+      } else if (m.type === 'exclude' && m.word) {
+        try {
+          await deps.exclude(m.word);
+        } catch (e) {
+          void panel.webview.postMessage({ type: 'excluded', word: m.word, ids: [], error: String(e instanceof Error ? e.message : e) });
+          return;
+        }
+        const gone = snapshot.filter((x) => !deps.accepts(x)).map((x) => x.id);
+        snapshot = snapshot.filter((x) => !gone.includes(x.id));
+        void panel.webview.postMessage({ type: 'excluded', word: m.word, ids: gone, excluded: deps.excluded() });
       } else if (m.type === 'send' && q && !sending) {
         sending = true; // 콘솔이 열리며 포커스가 옮겨 가도 여기서 닫는다
         panel.dispose();
@@ -112,6 +131,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
           <button class="primary" id="send">새 콘솔로 옮기기</button>
           <button id="copy">복사</button>
         </div>
+        <div class="excl"><span class="lbl" title="누르면 앞으로 이 쿼리 id · 테이블이 든 쿼리는 모으지 않습니다 (설정 exclude 에 더함)">수집 제외</span><span id="exclBtns"></span></div>
       </div>
     </div>
     <div class="foot">
@@ -120,6 +140,8 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       <span><kbd>Ctrl+C</kbd> 복사</span>
       <span><kbd>Esc</kbd> 닫기</span>
       <span class="sp"></span>
+      <span id="note"></span>
+      <span id="filtered"></span>
       <span id="opened"></span>
     </div>
   </div>

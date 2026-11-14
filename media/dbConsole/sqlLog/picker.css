@@ -35,3 +35,10 @@ button.primary:hover { background: var(--vscode-button-hoverBackground); }
 .foot .sp { flex: 1; }
 kbd { font-family: var(--vscode-editor-font-family); font-size: 0.9em; padding: 0 5px; border: 1px solid var(--vscode-keybindingLabel-border, #8886); border-radius: 3px; background: var(--vscode-keybindingLabel-background, transparent); }
 .empty { padding: 24px 12px; color: var(--vscode-descriptionForeground); }
+.excl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 12px 8px; }
+.excl .lbl { color: var(--vscode-descriptionForeground); margin-right: 2px; }
+button.small { padding: 1px 8px; font-size: 0.9em; font-family: var(--vscode-editor-font-family); }
+button.small.query::before { content: 'id '; opacity: 0.6; font-family: var(--vscode-font-family); }
+.foot .ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
+.foot .err { color: var(--vscode-errorForeground); }
+#exclBtns { display: inline-flex; gap: 6px; flex-wrap: wrap; }

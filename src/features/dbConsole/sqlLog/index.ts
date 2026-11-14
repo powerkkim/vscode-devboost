@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Feature } from '../../../core/feature';
-import { LogReader, LoggedQuery, QueryRing, consoleText, queryInfo, queryTitle } from './parse';
+import { LogReader, LoggedQuery, QueryFilter, QueryRing, consoleText, queryInfo, queryTitle } from './parse';
 import { closeSqlLogPicker, showSqlLogPicker } from './picker';
 
 /**
@@ -9,6 +9,7 @@ import { closeSqlLogPicker, showSqlLogPicker } from './picker';
  *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
  * 터미널 출력은 VS Code 의 셸 통합으로 읽는다. 기능이 켜진 뒤에 시작한 명령부터 읽고, 쿼리는 메모리에만 둔다.
+ * 수집 필터(include · exclude 낱말, 같은 쿼리 id 는 최신 하나만)는 모을 때 걸러, 필요 없는 공통 쿼리가 자리를 차지하지 않게 한다.
  */
 
 
@@ -20,6 +21,12 @@ const IDLE_MS = 300;
 
 function cfg() {
   return vscode.workspace.getConfiguration('devBoost.dbConsole.sqlLog');
+}
+
+const FILTER_SETTINGS = ['include', 'exclude', 'latestOnly'].map((k) => `devBoost.dbConsole.sqlLog.${k}`);
+
+function readFilter(): QueryFilter {
+  return new QueryFilter(cfg().get<string[]>('include', []), cfg().get<string[]>('exclude', []));
 }
 
 const two = (n: number) => String(n).padStart(2, '0');
@@ -39,7 +46,7 @@ export const sqlLog: Feature = {
   name: 'SQL 로그',
   switches: ['dbConsole.enabled', 'dbConsole.sqlLog.enabled'],
   start(context) {
-    const ring = new QueryRing(cfg().get<number>('maxQueries', 10));
+    const ring = new QueryRing(cfg().get<number>('maxQueries', 10), readFilter(), cfg().get<boolean>('latestOnly', false));
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
     status.command = 'devBoost.sqlLog.pick';
     status.name = 'DevBoost SQL 로그';
@@ -47,14 +54,15 @@ export const sqlLog: Feature = {
 
     const refresh = () => {
       const list = ring.items();
-      if (!list.length) {
+      if (!list.length && !ring.excluded) {
         status.hide();
         return;
       }
       status.text = `$(database) SQL ${list.length}`;
       const md = new vscode.MarkdownString(undefined, true);
       md.isTrusted = { enabledCommands: ['devBoost.sqlLog.send'] };
-      md.appendMarkdown('**최근 쿼리** — 누르면 새 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
+      if (ring.excluded) md.appendMarkdown(`$(filter) 수집 필터로 뺀 쿼리 ${ring.excluded}개 (설정 \`exclude\` · \`include\`)\n\n`);
+      if (list.length) md.appendMarkdown('**최근 쿼리** — 누르면 새 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
       for (const q of list) {
         const arg = encodeURIComponent(JSON.stringify([q.id]));
         const info = queryInfo(q);
@@ -87,11 +95,27 @@ export const sqlLog: Feature = {
     const pick = () => {
       if (!ring.items().length) {
         void vscode.window.showInformationMessage(
-          '아직 읽은 쿼리가 없습니다. VS Code 터미널에서 서버를 실행하고(SQL 로그가 찍히는 상태로) 화면을 한 번 조회해 보세요.'
+          ring.excluded
+            ? `모은 쿼리가 없습니다. 읽은 쿼리 ${ring.excluded}개는 모두 수집 필터에 걸렸습니다 (설정 devBoost.dbConsole.sqlLog.exclude · include).`
+            : '아직 읽은 쿼리가 없습니다. VS Code 터미널에서 서버를 실행하고(SQL 로그가 찍히는 상태로) 화면을 한 번 조회해 보세요.'
         );
         return;
       }
-      showSqlLogPicker(context, { items: () => ring.items(), send, timeText });
+      showSqlLogPicker(context, { items: () => ring.items(), send, timeText, excluded: () => ring.excluded, exclude, accepts: (q) => ring.accepts(q) });
+    };
+
+    /**
+     * 낱말을 수집 제외(exclude)에 더한다. 설정을 적어 둔 곳(작업 영역이 있으면 그곳, 없으면 사용자)에 넣고,
+     * 이미 모인 목록에도 바로 적용한다. 이미 있으면 그대로 둔다
+     */
+    const exclude = async (word: string) => {
+      const list = cfg().get<string[]>('exclude', []);
+      if (list.some((w) => w.toLowerCase() === word.toLowerCase())) return;
+      const where = cfg().inspect<string[]>('exclude')?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+      const next = [...list, word];
+      ring.setFilter(new QueryFilter(cfg().get<string[]>('include', []), next), cfg().get<boolean>('latestOnly', false));
+      refresh();
+      await cfg().update('exclude', next, where);
     };
 
     /** 터미널 명령 하나의 출력을 끝까지 읽는다 */
@@ -135,6 +159,11 @@ export const sqlLog: Feature = {
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('devBoost.dbConsole.sqlLog.maxQueries')) {
           ring.setMax(cfg().get<number>('maxQueries', 10));
+          refresh();
+        }
+        // 필터를 바꾸면 이미 모인 목록에도 적용한다
+        if (FILTER_SETTINGS.some((k) => e.affectsConfiguration(k))) {
+          ring.setFilter(readFilter(), cfg().get<boolean>('latestOnly', false));
           refresh();
         }
       }),
