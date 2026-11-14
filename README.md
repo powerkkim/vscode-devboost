@@ -9,9 +9,9 @@
 | **Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
 | **MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔에서 실행, 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림 | `Ctrl+Alt+Enter`·우클릭 `DB 콘솔에서 실행` / 쿼리 위 `▶ 콘솔에서 실행`·`SQL 복사` | `devBoost.mybatisRunner.enabled` |
 | **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
-| **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
+| **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DevBoost · DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
 | **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
-| **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
+| **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `DevBoost · 케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
 | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
 | **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.importJump.enabled` |
 | **API 콘솔** — API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기). Controller 메서드에서 바로 열기, 브라우저 캡처로 실제 호출과 로그인 상태 이어받기 | `Ctrl+Alt+A` / Controller 위 `API 콘솔` | `devBoost.apiConsole.enabled` |
@@ -105,7 +105,7 @@ DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙
 - **DB 연결에서 바로 가져오기** — DB 콘솔에 등록한 연결을 골라 접두어만 넣으면 칸·제약·인덱스·주석을 바로 읽어 옴 (Oracle · PostgreSQL · MySQL)
 - **쿼리 결과 붙여 넣기** — DB 에 접속할 수 없는 환경이면 화면이 알려 주는 쿼리를 다른 도구에서 실행하고 결과를 복사해 옴 (아래 순서)
 
-1. 명령 팔레트(`Ctrl+Shift+P`) → `DB 스키마: 스키마 가져오기 · 테이블 정의서`
+1. 명령 팔레트(`Ctrl+Shift+P`) → `DevBoost · DB 스키마: 스키마 가져오기 · 테이블 정의서`
 2. **범위**: 테이블 접두어 (`TB_`, 여러 개는 쉼표, 비우면 전체)와 환경(개발/운영 …)
 3. **수집 쿼리** `▶ 워크시트에서 실행` → 결과 그리드 전체를 헤더와 함께 복사 → `클립보드에서 가져오기` (쿼리 하나에 기본값·PK·FK·인덱스까지 다 나옴)
 4. **저장** → `.devboost/schema/<스키마>@<환경>.json`
@@ -130,7 +130,7 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 → SELECT * FROM TB_USER WHERE DEPT_CD = 'D001' AND REG_DT >= TIMESTAMP '2026-11-01 00:00:00.0'
 ```
 
-- `Ctrl+Alt+L` 또는 상태바 `SQL n` 을 누르면 **고르는 창**이 열립니다 (명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`)
+- `Ctrl+Alt+L` 또는 상태바 `SQL n` 을 누르면 **고르는 창**이 열립니다 (명령 `DevBoost · SQL 로그: 최근 쿼리를 DB 콘솔로`)
   - 왼쪽 목록: 종류, 이름, 테이블, 건수·실행 시간, 넘어간 값이 보이는 조건 하나 / 오른쪽: 고른 쿼리의 전체 SQL
   - 찾기 칸에 테이블·칼럼·값을 적으면 SQL 전체에서 찾습니다. `↑` `↓` 로 옮기고 `Enter` 로 **새 DB 콘솔**에 옮깁니다. `Ctrl+C` 는 복사
   - 창을 연 순간의 목록(기본 10개, 새 것부터)을 그대로 보여 줍니다. 그 뒤 들어온 쿼리는 닫고 다시 열면 보입니다
@@ -171,7 +171,7 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 
 ### API 콘솔
 
-`Ctrl+Alt+A` (명령 `API 콘솔: 열기`) 로 엽니다. 자주 쓰는 API 를 모음으로 저장해 두고, 값만 바꿔 가며 보내 봅니다.
+`Ctrl+Alt+A` (명령 `DevBoost · API 콘솔: 열기`) 로 엽니다. 자주 쓰는 API 를 모음으로 저장해 두고, 값만 바꿔 가며 보내 봅니다.
 
 - **목록** — 모음 → 폴더 → 요청으로 정리합니다 (예: `결재 처리`, `메일 발송`). 두 번 누르면 이름 바꾸기, 끌어서 옮기기, `⋯` 에서 복제 · 내보내기 · 삭제
 - **요청** — 메서드, 주소, 파라미터, 헤더, 본문(JSON · 글 · form · 파일 첨부), 인증(Bearer · Basic), 메모. `Ctrl+Enter` 로 보냅니다
@@ -185,13 +185,13 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 
 #### Controller 에서 바로 열기
 
-Controller(Java) 파일의 `@GetMapping` · `@PostMapping` 같은 매핑 메서드 위에 `API 콘솔  GET /api/…` 이 보입니다. 누르면 그 요청이 채워져 열립니다 (우클릭 `이 요청을 API 콘솔에서 열기` 도 같습니다).
+Controller(Java) 파일의 `@GetMapping` · `@PostMapping` 같은 매핑 메서드 위에 로켓 표시와 함께 `API 콘솔  GET /api/…` 이 보입니다. 누르면 그 요청이 채워져 열립니다 (우클릭 `DevBoost: 이 요청을 API 콘솔에서 열기` 도 같습니다).
 
 - 주소는 `{{baseUrl}}` + context-path + 클래스 경로 + 메서드 경로. 환경에 `baseUrl` 이 없으면 `application.yml` 의 포트로 `http://localhost:포트` 를 넣어 둡니다
 - `@PathVariable` 은 경로 값, `@RequestParam` 과 검색 조건 객체의 필드는 파라미터(선택 값은 꺼 둠), `@RequestHeader` 는 헤더
 - `@RequestBody` 는 DTO 의 필드를 읽어 JSON 뼈대로, `MultipartFile` · `@RequestPart` 는 파일 첨부로
 - Controller 이름의 폴더에 들어갑니다. 이미 넣은 요청이면 그 요청을 엽니다. 클래스 위의 `API 콘솔에 모두 넣기` 는 한 번에 넣습니다
-- DTO 를 찾지 못했거나 경로가 상수로 적혀 있으면 요청의 메모 탭에 적어 둡니다
+- DTO 를 찾지 못했거나 경로가 상수로 적혀 있으면 요청의 메모 탭에 적어 둡니다. 쿠키(`@CookieValue`)로 받는 값은 헤더 탭에 꺼 둔 `Cookie` 줄로 들어가고, `HttpServletRequest` 처럼 서버가 넣는 값은 채우지 않고 메모에 까닭을 적습니다
 - 넣은 뒤에 Controller 가 바뀌었으면, 다시 열었을 때 알려 주고 `다시 채우기` 로 새 모양에 맞춥니다 (적어 둔 값은 그대로)
 
 #### 브라우저 캡처

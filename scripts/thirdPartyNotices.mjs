@@ -93,6 +93,17 @@ export function writeNotices(inputs) {
     if (first.notice) out.push('NOTICE:', '', fence(first.notice), '');
   }
 
+  // 묶은 라이브러리가 아니라 그림으로 넣은 것 (resources/icons, scripts/icons.mjs 가 만든다)
+  out.push(
+    '---',
+    '',
+    '## 아이콘',
+    '',
+    '`resources/icons/` 의 로켓 · DB · 화살표 · 돋보기 그림은 [Codicons](https://github.com/microsoft/vscode-codicons) (© Microsoft Corporation) 의 그림을 바탕으로 색을 입히고 겹쳐서 만든 것입니다.',
+    'Codicons 의 그림은 [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) 라이선스로 제공됩니다.',
+    ''
+  );
+
   const content = out.join('\n');
   const old = fs.existsSync(FILE) ? fs.readFileSync(FILE, 'utf8').split('\r\n').join('\n') : '';
   if (old !== content) {

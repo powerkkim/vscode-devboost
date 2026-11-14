@@ -169,6 +169,46 @@ test('파일 첨부(multipart) · Pageable · 읽지 못한 것은 메모에', a
   assert.strictEqual(blind.url, '{{baseUrl}}/api/base/users');
 });
 
+test('쿠키로 받는 값 · 서버가 넣는 값은 메모에, 비어 있는 까닭은 한 줄로', async () => {
+  const src = `package a;
+import a.dto.AuthDto.LoginRequest;
+@RestController @RequestMapping("/api/auth")
+public class AuthController {
+  @PostMapping("/refresh")
+  public ResponseEntity<Token> refresh(@CookieValue(name = "refreshToken", required = false) String refreshToken, HttpServletRequest request, HttpServletResponse response) { return null; }
+  @PostMapping("/login")
+  public ResponseEntity<Token> login(
+      @Valid
+      @RequestBody final LoginRequest request,
+      @AuthenticationPrincipal UserDetails me) { return null; }
+  @PostMapping("/logout")
+  public void logout(HttpServletRequest request) {}
+  @PostMapping("/form")
+  public void form(LoginForm form) {}
+}`;
+  const dto = J.parseJava('package a.dto; public class AuthDto { public static class LoginRequest { private String loginId; private String password; } }', 'AuthDto.java', { detail: true });
+  const find = (name) => dto.find((c) => c.name === name.split('.').pop());
+  const list = C.readEndpoints(src, 'AuthController.java');
+  const req = async (name) => C.toRequest(list.find((e) => e.method.name === name), { resolve: find });
+
+  const refresh = await req('refresh');
+  assert.deepStrictEqual(refresh.headers, [{ key: 'Cookie', value: 'refreshToken=', enabled: false }]);
+  assert.strictEqual(refresh.bodyMode, 'none');
+  assert.match(refresh.note, /^AuthController\.refresh\(String, HttpServletRequest, HttpServletResponse\)/);
+  assert.match(refresh.note, /- request: HttpServletRequest — 서버가 넣는 값/);
+  assert.match(refresh.note, /- 쿠키 refreshToken: 브라우저 캡처로 이어받거나/);
+  assert.strictEqual(C.warningOf(refresh), '쿠키 refreshToken 로 값을 받는 메서드');
+
+  // 어노테이션이 여러 줄 · final 이 끼어도 본문을 채운다
+  const login = await req('login');
+  assert.deepStrictEqual([login.bodyMode, JSON.parse(login.bodyText)], ['json', { loginId: '', password: '' }]);
+  assert.match(login.note, /- me: @AuthenticationPrincipal — 서버가 넣는 값/);
+  assert.strictEqual(C.warningOf(login), '');
+
+  assert.strictEqual(C.warningOf(await req('logout')), '파라미터 · 본문을 받지 않는 메서드');
+  assert.strictEqual(C.warningOf(await req('form')), '읽지 못한 타입: LoginForm · form: LoginForm 의 필드를 읽지 못함');
+});
+
 test('Java 읽기(detail): 안에 든 타입, enum 상수, record, 파라미터 어노테이션 — 보통 읽기는 그대로', () => {
   const names = all.map((c) => c.name + (c.outer ? '<' + c.outer : ''));
   assert.deepStrictEqual(names, ['UserController', 'PhotoMeta<UserController', 'Kind<UserController', 'UserDto', 'Patch<UserDto', 'RoleDto', 'BaseDto', 'UserSearch', 'Range']);

@@ -71,6 +71,10 @@
     }
     return el;
   }
+  /** 안의 것을 바꿔 넣는다. 없는 것(null · false)은 뺀다 — replaceChildren 은 null 을 "null" 글자로 넣는다 */
+  function put(el, ...kids) {
+    el.replaceChildren(...kids.flat().filter((k) => k !== undefined && k !== null && k !== false));
+  }
   let idSeq = 0;
   const newId = () => Date.now().toString(36) + (idSeq++).toString(36) + Math.random().toString(36).slice(2, 6);
   const emptyRequest = (name) => ({ id: newId(), kind: 'request', name: name || '새 요청', method: 'GET', url: '', params: [], headers: [], bodyMode: 'none', bodyText: '', bodyForm: [], auth: { type: 'none' }, note: '' });
@@ -580,10 +584,11 @@
         h('span', { class: 'st status s' + String(x.status)[0], text: String(x.status) })
       )
     );
-    $side.replaceChildren(
+    put($side, 
       h(
         'div',
         { class: 'side-head' },
+        h('span', { class: 'brand', text: 'DevBoost', title: 'DevBoost 의 API 콘솔' }),
         h('span', { class: 'title', text: 'API 콘솔' }),
         h('span', { class: 'ver', text: S.version ? 'v' + S.version : '' }),
         h('button', { class: 'link', title: '새 요청', text: '+ 요청', onclick: () => addRequest(homeFolder()) }),
@@ -629,7 +634,8 @@
     return h(
       'div',
       { class: 'side-head' },
-      h('span', { class: 'title', text: 'API 콘솔' }),
+      h('span', { class: 'brand', text: 'DevBoost', title: 'DevBoost 의 API 콘솔' }),
+        h('span', { class: 'title', text: 'API 콘솔' }),
       h('span', { class: 'ver', text: S.version ? 'v' + S.version : '' }),
       h('button', {
         class: 'link',
@@ -674,7 +680,7 @@
               : '캡처를 시작하면 전용 브라우저가 열립니다. 거기서 평소처럼 로그인하고 화면을 쓰면 서버 호출이 여기에 쌓이고, 토큰과 쿠키는 자동으로 이어받아 내 요청에도 붙습니다.'
           )
     );
-    $side.replaceChildren(
+    put($side, 
       captureHead(),
       modeTabs(),
       h(
@@ -791,7 +797,7 @@
     const top = h('div', { class: 'top' }, h('button', { class: 'link', title: '목록 접기 · 펴기', text: '☰', onclick: toggleSide }), h('span', { class: 'grow' }), followChip(), envSelect(), h('button', { class: 'link', text: '환경 편집', onclick: openEnvDialog }));
     const c = S.capDetail && S.capDetail.id === S.capSel ? S.capDetail : undefined;
     if (!c) {
-      $main.replaceChildren(
+      put($main, 
         top,
         h(
           'div',
@@ -843,7 +849,7 @@
       }
       pane.append(text ? h('pre', { class: 'raw', text }) : h('div', { class: 'dim', text: '본문 없이 보낸 요청입니다.' }));
     }
-    $main.replaceChildren(
+    put($main, 
       top,
       h(
         'div',
@@ -957,7 +963,7 @@
     const on = document.querySelector('.tree .node.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
     const base = madeBase ? ` · 환경 "${env.name}" 에 baseUrl = ${m.baseUrl}` : '';
-    if (m.requests.length === 1) toast((added ? `"${m.folder}" 폴더에 넣었습니다` : '모음에 있는 요청을 열었습니다') + base);
+    if (m.requests.length === 1) toast((added ? `"${m.folder}" 폴더에 넣었습니다` : '모음에 있는 요청을 열었습니다') + base + (m.warning ? ` · ${m.warning} (메모 탭 참고)` : ''));
     else toast(`${added}개를 넣었습니다` + (added < m.requests.length ? ` (${m.requests.length - added}개는 이미 있음)` : '') + base);
   }
 
@@ -1004,7 +1010,7 @@
     const table = h('table', { class: 'kv' });
     const blank = () => ({ key: '', value: '', enabled: true });
     const draw = () => {
-      table.replaceChildren();
+      put(table);
       const all = rows.concat([blank()]);
       all.forEach((r, i) => {
         const isNew = i === rows.length;
@@ -1092,7 +1098,7 @@
   function renderTabs(r) {
     const el = document.getElementById('req-tabs');
     if (!el) return;
-    el.replaceChildren(
+    put(el, 
       ...['params', 'headers', 'body', 'auth', 'extract', 'note'].map((id) => {
         const [name, n] = tabLabel(r, id);
         return h('div', { class: 'tab' + (S.tab === id ? ' on' : ''), onclick: () => ((S.tab = id), persist(), renderTabs(r), renderReqBody(r)) }, name, n ? h('span', { class: 'n', text: String(n) }) : null);
@@ -1126,9 +1132,9 @@
         );
       }
       kids.push(kvTable(r.params, { onChange }), h('div', { class: 'hint', text: '주소 뒤에 ?이름=값 으로 붙습니다. 주소 칸에 ?… 를 붙여넣으면 이 표로 옮겨집니다. 주소에 {id} 처럼 적으면 경로 값 칸이 생깁니다.' }));
-      el.replaceChildren(...kids);
+      put(el, ...kids);
     } else if (S.tab === 'headers') {
-      el.replaceChildren(kvTable(r.headers, { onChange, keyHint: '헤더 이름' }), h('div', { class: 'hint', text: 'Content-Type 과 Authorization 은 Body · 인증 탭에서 정한 대로 붙습니다. 여기에 직접 적으면 그 값이 우선입니다.' }));
+      put(el, kvTable(r.headers, { onChange, keyHint: '헤더 이름' }), h('div', { class: 'hint', text: 'Content-Type 과 Authorization 은 Body · 인증 탭에서 정한 대로 붙습니다. 여기에 직접 적으면 그 값이 우선입니다.' }));
     } else if (S.tab === 'body') {
       const modes = h(
         'div',
@@ -1183,7 +1189,7 @@
       } else if (r.bodyMode === 'form') editor = kvTable(r.bodyForm, { onChange });
       else if (r.bodyMode === 'multipart') editor = kvTable(r.bodyForm, { onChange, files: true });
       else editor = h('div', { class: 'hint', text: '본문 없이 보냅니다.' });
-      el.replaceChildren(modes, editor);
+      put(el, modes, editor);
       if (r.method === 'GET' && r.bodyMode !== 'none') el.appendChild(h('div', { class: 'hint', text: 'GET 은 본문을 보내지 않습니다. 메서드를 바꾸세요.' }));
     } else if (S.tab === 'auth') {
       const types = h(
@@ -1215,10 +1221,10 @@
       const form = h('div', { class: 'form' });
       if (r.auth.type === 'bearer') form.append(...field('토큰', 'token', '{{token}}'));
       if (r.auth.type === 'basic') form.append(...field('아이디', 'username', ''), ...field('비밀번호', 'password', ''));
-      el.replaceChildren(types, form, h('div', { class: 'hint', text: `로그인 응답이 내려 준 쿠키(세션)는 닫을 때까지 자동으로 이어 보냅니다. 지금 ${S.cookies}개. 토큰은 환경 변수에 넣고 {{token}} 으로 쓰면 환경마다 바꿀 수 있습니다.` }));
+      put(el, types, form, h('div', { class: 'hint', text: `로그인 응답이 내려 준 쿠키(세션)는 닫을 때까지 자동으로 이어 보냅니다. 지금 ${S.cookies}개. 토큰은 환경 변수에 넣고 {{token}} 으로 쓰면 환경마다 바꿀 수 있습니다.` }));
     } else if (S.tab === 'extract') {
       if (!r.extract) r.extract = [];
-      el.replaceChildren(
+      put(el, 
         kvTable(r.extract, { onChange, keyHint: '변수 이름 (예: token)', valueHint: '응답에서의 위치 (예: data.accessToken)' }),
         h('div', { class: 'hint', text: '응답이 올 때마다 그 값을 환경 변수에 넣습니다. 다른 요청에서 {{변수이름}} 으로 이어 씁니다 (등록 응답의 id 로 조회, 로그인 응답의 토큰 등).' }),
         h('div', { class: 'hint', text: '위치: data.items[0].id 처럼 점과 [번호]. 응답 헤더는 @header.이름. 응답의 값을 눌러 "응답이 올 때마다 변수로 저장"을 고르면 여기에 들어옵니다.' })
@@ -1226,7 +1232,7 @@
     } else {
       const ta = h('textarea', { class: 'note', placeholder: '이 API 가 무엇인지, 필수 값, 주의할 점 등을 적어 둡니다.', oninput: (e) => ((r.note = e.target.value), changed(r)) });
       ta.value = r.note;
-      el.replaceChildren(ta);
+      put(el, ta);
     }
   }
 
@@ -1273,7 +1279,7 @@
     if (S.mode === 'cap') return renderCaptureMain();
     const r = current();
     if (!r) {
-      $main.replaceChildren(
+      put($main, 
         h(
           'div',
           { class: 'top' },
@@ -1353,7 +1359,7 @@
           ['복제', () => addRequest(homeFolder(), Object.assign(clone(r), { name: r.name + ' 복사' }))],
         ]),
     });
-    $main.replaceChildren(
+    put($main, 
       h(
         'div',
         { class: 'top' },
@@ -1515,7 +1521,7 @@
     const res = S.responses[r.id];
     const tabs = h('div', { class: 'tabs' });
     const body = h('div', { class: 'res-body' });
-    el.replaceChildren(tabs, body);
+    put(el, tabs, body);
 
     if (sending) {
       tabs.append(h('div', { class: 'tab on', text: '응답' }));
@@ -1577,7 +1583,7 @@
     tabs.append(tab('body', '응답'), tab('headers', '헤더', res.headers.length), tab('sent', '보낸 요청'), right);
 
     function drawBody() {
-      body.replaceChildren();
+      put(body);
       if (res.redirects.length) body.append(h('div', { class: 'dim', style: 'margin-bottom:6px', text: `리다이렉트 ${res.redirects.length}번 → ${res.url}` }));
       if ((res.status === 401 || res.status === 403) && !(res.followed || []).length && !S.capture.running)
         body.append(

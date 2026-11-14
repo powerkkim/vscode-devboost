@@ -67,8 +67,8 @@ export const apiConsole: Feature = {
     let capture: BrowserCapture | undefined;
     let starting = false;
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
-    status.text = '$(record) API 캡처 중';
-    status.tooltip = 'API 콘솔이 브라우저의 호출을 받고 있습니다. 누르면 API 콘솔을 엽니다';
+    status.text = '$(rocket) API 캡처 중';
+    status.tooltip = 'DevBoost API 콘솔이 브라우저의 호출을 받고 있습니다. 누르면 API 콘솔을 엽니다';
     status.command = 'devBoost.apiConsole.open';
 
     const followState = () => ({ type: 'follow', on: followOn, hosts: follow.summary() });
@@ -450,7 +450,9 @@ export const apiConsole: Feature = {
         retainContextWhenHidden: true, // 다른 탭에 다녀와도 쓰던 내용과 응답이 남게
         localResourceRoots: [mediaRoot],
       });
-      panel.iconPath = new vscode.ThemeIcon('globe');
+      // 탭 아이콘: 로켓 + 주고받는 화살표 (DevBoost 의 화면임을 알아보게)
+      const icons = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icons');
+      panel.iconPath = { light: vscode.Uri.joinPath(icons, 'api-light.svg'), dark: vscode.Uri.joinPath(icons, 'api-dark.svg') };
       const subs: vscode.Disposable[] = [];
       panel.webview.onDidReceiveMessage((m: FromView) => void onMessage(m), null, subs);
       panel.onDidDispose(
@@ -514,7 +516,7 @@ export const apiConsole: Feature = {
         }
         const picked = await vscode.window.showQuickPick(
           all.map((e) => ({ label: `${e.http} ${e.path || '/'}`, description: e.title === e.method.name ? `${e.cls.name}.${e.method.name}()` : `${e.title} · ${e.method.name}()`, ep: e })),
-          { title: 'API 콘솔에서 열 요청', matchOnDescription: true }
+          { title: 'DevBoost API 콘솔에서 열 요청', matchOnDescription: true }
         );
         if (!picked) return;
         ep = picked.ep;
@@ -544,6 +546,7 @@ export const apiConsole: Feature = {
     return [
       vscode.commands.registerCommand('devBoost.apiConsole.open', open),
       vscode.commands.registerCommand('devBoost.apiConsole.openEndpoint', openEndpoint),
+      vscode.commands.registerCommand('devBoost.apiConsole.openEndpointMenu', () => openEndpoint()),
       vscode.commands.registerCommand('devBoost.apiConsole.addController', addController),
       vscode.commands.registerCommand('devBoost.apiConsole.captureStart', async () => {
         open();

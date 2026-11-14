@@ -149,3 +149,4 @@ pre.raw mark.cur { background: var(--vscode-editor-findMatchBackground, #515c6a)
 .tip button.link { color: var(--vscode-textLink-foreground); padding: 0 2px; }
 .empty > div { margin-bottom: 4px; }
 .tip.bar { margin: 2px 10px 6px; }
+.side-head .brand { font-size: 0.78em; font-weight: 700; letter-spacing: 0.02em; padding: 1px 5px; border-radius: 3px; color: var(--vscode-badge-foreground, #fff); background: var(--vscode-badge-background, #4d4d4d); }

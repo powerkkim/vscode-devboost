@@ -1754,3 +1754,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+---
+
+## 아이콘
+
+`resources/icons/` 의 로켓 · DB · 화살표 · 돋보기 그림은 [Codicons](https://github.com/microsoft/vscode-codicons) (© Microsoft Corporation) 의 그림을 바탕으로 색을 입히고 겹쳐서 만든 것입니다.
+Codicons 의 그림은 [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) 라이선스로 제공됩니다.
