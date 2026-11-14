@@ -94,7 +94,7 @@ const driverOptions = (name) => ({
 
 // DB 결과 패널(Webview) → media/dbConsole/results.js (결과 표는 콘솔과 같은 것을 쓴다)
 const resultsOptions = { ...consoleOptions, entryPoints: ['webview/dbConsole/results.ts'], outfile: 'media/dbConsole/results.js' };
-const bookOptions = { ...consoleOptions, entryPoints: ['webview/queryBook/main.ts'], outfile: 'media/queryBook/book.js' };
+const bookOptions = { ...consoleOptions, entryPoints: ['webview/dbConsole/queryBook/main.ts'], outfile: 'media/dbConsole/queryBook/book.js' };
 
 if (watch) {
   for (const o of [options, webviewOptions, consoleOptions, resultsOptions, bookOptions, driverOptions('pg'), driverOptions('mysql')]) {

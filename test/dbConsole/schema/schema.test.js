@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 
-const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'dbSchema', 'schema');
+const OUT = path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'schema');
 const { importText, normalizeOracleType, COLLECT_COLUMNS } = require(path.join(OUT, 'importer.js'));
 const { mergeImport, schemaFileName } = require(path.join(OUT, 'merge.js'));
 const { buildCollectSql, normalizePrefixes } = require(path.join(OUT, 'collectSql.js'));

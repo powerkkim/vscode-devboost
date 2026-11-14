@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import { OracleBridge } from '../../../core/oracleBridge';
-import { buildCollectSql, normalizePrefixes } from '../schema/collectSql';
-import { ImportPart, importText } from '../schema/importer';
-import { mergeImport } from '../schema/merge';
-import { buildTableDoc, buildTableDocXlsx, localDate, tableDocXlsxName } from '../schema/tableDoc';
-import { SchemaFile } from '../schema/types';
-import { decodeText } from '../schema/csv';
+import { OracleBridge } from '../worksheet/oracleBridge';
+import { buildCollectSql, normalizePrefixes } from '../collectSql';
+import { ImportPart, importText } from '../importer';
+import { mergeImport } from '../merge';
+import { buildTableDoc, buildTableDocXlsx, localDate, tableDocXlsxName } from '../tableDoc';
+import { SchemaFile } from '../types';
+import { decodeText } from '../csv';
 import { SchemaStore } from '../schemaStore';
 
 /**
@@ -47,7 +47,7 @@ export class SchemaPanel {
     const panel = vscode.window.createWebviewPanel('devBoostDbSchema', 'DB 스키마', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media', 'dbSchema')],
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media', 'dbConsole', 'schema')],
     });
     SchemaPanel.current = new SchemaPanel(context, deps, panel);
   }
@@ -393,7 +393,7 @@ export class SchemaPanel {
 
   private html(): string {
     const wv = this.panel.webview;
-    const base = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'dbSchema');
+    const base = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'dbConsole', 'schema');
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'schema.js'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'schema.css'));
     const nonce = randomBytes(16).toString('base64');

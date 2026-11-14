@@ -2,13 +2,13 @@ import * as vscode from 'vscode';
 import { Feature } from './core/feature';
 import { searchEverywhere } from './features/searchEverywhere';
 import { sourceAtlas } from './features/sourceAtlas';
-import { mybatisRunner } from './features/mybatisRunner';
-import { dbSchema } from './features/dbSchema';
-import { caseConverter } from './features/caseConverter';
+import { mybatisRunner } from './features/dbConsole/mybatis';
+import { dbSchema } from './features/dbConsole/schema';
+import { caseConverter } from './features/codeTools/caseConverter';
 import { dbConsole } from './features/dbConsole';
 import { Sessions } from './features/dbConsole/sessions';
-import { sqlLog } from './features/sqlLog';
-import { importJump } from './features/importJump';
+import { sqlLog } from './features/dbConsole/sqlLog';
+import { importJump } from './features/codeTools/importJump';
 import { apiConsole } from './features/apiConsole';
 
 /**

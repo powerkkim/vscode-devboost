@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'mybatisRunner', 'mapper');
+const OUT = path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'mybatis', 'mapper');
 const { parseMapper, statementAt } = require(path.join(OUT, 'mapperDoc.js'));
 const { renderStatement, collectParams, applyTrim, buildBindScript } = require(path.join(OUT, 'render.js'));
 const { buildParamObject } = require(path.join(OUT, 'values.js'));

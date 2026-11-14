@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
-const { summarizeRunResult, fmtElapsed, describeRunEnd } = require(path.join(__dirname, '..', '..', 'out', 'core', 'runResult.js'));
+const { summarizeRunResult, fmtElapsed, describeRunEnd } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'schema', 'worksheet', 'runResult.js'));
 
 test('성공: items 에 오류 없음', () => {
   const s = summarizeRunResult({ data: { items: [{ statementType: 'QUERY' }] }, error: null });

@@ -34,7 +34,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
   current?.dispose(); // 다시 열면 최신 목록으로
   // 연 순간의 목록 (쿼리 객체는 건수·시간이 나중에 채워질 수 있어 값으로 떠 둔다)
   const snapshot: Entry[] = deps.items().map((q) => ({ ...q }));
-  const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media', 'sqlLog');
+  const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media', 'dbConsole', 'sqlLog');
   const panel = vscode.window.createWebviewPanel(
     'devBoost.sqlLog',
     'SQL 로그',

@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 
-const R = require(path.join(__dirname, '..', '..', 'out', 'features', 'importJump', 'resolve.js'));
+const R = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'codeTools', 'importJump', 'resolve.js'));
 
 /** 메모리 파일 */
 function mem(map) {

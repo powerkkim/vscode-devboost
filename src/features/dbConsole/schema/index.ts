@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { Feature } from '../../core/feature';
-import { OracleBridge } from '../../core/oracleBridge';
+import { Feature } from '../../../core/feature';
+import { OracleBridge } from './worksheet/oracleBridge';
 import { SchemaStore } from './schemaStore';
 import { SchemaPanel } from './ui/schemaPanel';
 

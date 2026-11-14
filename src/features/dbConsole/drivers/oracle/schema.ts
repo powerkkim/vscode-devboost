@@ -1,7 +1,7 @@
 import type { Connection } from 'oracledb';
 import type { CollectedSchema, Relation, SchemaObjects, SchemaReader, TableColumn } from '../../driver/types';
-import type { ConstraintInfo as SchemaConstraint, IndexInfo as SchemaIndex } from '../../../dbSchema/schema/types';
-import { normalizeOracleType } from '../../../dbSchema/schema/importer';
+import type { ConstraintInfo as SchemaConstraint, IndexInfo as SchemaIndex } from '../../schema/types';
+import { normalizeOracleType } from '../../schema/importer';
 
 /**
  * Oracle 딕셔너리 조회 (사이드바 트리·자동 완성·JOIN 만들기). vscode 모듈에 의존하지 않는다.

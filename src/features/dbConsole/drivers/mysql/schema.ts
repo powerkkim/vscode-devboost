@@ -1,5 +1,5 @@
 import type { CollectedSchema, Relation, SchemaReader, TableColumn } from '../../driver/types';
-import type { ColumnType, ConstraintInfo, IndexInfo } from '../../../dbSchema/schema/types';
+import type { ColumnType, ConstraintInfo, IndexInfo } from '../../schema/types';
 
 /**
  * MySQL·MariaDB 딕셔너리 조회 (information_schema). vscode·mysql2 모듈에 의존하지 않는다 — 쿼리 함수를 받는다.

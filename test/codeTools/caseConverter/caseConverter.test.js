@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 
-const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'caseConverter', 'convert');
+const OUT = path.join(__dirname, '..', '..', '..', 'out', 'features', 'codeTools', 'caseConverter', 'convert');
 const { convertName, convertText, splitWords, cycleCase } = require(path.join(OUT, 'words.js'));
 const { sqlToJavaFields, renderJavaFields, statementAt, sqlTypeToJava } = require(path.join(OUT, 'sql.js'));
 const { parseJavaFields, javaToTs, javaToMyBatis } = require(path.join(OUT, 'java.js'));

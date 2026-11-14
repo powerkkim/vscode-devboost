@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import type { Cell, Column, DbKind, RowCursor } from '../driver/types';
-import { toCsv } from '../../dbSchema/schema/csv';
+import { toCsv } from '../schema/csv';
 import { guessTable, toInsertSql } from '../sql/insertSql';
 
 export const RESULTS_VIEW_ID = 'devBoost.dbConsole.results';

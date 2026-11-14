@@ -1,7 +1,7 @@
 // 쿼리 사전 화면: 왼쪽 분류·검색 목록, 오른쪽 항목 설명. 넣기·실행은 확장이 한다.
-import type { BookEntry } from '../../src/features/dbConsole/querybook/entry';
-import { matches, placeholders } from '../../src/features/dbConsole/querybook/entry';
-import { renderMarkdown } from '../../src/features/dbConsole/querybook/markdown';
+import type { BookEntry } from '../../../src/features/dbConsole/querybook/entry';
+import { matches, placeholders } from '../../../src/features/dbConsole/querybook/entry';
+import { renderMarkdown } from '../../../src/features/dbConsole/querybook/markdown';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): unknown; setState(s: unknown): void };
 const vscode = acquireVsCodeApi();

@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
-import { Feature } from '../../core/feature';
+import { Feature } from '../../../core/feature';
 import {
   Aliases,
   Files,

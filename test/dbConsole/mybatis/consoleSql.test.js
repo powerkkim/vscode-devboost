@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
-const OUT = path.join(__dirname, '..', '..', 'out', 'features', 'mybatisRunner', 'mapper');
+const OUT = path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'mybatis', 'mapper');
 const { buildConsoleRun, bindToConsoleParam } = require(path.join(OUT, 'consoleSql.js'));
 const { parseMapper } = require(path.join(OUT, 'mapperDoc.js'));
 const { renderStatement } = require(path.join(OUT, 'render.js'));

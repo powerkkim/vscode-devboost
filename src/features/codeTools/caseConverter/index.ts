@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { Feature } from '../../core/feature';
-import { SchemaStore } from '../dbSchema/schemaStore';
+import { Feature } from '../../../core/feature';
+import { SchemaStore } from '../../dbConsole/schema/schemaStore';
 import { CASES, CaseKind, convertText, cycleCase } from './convert/words';
 import {
   DateType,

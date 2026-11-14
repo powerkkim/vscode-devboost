@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const path = require('path');
 
 const { LogReader, QueryRing, parseParams, bindSql, literal, layoutSql, stripAnsi, consoleText } = require(
-  path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js')
+  path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'parse.js')
 );
 
 const P = '2026-11-10 12:00:00.123 DEBUG 1234 --- [nio-8080-exec-1] c.e.m.UserMapper.selectUser      : ';
@@ -139,12 +139,12 @@ test('최근 목록: 새 것이 앞, 개수 제한, 같은 쿼리가 이어 오�
 test('콘솔에 넣을 글: 머리 주석은 mapper 머리 주석(-- 네임스페이스.id)과 겹치지 않는 모양', () => {
   const text = consoleText({ sql: 'SELECT 1 FROM DUAL WHERE A = 1', mapper: 'UserMapper.selectUser', time: 0, rows: 2 }, '12:00:01');
   assert.strictEqual(text, '-- [로그 12:00:01] UserMapper.selectUser · 2건\nSELECT 1\nFROM DUAL\nWHERE A = 1;');
-  const { parseMapperHeader } = require(path.join(__dirname, '..', '..', 'out', 'features', 'mybatisRunner', 'mapper', 'consoleSql.js'));
+  const { parseMapperHeader } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'mybatis', 'mapper', 'consoleSql.js'));
   assert.strictEqual(parseMapperHeader(text.split('\n')[0]), undefined);
 });
 
 // ───────── log4jdbc (jdbc.sqltiming · jdbc.sqlonly) ─────────
-const { queryTitle, queryInfo, queryMapper } = require(path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js'));
+const { queryTitle, queryInfo, queryMapper } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'parse.js'));
 
 const T = '20170202 20:37:02.0';
 const SQLTIMING_BLOCK = [
@@ -252,7 +252,7 @@ test('log4jdbc: SQL 안에 로그 수준 같은 낱말·빈 줄이 있어도 덩
 });
 
 // ───────── 목록 요약 ─────────
-const { summarize } = require(path.join(__dirname, '..', '..', 'out', 'features', 'sqlLog', 'parse.js'));
+const { summarize } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'parse.js'));
 
 test('요약: 종류·테이블·값이 보이는 조건', () => {
   assert.deepStrictEqual(summarize(TIDY), { verb: 'SELECT', tables: 'LCUSRBASE', cond: "EMAIL = 'abc@test.com'" });

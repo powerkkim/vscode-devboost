@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Feature } from '../../core/feature';
+import { Feature } from '../../../core/feature';
 import { LogReader, LoggedQuery, QueryRing, consoleText, queryInfo, queryTitle } from './parse';
 import { closeSqlLogPicker, showSqlLogPicker } from './picker';
 

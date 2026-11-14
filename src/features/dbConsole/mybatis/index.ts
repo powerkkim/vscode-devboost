@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Feature } from '../../core/feature';
+import { Feature } from '../../../core/feature';
 import { looksLikeMapper, parseMapper, statementAt } from './mapper/mapperDoc';
 import { MapperIndex } from './mapperIndex';
 import { RunnerStore } from './store';

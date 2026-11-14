@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { schemaFileName } from './schema/merge';
-import { SchemaFile } from './schema/types';
+import { schemaFileName } from './merge';
+import { SchemaFile } from './types';
 
 /** 저장한 스키마 파일 하나의 요약 (화면 목록용) */
 export interface SavedSchemaInfo {

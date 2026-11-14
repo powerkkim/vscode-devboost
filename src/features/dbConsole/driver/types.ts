@@ -6,7 +6,7 @@ import type {
   ColumnInfo as SchemaColumn,
   ConstraintInfo as SchemaConstraint,
   IndexInfo as SchemaIndex,
-} from '../../dbSchema/schema/types';
+} from '../schema/types';
 
 /**
  * DB 콘솔이 DB 종류와 관계없이 쓰는 약속 (vscode 모듈에 의존하지 않는다).

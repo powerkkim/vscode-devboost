@@ -1,5 +1,5 @@
 import type { Cell, Column, Page, RowCursor } from './driver/types';
-import { toCsv } from '../dbSchema/schema/csv';
+import { toCsv } from './schema/csv';
 
 /**
  * 조회 결과 전체를 CSV 로 흘려 쓴다: 한 번에 batch 행씩 받아 바로 쓰고 버린다 (메모리에 다 싣지 않는다).
