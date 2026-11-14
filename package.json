@@ -3,7 +3,7 @@
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
-  "version": "0.28.1",
+  "version": "0.29.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -1157,7 +1157,7 @@
             "type": "boolean",
             "default": true,
             "order": 0,
-            "markdownDescription": "수집 쿼리 결과를 가져와 테이블·컬럼·제약·인덱스 정보를 저장하고(`.devboost/schema`), 테이블 정의서(CSV: 목차 + 정의서)를 만듦. 명령: `DB 콘솔: 스키마 가져오기 · 테이블 정의서`"
+            "markdownDescription": "수집 쿼리 결과를 가져와 테이블·컬럼·제약·인덱스 정보를 저장하고(`.devboost/schema`), 테이블 정의서(Excel: 목차 + 정의서)를 만듦. 명령: `DB 콘솔: 스키마 가져오기 · 테이블 정의서`"
           }
         }
       },
