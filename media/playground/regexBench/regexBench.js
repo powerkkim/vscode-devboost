@@ -327,7 +327,7 @@
     if (m.type === 'init') {
       presets = m.presets;
       renderPresets();
-      if (!saved.flavorSet) $('flavor').value = m.flavor;
+      $('flavor').value = m.flavor;
       if (m.initial) useInitial(m.initial);
       changed();
     } else if (m.type === 'use') {
