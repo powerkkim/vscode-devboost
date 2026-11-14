@@ -17,7 +17,31 @@ const optionalEngines = [
   'underscore', 'vash', 'velocityjs', 'walrus', 'whiskers',
 ];
 
+// 무거운 라이브러리는 본체(dist/extension.js)에 넣지 않고 따로 묶어, 그 기능을 처음 쓸 때만 읽는다.
+// 본체에서는 그 패키지를 import 하는 자리가 "따로 묶은 파일을 require" 하는 것으로 바뀐다.
+//   패키지 이름 → [따로 묶은 파일(본체 기준 경로), 그 파일이 내보낸 것 중 꺼낼 이름]
+const SPLIT_LIBS = {
+  oracledb: ['./drivers/oracle.js'],
+  '@vue/compiler-sfc': ['./libs/atlas.js', '@vue/compiler-sfc'],
+  '@babel/parser': ['./libs/atlas.js', '@babel/parser'],
+  '@babel/traverse': ['./libs/atlas.js', '@babel/traverse'],
+  '@babel/types': ['./libs/atlas.js', '@babel/types'],
+};
+const splitLibs = {
+  name: 'split-libs',
+  setup(build) {
+    const names = Object.keys(SPLIT_LIBS).map((n) => n.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'));
+    build.onResolve({ filter: new RegExp(`^(${names.join('|')})$`) }, (a) => ({ path: a.path, namespace: 'split-lib' }));
+    build.onResolve({ filter: /^\.\/(drivers|libs)\//, namespace: 'split-lib' }, (a) => ({ path: a.path, external: true }));
+    build.onLoad({ filter: /.*/, namespace: 'split-lib' }, (a) => {
+      const [file, key] = SPLIT_LIBS[a.path];
+      return { contents: `module.exports = require(${JSON.stringify(file)})${key ? `[${JSON.stringify(key)}]` : ''};`, loader: 'js' };
+    });
+  },
+};
+
 const options = {
+  plugins: [splitLibs],
   entryPoints: ['src/extension.ts'],
   bundle: true,
   platform: 'node',
@@ -92,17 +116,22 @@ const driverOptions = (name) => ({
   logLevel: 'info',
 });
 
+// 따로 묶는 라이브러리 (SPLIT_LIBS): Oracle 드라이버, Source Atlas 분석기의 Vue 컴파일러·Babel
+const libOptions = (name, dir) => ({ ...driverOptions(name), outfile: `dist/${dir}/${name}.js`, plugins: [], external: [...optionalEngines] });
+
 // DB 결과 패널(Webview) → media/dbConsole/results.js (결과 표는 콘솔과 같은 것을 쓴다)
 const resultsOptions = { ...consoleOptions, entryPoints: ['webview/dbConsole/results.ts'], outfile: 'media/dbConsole/results.js' };
 const bookOptions = { ...consoleOptions, entryPoints: ['webview/dbConsole/queryBook/main.ts'], outfile: 'media/dbConsole/queryBook/book.js' };
 
+const ALL = [options, webviewOptions, consoleOptions, resultsOptions, bookOptions, driverOptions('pg'), driverOptions('mysql'), libOptions('oracle', 'drivers'), libOptions('atlas', 'libs')];
+
 if (watch) {
-  for (const o of [options, webviewOptions, consoleOptions, resultsOptions, bookOptions, driverOptions('pg'), driverOptions('mysql')]) {
+  for (const o of ALL) {
     const ctx = await esbuild.context(o);
     await ctx.watch();
   }
 } else {
-  const results = await Promise.all([esbuild.build(options), esbuild.build(webviewOptions), esbuild.build(consoleOptions), esbuild.build(resultsOptions), esbuild.build(bookOptions), esbuild.build(driverOptions('pg')), esbuild.build(driverOptions('mysql'))]);
+  const results = await Promise.all(ALL.map((o) => esbuild.build(o)));
   // 묶인 라이브러리의 라이선스 고지 (배포 파일에 함께 들어간다)
   writeNotices(results.flatMap((r) => Object.keys(r.metafile.inputs)));
 }
