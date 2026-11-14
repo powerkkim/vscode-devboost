@@ -119,3 +119,33 @@ pre.raw mark.cur { background: var(--vscode-editor-findMatchBackground, #515c6a)
 .menu div { padding: 4px 14px; cursor: pointer; white-space: nowrap; }
 .menu div:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, inherit); }
 .menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
+
+/* 모음 · 브라우저 캡처 전환 */
+.mode-tabs { display: flex; gap: 2px; padding: 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+.mode-tabs .tab { padding: 4px 8px; }
+.rec { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-charts-red, #f14c4c); margin-right: 5px; animation: rec 1.2s ease-in-out infinite; }
+@keyframes rec { 50% { opacity: 0.3; } }
+.cap-bar { display: flex; gap: 6px; padding: 0 8px 6px; }
+.cap-bar button:first-child { flex: 1; }
+.node.cap .st { font-family: var(--mono); font-size: 0.85em; flex: none; }
+.reqline.cap { align-items: center; }
+.reqline.cap .mt { width: auto; font-size: 0.9em; }
+.reqline.cap .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.main > .res-body { border-top: none; }
+.hd.act .hv { position: relative; padding-right: 26px; }
+.hd.act .hv button { position: absolute; right: 0; top: -2px; opacity: 0; }
+.hd.act .hv:hover button, .hd.act .hv button:focus { opacity: 1; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px; font-size: 0.9em; color: var(--dim); background: transparent; border: 1px solid var(--line); }
+.chip.on { color: var(--vscode-foreground); border-color: var(--vscode-charts-green, #3fb950); }
+.chip .key { font-size: 0.85em; filter: grayscale(1); }
+.chip.on .key { filter: none; }
+.menu div.info { cursor: default; color: var(--dim); white-space: normal; max-width: 420px; }
+.menu div.info:hover { background: none; color: var(--dim); }
+.sub { color: var(--dim); font-size: 0.9em; margin: 2px 0 3px; }
+.kv.path { margin-bottom: 10px; }
+.jt .val { cursor: pointer; border-radius: 2px; }
+.jt .val:hover { background: var(--vscode-list-hoverBackground); }
+.tip { margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; line-height: 1.5; }
+.tip button.link { color: var(--vscode-textLink-foreground); padding: 0 2px; }
+.empty > div { margin-bottom: 4px; }
+.tip.bar { margin: 2px 10px 6px; }

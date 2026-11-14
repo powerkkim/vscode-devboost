@@ -239,5 +239,5 @@ test('보내기: 실제 서버로 — JSON 본문, 압축 풀기, 쿠키 이어 
     await new Promise((r) => server.close(r));
   }
   await assert.rejects(H.send(build({ url: base + '/x' }), opts), (e) => /연결이 거부됐습니다/.test(H.explainError(e)));
-  await assert.rejects(H.send({ method: 'GET', url: 'ftp://h/x', headers: {}, missing: [] }, opts), /http, https 주소만/);
+  await assert.rejects(H.send({ method: 'GET', url: 'ftp://h/x', headers: {}, missing: [], missingPath: [] }, opts), /http, https 주소만/);
 });

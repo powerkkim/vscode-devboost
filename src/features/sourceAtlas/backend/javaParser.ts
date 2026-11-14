@@ -11,6 +11,17 @@ export interface Ann {
 export interface Param {
   type: string; // 제네릭·패키지 제거한 단순 이름
   name: string;
+  /** 아래 셋은 detail 로 읽었을 때만 (API 콘솔의 Controller 읽기용) */
+  /** 붙어 있는 어노테이션 */
+  anns?: Ann[];
+  /** 제네릭을 그대로 둔 타입 글 (List<ItemDto>) */
+  raw?: string;
+  /** static 필드 */
+  isStatic?: boolean;
+}
+export interface ParseOptions {
+  /** 파라미터·필드의 어노테이션과 원래 타입, 메서드의 시작·끝 줄까지 읽는다. 색인(Atlas)에는 쓰지 않는다 — 메모리를 더 쓴다 */
+  detail?: boolean;
 }
 /** 본문 안의 `receiver.method(args)` 호출 */
 export interface Call {
@@ -37,6 +48,9 @@ export interface JavaMethod {
   returnType: string;
   /** 본문 분석 결과. 추상 메서드나 빈 본문은 null */
   scan: BodyScan | null;
+  /** detail 로 읽었을 때만: 어노테이션을 포함한 선언의 첫 줄과 본문의 끝 줄 */
+  startLine?: number;
+  endLine?: number;
 }
 export interface JavaClass {
   name: string;
@@ -52,6 +66,9 @@ export interface JavaClass {
   fields: Param[];
   ctorParams: Param[];
   methods: JavaMethod[];
+  /** detail 로 읽었을 때만: enum 의 상수 이름들, 다른 타입 안에 든 타입이면 바깥 타입 이름 */
+  enumConstants?: string[];
+  outer?: string;
 }
 
 /** 주석을 공백으로 바꾸고(줄바꿈 유지), 문자열 내용을 가린 버전도 같이 만든다. 둘 다 원본과 길이가 같다. */
@@ -188,14 +205,15 @@ function takeAnnotations(text: string): [Ann[], string] {
   return [anns, rest];
 }
 
-function parseParams(s: string): Param[] {
+function parseParams(s: string, detail = false): Param[] {
   return splitTopLevel(s)
-    .map((p) => {
-      const [, sig] = takeAnnotations(p.trim());
+    .map((p): Param | null => {
+      const [anns, sig] = takeAnnotations(p.trim());
       // 파라미터 앞에 붙은 어노테이션이 여러 개이거나 공백이 섞여도 마지막 토큰이 이름
       const clean = sig.replace(/\bfinal\b/g, '').trim();
       const m = clean.match(/^([\s\S]+?)\s+(\w+)$/);
-      return m ? { type: simpleType(m[1]), name: m[2] } : null;
+      if (!m) return null;
+      return detail ? { type: simpleType(m[1]), name: m[2], anns, raw: m[1].replace(/\s+/g, ' ').trim() } : { type: simpleType(m[1]), name: m[2] };
     })
     .filter((x): x is Param => !!x);
 }
@@ -205,7 +223,8 @@ const METHOD_RE = new RegExp(`^${MODS}(?:<[^>]*>\\s+)?([\\w.<>\\[\\],?&\\s]+?)\\
 const CTOR_RE = new RegExp(`^${MODS}(\\w+)\\s*\\(([\\s\\S]*)\\)\\s*(?:throws[\\s\\S]*)?$`);
 const FIELD_RE = new RegExp(`^${MODS}([\\w.<>\\[\\],?\\s]+?)\\s+(\\w+)\\s*(?:=[\\s\\S]*)?$`);
 
-export function parseJava(source: string, file: string): JavaClass[] {
+export function parseJava(source: string, file: string, opts: ParseOptions = {}): JavaClass[] {
+  const detail = !!opts.detail;
   const { plain, masked } = maskSource(source);
   const starts = lineStarts(source);
   const pkg = (masked.match(/^\s*package\s+([\w.]+)\s*;/m) ?? [])[1] ?? '';
@@ -223,11 +242,15 @@ export function parseJava(source: string, file: string): JavaClass[] {
   const classes: JavaClass[] = [];
   const declRe = /\b(class|interface|enum|record)\s+(\w+)([^{;]*)\{/g;
   let m: RegExpExecArray | null;
+  /** detail: 지금까지 읽은 타입들의 본문 범위 (안에 든 타입의 바깥을 찾으려고) */
+  const spans: { name: string; from: number; to: number }[] = [];
   while ((m = declRe.exec(masked))) {
-    if (depthAt[m.index] !== 0) continue;
-    // 선언 앞의 어노테이션·수식어: 직전 최상위 문장 끝(; 또는 }) 이후부터
+    const d = depthAt[m.index];
+    // 보통은 최상위 타입만. detail 이면 타입 안에 든 타입(static class Inner)도 읽는다
+    if (d !== 0 && !detail) continue;
+    // 선언 앞의 어노테이션·수식어: 같은 깊이의 직전 문장 끝(; 또는 }) 이나 바깥 타입의 { 이후부터
     let b = m.index - 1;
-    while (b >= 0 && !((masked[b] === ';' || masked[b] === '}') && depthAt[b] === 0 && depthAt[b + 1] === 0)) b--;
+    while (b >= 0 && !((masked[b] === ';' && depthAt[b] === d) || ((masked[b] === '}' || masked[b] === '{') && depthAt[b + 1] === d))) b--;
     const [anns] = takeAnnotations(plain.slice(b + 1, m.index).replace(MODS_ONLY, ' '));
     const header = m[3];
     const impl = (header.match(/\bimplements\s+([\s\S]+?)(?=\bextends\b|$)/) ?? [])[1];
@@ -244,16 +267,41 @@ export function parseJava(source: string, file: string): JavaClass[] {
       extends: ext ? splitTopLevel(ext).map(simpleType).filter(Boolean) : [],
       imports, fields: [], ctorParams: [], methods: [],
     };
-    parseBody(cls, plain, masked, bodyOpen + 1, bodyClose, starts);
+    if (detail && kind === 'record') {
+      // record Point(int x, @JsonProperty("yy") int y) 의 구성 요소는 필드로
+      const open = m.index + m[0].indexOf('(');
+      const close = m[0].includes('(') ? matchClose(masked, open) : -1;
+      if (close > open) cls.fields = parseParams(plain.slice(open + 1, close), true);
+    }
+    if (detail && kind === 'enum') {
+      // 상수는 본문의 첫 ; 앞까지: A, B("x"), C { … }
+      let end = bodyOpen + 1;
+      for (let depth = 0; end < bodyClose; end++) {
+        const c = masked[end];
+        if (c === '(' || c === '{') depth++;
+        else if (c === ')' || c === '}') depth--;
+        else if (c === ';' && depth === 0) break;
+      }
+      cls.enumConstants = splitTopLevel(masked.slice(bodyOpen + 1, end))
+        .map((x) => (takeAnnotations(x)[1].match(/^\s*([A-Za-z_]\w*)/) ?? [])[1])
+        .filter((x): x is string => !!x);
+    }
+    if (detail) {
+      const outer = spans.filter((sp) => sp.from < m!.index && m!.index < sp.to).pop();
+      if (outer) cls.outer = outer.name;
+      spans.push({ name: cls.name, from: bodyOpen, to: bodyClose });
+    }
+    parseBody(cls, plain, masked, bodyOpen + 1, bodyClose, starts, detail);
     classes.push(cls);
-    declRe.lastIndex = bodyClose;
+    // detail 이면 본문 안의 타입 선언도 이어서 찾는다
+    declRe.lastIndex = detail ? bodyOpen + 1 : bodyClose;
   }
   return classes;
 }
 
 const MODS_ONLY = /\b(?:public|protected|private|static|final|abstract|sealed|strictfp)\b/g;
 
-function parseBody(cls: JavaClass, plain: string, masked: string, from: number, to: number, starts: number[]) {
+function parseBody(cls: JavaClass, plain: string, masked: string, from: number, to: number, starts: number[], detail = false) {
   let start = from;
   let paren = 0;
   const handle = (hs: number, he: number, blockOpen: number, blockClose: number) => {
@@ -269,7 +317,7 @@ function parseBody(cls: JavaClass, plain: string, masked: string, from: number, 
     const nameOffset = hs + (headerPlain.length - sigPlain.length);
     if (firstParen < 0 || (firstEq >= 0 && firstEq < firstParen)) {
       const f = sig.match(FIELD_RE);
-      if (f && blockOpen < 0) cls.fields.push({ type: simpleType(f[1]), name: f[2] });
+      if (f && blockOpen < 0) cls.fields.push(detail ? { type: simpleType(f[1]), name: f[2], anns, raw: f[1].replace(/\s+/g, ' ').trim(), isStatic: /\bstatic\b/.test(sig) } : { type: simpleType(f[1]), name: f[2] });
       return;
     }
     const sigClean = sig;
@@ -288,8 +336,9 @@ function parseBody(cls: JavaClass, plain: string, masked: string, from: number, 
     const idx = plain.indexOf(name, nameOffset);
     cls.methods.push({
       name, line: lineAt(starts, idx < 0 ? hs : idx), annotations: anns,
-      params: parseParams(pm ? pm[3] : mm[3]), returnType: simpleType(mm[1]),
+      params: parseParams(pm ? pm[3] : mm[3], detail), returnType: simpleType(mm[1]),
       scan: blockOpen >= 0 ? scanBody(masked.slice(blockOpen + 1, blockClose), plain.slice(blockOpen + 1, blockClose)) : null,
+      ...(detail ? { startLine: lineAt(starts, hs + (headerPlain.length - headerPlain.trimStart().length)), endLine: lineAt(starts, blockOpen >= 0 ? blockClose : he) } : {}),
     });
   };
   for (let i = from; i < to; i++) {
