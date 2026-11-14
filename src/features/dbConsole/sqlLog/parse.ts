@@ -521,26 +521,114 @@ export class LogReader {
   }
 }
 
-/** 최근 쿼리 목록 (새 것이 앞). 바로 앞과 같은 SQL 이 또 오면 시각만 바꾼다 */
+/** 낱말 경계 글자 (식별자에 쓰이는 글자) */
+const NAME_CHAR = '[\\w$#]';
+
+/**
+ * 수집 필터 낱말 하나 → 정규식. 대소문자를 가리지 않고, 낱말 단위로 맞춘다 (TB_USER 는 TB_USER_ROLE 에 맞지 않음).
+ * `*` 는 이름 글자 여럿: `TB_COMM*` · `*Common*`. 띄어 쓴 곳은 공백 여럿에 맞는다. 빈 낱말 · `*` 만은 undefined
+ */
+export function filterPattern(word: string): RegExp | undefined {
+  const w = word.trim();
+  if (!w || /^\*+$/.test(w)) return undefined;
+  const body = w
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'))
+    .join(`${NAME_CHAR}*`);
+  const before = /^[\w$#*]/.test(w) ? `(?<!${NAME_CHAR})` : '';
+  const after = /[\w$#*]$/.test(w) ? `(?!${NAME_CHAR})` : '';
+  return new RegExp(before + body + after, 'i');
+}
+
+/**
+ * 수집 필터: 쿼리 id(SQL 머리 주석) · mapper 이름 · SQL 글(테이블 이름 등)에서 낱말을 찾는다.
+ * 제외 낱말이 하나라도 있으면 빼고, 포함 낱말을 적었으면 그중 하나가 있어야 넣는다 (제외가 먼저)
+ */
+export class QueryFilter {
+  private readonly include: RegExp[];
+  private readonly exclude: RegExp[];
+
+  constructor(include: readonly string[] = [], exclude: readonly string[] = []) {
+    const compile = (list: readonly string[]) => list.map((w) => filterPattern(String(w))).filter((r): r is RegExp => !!r);
+    this.include = compile(include);
+    this.exclude = compile(exclude);
+  }
+
+  accepts(q: LoggedQuery): boolean {
+    if (!this.include.length && !this.exclude.length) return true;
+    const hay = `${queryId(q.sql)}\n${q.mapper}\n${q.sql}`;
+    if (this.exclude.some((r) => r.test(hay))) return false;
+    return !this.include.length || this.include.some((r) => r.test(hay));
+  }
+}
+
+/** 같은 쿼리로 볼 이름: SQL 머리 주석의 쿼리 id → mapper 메서드. 둘 다 없으면 '' */
+export function sameQueryKey(q: LoggedQuery): string {
+  return queryId(q.sql) || q.mapper;
+}
+
+/**
+ * 최근 쿼리 목록 (새 것부터, 최대 max 개). 같은 쿼리가 연달아 찍히면(같은 SQL · mapper) 한 건으로 합친다.
+ * 필터에 걸린 쿼리는 넣지 않고 개수만 센다 (excluded). latestOnly 면 같은 쿼리 id 의 예전 것은 뺀다
+ */
 export class QueryRing {
   private list: (LoggedQuery & { id: number })[] = [];
   private seq = 0;
+  /** 필터로 뺀 쿼리 수 (지운 뒤부터) */
+  excluded = 0;
 
-  constructor(private max: number) {}
+  constructor(
+    private max: number,
+    private filter = new QueryFilter(),
+    private latestOnly = false
+  ) {}
 
   setMax(max: number) {
     this.max = Math.max(1, max);
     this.list.length = Math.min(this.list.length, this.max);
   }
 
-  add(q: LoggedQuery): void {
+  /** 필터 · 같은 id 하나만을 바꾸고 이미 모인 목록에도 적용한다. 뺀 쿼리 수를 돌려준다 (excluded 에는 세지 않음) */
+  setFilter(filter: QueryFilter, latestOnly: boolean): number {
+    this.filter = filter;
+    this.latestOnly = latestOnly;
+    const before = this.list.length;
+    this.list = this.list.filter((q) => filter.accepts(q));
+    if (latestOnly) {
+      const seen = new Set<string>();
+      this.list = this.list.filter((q) => {
+        const key = sameQueryKey(q);
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+    return before - this.list.length;
+  }
+
+  accepts(q: LoggedQuery): boolean {
+    return this.filter.accepts(q);
+  }
+
+  /** 넣었으면 true, 필터에 걸렸으면 false */
+  add(q: LoggedQuery): boolean {
+    if (!this.filter.accepts(q)) {
+      this.excluded++;
+      return false;
+    }
     const top = this.list[0];
     if (top && top.sql === q.sql && top.mapper === q.mapper) {
       this.list[0] = Object.assign(q, { id: top.id });
-      return;
+      return true;
+    }
+    if (this.latestOnly) {
+      const key = sameQueryKey(q);
+      if (key) this.list = this.list.filter((x) => sameQueryKey(x) !== key);
     }
     this.list.unshift(Object.assign(q, { id: ++this.seq }));
     if (this.list.length > this.max) this.list.length = this.max;
+    return true;
   }
 
   items(): readonly (LoggedQuery & { id: number })[] {
@@ -553,6 +641,7 @@ export class QueryRing {
 
   clear() {
     this.list = [];
+    this.excluded = 0;
   }
 }
 
@@ -622,12 +711,13 @@ export interface QuerySummary {
   cond: string;
 }
 
-/** 목록에서 쿼리를 알아보기 위한 요약 — 종류, 테이블, 넘어간 값이 보이는 조건 하나 */
-export function summarize(sql: string): QuerySummary {
-  const bare = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ').replace(/\s+/g, ' ').trim();
-  const verb = /^([A-Za-z]+)/.exec(bare)?.[1].toUpperCase() ?? 'SQL';
+/** 주석을 빼고 공백을 하나로 */
+const bareSql = (sql: string) => sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** 쿼리에 나오는 테이블 이름 (나온 차례, 겹친 것은 한 번). FROM A a, B b 처럼 쉼표로 이은 것까지 (별칭은 버린다) */
+export function tableNames(sql: string): string[] {
+  const bare = bareSql(sql);
   const names: string[] = [];
-  // FROM A a, B b 처럼 쉼표로 이은 것까지 (별칭은 버린다)
   const re = /\b(?:FROM|JOIN|INTO|UPDATE)\s+((?:[A-Za-z_][\w.$#]*(?:\s+(?:AS\s+)?[A-Za-z_]\w*)?\s*,\s*)*[A-Za-z_][\w.$#]*)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(bare))) {
@@ -636,6 +726,20 @@ export function summarize(sql: string): QuerySummary {
       if (n && !/^(SELECT|SET|ONLY|TABLE|LATERAL)$/i.test(n) && !names.includes(n)) names.push(n);
     }
   }
+  return names;
+}
+
+/** "수집 제외" 단추에 둘 낱말: 쿼리 id(없으면 mapper 이름) · 테이블들 */
+export function excludeWords(q: LoggedQuery): { word: string; kind: 'query' | 'table' }[] {
+  const id = queryId(q.sql) || q.mapper;
+  return [...(id ? [{ word: id, kind: 'query' as const }] : []), ...tableNames(q.sql).map((word) => ({ word, kind: 'table' as const }))];
+}
+
+/** 목록에서 쿼리를 알아보기 위한 요약 — 종류, 테이블, 넘어간 값이 보이는 조건 하나 */
+export function summarize(sql: string): QuerySummary {
+  const bare = bareSql(sql);
+  const verb = /^([A-Za-z]+)/.exec(bare)?.[1].toUpperCase() ?? 'SQL';
+  const names = tableNames(sql);
   const tables = names.slice(0, 3).join(', ') + (names.length > 3 ? ', …' : '');
 
   let cond = '';

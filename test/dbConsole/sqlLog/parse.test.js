@@ -357,3 +357,66 @@ test('자동을 켜도 MyBatis · log4jdbc 로그는 한 번씩만 읽힌다', (
   assert.strictEqual(got.length, 1);
   assert.strictEqual(got[0].sql, TIDY);
 });
+
+// ── 수집 필터
+const { QueryFilter, filterPattern, tableNames, sameQueryKey, excludeWords } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'parse.js'));
+const Q = (sql, mapper = '') => ({ sql, mapper, time: 1 });
+
+test('수집 필터 낱말: 대소문자 무시 · 낱말 단위 · * · 공백', () => {
+  const t = (w, s) => filterPattern(w).test(s);
+  assert.ok(t('TB_USER', 'FROM tb_user u'));
+  assert.ok(!t('TB_USER', 'FROM TB_USER_ROLE'));
+  assert.ok(t('TB_COMM*', 'FROM TB_COMMON_CODE'));
+  assert.ok(t('*Common*', 'selectCommonCode'));
+  assert.ok(t('CommonMapper', 'com.x.CommonMapper.selectCode'));
+  assert.ok(!t('common', 'com.x.CommonMapper.selectCode'));
+  assert.ok(t('from dual', 'SELECT 1 FROM\n   DUAL'));
+  assert.ok(t('a.b(', 'x a.b(1)'));
+  assert.strictEqual(filterPattern('  '), undefined);
+  assert.strictEqual(filterPattern('**'), undefined);
+});
+
+test('수집 필터: 쿼리 id · mapper · SQL 에서 찾고, 제외가 포함보다 먼저', () => {
+  const common = Q('SELECT /* selectCommonCode */ CD FROM TB_COMMON_CODE WHERE GRP = \'A\'', 'com.x.CommonMapper.selectCommonCode');
+  const order = Q('SELECT * FROM TB_ORDER WHERE NO = 1', 'com.x.OrderMapper.selectOrder');
+  const none = new QueryFilter();
+  assert.ok(none.accepts(common) && none.accepts(order));
+  assert.ok(!new QueryFilter([], ['selectCommonCode']).accepts(common));
+  assert.ok(!new QueryFilter([], ['CommonMapper']).accepts(common));
+  assert.ok(!new QueryFilter([], ['TB_COMMON*']).accepts(common));
+  assert.ok(new QueryFilter([], ['TB_COMMON']).accepts(common));
+  const inc = new QueryFilter(['OrderMapper'], []);
+  assert.ok(inc.accepts(order) && !inc.accepts(common));
+  assert.ok(!new QueryFilter(['OrderMapper'], ['TB_ORDER']).accepts(order));
+  assert.ok(new QueryFilter(['', '*'], ['  ']).accepts(common), '빈 낱말은 없는 것');
+});
+
+test('최근 쿼리 목록: 필터에 걸리면 넣지 않고 세기, 필터 바꾸면 모인 것에도 적용, 같은 쿼리 id 는 최신 하나', () => {
+  const ring = new QueryRing(5, new QueryFilter([], ['TB_LOG']));
+  assert.strictEqual(ring.add(Q('INSERT INTO TB_LOG VALUES (1)')), false);
+  assert.strictEqual(ring.add(Q('SELECT /* a.sel */ 1 FROM T1')), true);
+  ring.add(Q('SELECT 2 FROM T2', 'M.two'));
+  ring.add(Q('SELECT /* a.sel */ 3 FROM T1'));
+  assert.deepStrictEqual([ring.items().length, ring.excluded], [3, 1]);
+  assert.strictEqual(ring.setFilter(new QueryFilter([], ['T2']), true), 2, 'T2 하나 + 예전 a.sel 하나');
+  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT /* a.sel */ 3 FROM T1']);
+  assert.strictEqual(ring.excluded, 1, '설정을 바꿔 뺀 것은 세지 않음');
+  ring.add(Q('SELECT /* a.sel */ 4 FROM T1'));
+  ring.add(Q('SELECT 5 FROM T5'));
+  ring.add(Q('SELECT 6 FROM T5'));
+  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT 6 FROM T5', 'SELECT 5 FROM T5', 'SELECT /* a.sel */ 4 FROM T1'], 'id 없는 쿼리는 하나로 합치지 않음');
+  ring.clear();
+  assert.deepStrictEqual([ring.items().length, ring.excluded], [0, 0]);
+  assert.strictEqual(sameQueryKey(Q('SELECT 1', 'M.x')), 'M.x');
+});
+
+test('고르는 창의 수집 제외 단추: 쿼리 id(없으면 mapper) · 테이블', () => {
+  assert.deepStrictEqual(tableNames('SELECT * FROM A a JOIN B ON 1=1, C WHERE X IN (SELECT 1 FROM A)'), ['A', 'B']);
+  assert.deepStrictEqual(excludeWords(Q('SELECT /* selectUser */ * FROM TB_USER U JOIN TB_DEPT D ON 1=1', 'x.UserMapper.selectUser')), [
+    { word: 'selectUser', kind: 'query' },
+    { word: 'TB_USER', kind: 'table' },
+    { word: 'TB_DEPT', kind: 'table' },
+  ]);
+  assert.deepStrictEqual(excludeWords(Q('UPDATE TB_X SET A = 1', 'x.M.upd')).map((x) => x.word), ['x.M.upd', 'TB_X']);
+  assert.deepStrictEqual(excludeWords(Q('SELECT 1')), []);
+});
