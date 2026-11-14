@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
  * 기능은 묶음으로 나뉜다 — 묶음 스위치와 그 안의 기능 스위치가 둘 다 켜져야 동작한다.
  *   DB 콘솔(dbConsole)   : 연결·콘솔, Mapper 쿼리 실행(mybatis), SQL 로그(sqlLog), 스키마(schema)
  *   코드 도구(codeTools) : import 따라가기(importJump), 케이스 변환(caseConverter)
+ *   Code Playground(playground) : JavaScript 작업대(jsBench), 정규식 작업대(regexBench)
  *   Search Everywhere · API 콘솔 · Source Atlas 는 묶음 하나에 기능 하나
  */
 export interface Feature {

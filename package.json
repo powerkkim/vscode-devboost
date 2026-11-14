@@ -1,7 +1,7 @@
 {
   "name": "devboost",
   "displayName": "DevBoost",
-  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
+  "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서, JavaScript · 정규식 작업대 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
   "version": "0.29.0",
   "publisher": "powerkkim",
@@ -334,6 +334,16 @@
         "command": "devBoost.apiConsole.captureStop",
         "title": "브라우저 캡처 끝내기",
         "category": "DevBoost · API 콘솔"
+      },
+      {
+        "command": "devBoost.jsBench.open",
+        "title": "JavaScript 작업대 열기 (고른 코드가 있으면 그 코드로)",
+        "category": "DevBoost · Code Playground"
+      },
+      {
+        "command": "devBoost.regexBench.open",
+        "title": "정규식 작업대 열기 (고른 글이 있으면 시험 글로)",
+        "category": "DevBoost · Code Playground"
       }
     ],
     "viewsContainers": {
@@ -608,6 +618,14 @@
         {
           "command": "devBoost.apiConsole.openEndpointMenu",
           "when": "false"
+        },
+        {
+          "command": "devBoost.jsBench.open",
+          "when": "config.devBoost.playground.enabled && config.devBoost.playground.jsBench.enabled"
+        },
+        {
+          "command": "devBoost.regexBench.open",
+          "when": "config.devBoost.playground.enabled && config.devBoost.playground.regexBench.enabled"
         }
       ],
       "editor/context": [
@@ -635,6 +653,16 @@
           "command": "devBoost.apiConsole.openEndpointMenu",
           "when": "config.devBoost.apiConsole.enabled && editorLangId == java",
           "group": "navigation@97"
+        },
+        {
+          "command": "devBoost.jsBench.open",
+          "when": "config.devBoost.playground.enabled && config.devBoost.playground.jsBench.enabled && editorHasSelection && editorLangId =~ /^(javascript|typescript|javascriptreact|typescriptreact|vue)$/",
+          "group": "devboost@3"
+        },
+        {
+          "command": "devBoost.regexBench.open",
+          "when": "config.devBoost.playground.enabled && config.devBoost.playground.regexBench.enabled && editorHasSelection",
+          "group": "devboost@4"
         }
       ],
       "view/title": [
@@ -881,6 +909,18 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "config.devBoost.apiConsole.enabled"
+      },
+      {
+        "command": "devBoost.jsBench.open",
+        "key": "ctrl+alt+j",
+        "mac": "cmd+alt+j",
+        "when": "config.devBoost.playground.enabled && config.devBoost.playground.jsBench.enabled"
+      },
+      {
+        "command": "devBoost.regexBench.open",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "config.devBoost.playground.enabled && config.devBoost.playground.regexBench.enabled"
       }
     ],
     "configuration": [
@@ -916,6 +956,12 @@
             "default": true,
             "order": 4,
             "markdownDescription": "**코드 도구** — 코드를 쓰고 읽을 때 쓰는 작은 기능 묶음. import 따라가기(`@/…` 별칭으로 가져온 이름을 `Ctrl+클릭`하면 실제 선언으로), 케이스 변환(camel·snake·kebab, SQL → Java 필드, Java → TypeScript·MyBatis SQL). 끄면 이 묶음이 모두 꺼지고, 하나씩 끄려면 아래 `코드 도구` 구획의 스위치를 씀"
+          },
+          "devBoost.playground.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "markdownDescription": "**Code Playground** — 코드를 바로 돌려 보는 화면 묶음. JavaScript 작업대(`Ctrl+Alt+J`): 예제 데이터와 함께 JS · TS 를 실행, 실무 예제에서 고르기, 칸을 골라 배열 가공 코드 만들기. 정규식 작업대(`Ctrl+Alt+R`): 자주 쓰는 정규식 · 질문 · 예시로 정규식을 만들고 시험 글에 맞춰 보기, JavaScript · Java 코드로 복사. 끄면 이 묶음이 모두 꺼지고, 하나씩 끄려면 아래 `Code Playground` 구획의 스위치를 씀"
           }
         }
       },
@@ -1373,6 +1419,50 @@
             "default": "",
             "markdownDescription": "INSERT·UPDATE 의 테이블 이름 앞에 붙일 접두어 (예: `tb_`). 클래스 이름을 snake_case 로 바꾼 값이 테이블 이름 자리에 들어가며, 직접 고쳐 쓰세요",
             "order": 8
+          }
+        }
+      },
+      {
+        "title": "Code Playground · JavaScript 작업대",
+        "properties": {
+          "devBoost.playground.jsBench.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 0,
+            "markdownDescription": "JavaScript · TypeScript 코드를 입력 데이터(`data`)와 함께 바로 돌려 보는 화면 (`Ctrl+Alt+J`, 편집기에서 코드를 고르고 우클릭). 실무 예제 500여 개, 칸을 골라 거르기 · 묶기 · 정렬 코드 만들기, 엑셀 표 → JSON · JSON → TypeScript 타입 · Vue defineProps 바꾸기. 화면을 열 때만 읽음"
+          },
+          "devBoost.playground.jsBench.nodePath": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "markdownDescription": "코드를 돌릴 Node.js 실행 파일의 경로. 비워 두면 VS Code 에 들어 있는 것을 써서 따로 설치하지 않아도 됨. 프로젝트와 같은 Node 버전으로 돌리고 싶을 때만 적음"
+          },
+          "devBoost.playground.jsBench.timeoutSeconds": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 60,
+            "order": 2,
+            "description": "한 번 실행의 시간 제한(초). 넘으면 멈춤 (끝나지 않는 반복 대비)"
+          }
+        }
+      },
+      {
+        "title": "Code Playground · 정규식 작업대",
+        "properties": {
+          "devBoost.playground.regexBench.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 0,
+            "markdownDescription": "정규식을 만들고 시험 글에 맞춰 보는 화면 (`Ctrl+Alt+R`, 편집기에서 글을 고르고 열면 시험 글로). 자주 쓰는 정규식(휴대폰 · 사업자번호 · 날짜 · 금액 …), 질문 따라가기, 예시로 만들기, 직접 만들기. 일치 표시 · 그룹 표 · 바꾸기, JavaScript `/…/` · Java `Pattern.compile` 코드로 복사. 화면을 열 때만 읽음"
+          },
+          "devBoost.playground.regexBench.timeoutSeconds": {
+            "type": "number",
+            "default": 1,
+            "minimum": 0.2,
+            "maximum": 10,
+            "order": 1,
+            "description": "한 번 계산의 시간 제한(초). 같은 글을 여러 번 되짚는 패턴이 화면을 멈추지 않게 넘으면 멈춤"
           }
         }
       },

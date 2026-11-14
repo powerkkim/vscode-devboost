@@ -76,7 +76,7 @@ test('기능의 스위치(switches)는 모두 선언된 설정이고, 켜기/끄
     }
   }
   const top = Object.keys(sections[0].properties).map((k) => k.replace('devBoost.', ''));
-  assert.deepStrictEqual(top.sort(), ['apiConsole.enabled', 'codeTools.enabled', 'dbConsole.enabled', 'searchEverywhere.enabled', 'sourceAtlas.enabled']);
+  assert.deepStrictEqual(top.sort(), ['apiConsole.enabled', 'codeTools.enabled', 'dbConsole.enabled', 'playground.enabled', 'searchEverywhere.enabled', 'sourceAtlas.enabled']);
   for (const k of top) assert.ok(used.has(k) || k === 'codeTools.enabled', k);
   assert.ok(used.has('codeTools.enabled'));
 });
@@ -107,8 +107,8 @@ test('이전 설정 이름: 표(core/settings.ts)와 package.json 이 같고, �
   }
 });
 
-test('명령 분류는 "DevBoost · 묶음 이름" 다섯 가지 중 하나', () => {
-  const allowed = new Set(['DevBoost · Search Everywhere', 'DevBoost · DB 콘솔', 'DevBoost · API 콘솔', 'DevBoost · Source Atlas', 'DevBoost · 코드 도구']);
+test('명령 분류는 "DevBoost · 묶음 이름" 여섯 가지 중 하나', () => {
+  const allowed = new Set(['DevBoost · Search Everywhere', 'DevBoost · DB 콘솔', 'DevBoost · API 콘솔', 'DevBoost · Source Atlas', 'DevBoost · 코드 도구', 'DevBoost · Code Playground']);
   for (const cmd of c.commands) {
     if (!cmd.category) {
       assert.match(cmd.title, /^DevBoost: /, `분류 없는 명령은 제목에 DevBoost 표시: ${cmd.command}`);

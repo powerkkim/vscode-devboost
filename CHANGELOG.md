@@ -1,7 +1,18 @@
 # Changelog
 
 ## 0.29.0 - 2026-11-14
-- **기능을 다섯 묶음으로 정리** — Search Everywhere / DB 콘솔 / API 콘솔 / Source Atlas / 코드 도구
+- **JavaScript 작업대** (새 묶음 Code Playground, `Ctrl+Alt+J`) — 예제 데이터와 함께 JavaScript · TypeScript 를 바로 돌려 보는 화면
+  - 실무 예제 500여 개(넣기 · 빼기, 중복, 묶기 · 집계, 날짜, 금액, 트리, 엑셀, 검증 …)를 찾아 고르면 코드 · 입력 데이터가 채워지고 바로 실행
+  - 고르기로 만들기: 입력 데이터의 칸을 골라 거르기 → 중복 빼기 → 묶기 → 정렬 → 앞에서 몇 개 코드를 만듦
+  - 입력 데이터는 JSON 이나 엑셀에서 복사한 표. 바꾸기: 엑셀 표 → JSON, `USER_NM` → `userNm`, JSON → TypeScript 타입 · Vue defineProps
+  - 결과는 출력과 표로. 5초 제한 · 멈추기 · 출력 한도. VS Code 에 들어 있는 Node.js 로 돌려 따로 설치할 것 없음
+  - 편집기에서 고른 코드로 열기, `편집기에 넣기`. 스위치 `devBoost.playground.enabled` · `devBoost.playground.jsBench.enabled`
+- **정규식 작업대** (Code Playground, `Ctrl+Alt+R`) — 정규식을 만들고 시험 글에 맞춰 보는 화면
+  - 만들기: 자주 쓰는 정규식 60여 개, 질문 따라가기, 예시로 만들기(맞아야 할 글 · 틀려야 할 글), 직접 만들기(조각 · 묶음 · 반복 · 꺼내기 · 앞뒤 조건)
+  - 시험 글에 맞는 곳 표시, 그룹 표, 바꾸기 결과, 확인할 글(글 전체가 맞는지)
+  - Java `Pattern.compile` · JavaScript `/…/` 코드로 복사 · 편집기에 넣기. 편집기에서 고른 글로 열기
+  - 계산은 따로 띄운 스레드에서, 1초가 넘는 패턴은 멈춤 (편집기가 멈추지 않음). 스위치 `devBoost.playground.regexBench.enabled`
+- **기능을 여섯 묶음으로 정리** — Search Everywhere / DB 콘솔 / API 콘솔 / Source Atlas / 코드 도구 / Code Playground
   - **DB 콘솔** 안으로: DB 연결 · 콘솔, Mapper 쿼리 실행(MyBatis), SQL 로그, 스키마 · 테이블 정의서. `devBoost.dbConsole.enabled` 를 끄면 모두 꺼지고, 안의 기능은 따로도 끌 수 있음
   - **코드 도구** (새 묶음): import 따라가기, 케이스 변환. 묶음 스위치 `devBoost.codeTools.enabled`
   - 명령 팔레트의 이름도 묶음에 맞춤: `DevBoost · DB 콘솔: …`, `DevBoost · 코드 도구: …`. 단축키는 그대로

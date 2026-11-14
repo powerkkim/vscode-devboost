@@ -11,6 +11,8 @@ import { apiConsole } from './features/apiConsole';
 import { sourceAtlas } from './features/sourceAtlas';
 import { importJump } from './features/codeTools/importJump';
 import { caseConverter } from './features/codeTools/caseConverter';
+import { jsBench } from './features/playground/jsBench';
+import { regexBench } from './features/playground/regexBench';
 
 /**
  * 기능 목록 — 묶음별로.
@@ -31,6 +33,9 @@ const FEATURES: Feature[] = [
   // 코드 도구
   importJump,
   caseConverter,
+  // Code Playground
+  jsBench,
+  regexBench,
 ];
 
 /** 현재 켜져 있는 기능 → 그 기능이 등록한 Disposable 목록 */

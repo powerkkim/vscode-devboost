@@ -4,7 +4,7 @@
 
 ## 기능
 
-기능은 다섯 묶음입니다. 묶음 스위치를 끄면 그 안의 기능이 모두 꺼지고, 묶음 안의 기능은 따로도 끌 수 있습니다.
+기능은 여섯 묶음입니다. 묶음 스위치를 끄면 그 안의 기능이 모두 꺼지고, 묶음 안의 기능은 따로도 끌 수 있습니다.
 
 | 묶음 | 기능 | 단축키 | 켜기/끄기 설정 |
 |---|---|---|---|
@@ -17,6 +17,8 @@
 | **Source Atlas** | 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
 | **코드 도구** | **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.codeTools.enabled` (묶음) · `devBoost.codeTools.importJump.enabled` |
 | | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `DevBoost · 코드 도구:` / 선택 영역 우클릭 | `devBoost.codeTools.caseConverter.enabled` |
+| **Code Playground** | **JavaScript 작업대** — 예제 데이터와 함께 JS · TS 를 바로 실행, 실무 예제 500여 개, 칸을 골라 배열 가공 코드 만들기 | `Ctrl+Alt+J` / 코드를 고르고 우클릭 | `devBoost.playground.enabled` (묶음) · `devBoost.playground.jsBench.enabled` |
+| | **정규식 작업대** — 자주 쓰는 정규식 · 질문 · 예시로 정규식을 만들고 시험 글에 맞춰 보기, 그룹 · 바꾸기, JavaScript · Java 코드로 복사 | `Ctrl+Alt+R` / 글을 고르고 우클릭 | `devBoost.playground.regexBench.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
 
@@ -172,6 +174,42 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 편집기가 이미 다른 파일의 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않습니다
 - 미리 만드는 색인이 없습니다. 이름을 누르거나 올렸을 때 그 파일의 import 와 대상 파일만 읽습니다
 - 끄면(`devBoost.codeTools.importJump.enabled`) 편집기 원래 동작 그대로입니다
+
+### Code Playground · JavaScript 작업대
+
+`Ctrl+Alt+J` 로 엽니다. 편집기에서 코드를 골라 둔 채 열면(우클릭 `JavaScript 작업대 열기`) 그 코드가 들어옵니다.
+
+- **왼쪽** `예제` — 찾기 칸에 낱말(날짜, 금액, 중복, 트리 …)을 치고 예제를 고르면 코드 · 입력 데이터가 채워지고 바로 실행됩니다. `화면 전용` 예제(Vue · React · 브라우저)는 실행하지 않고 복사해 씁니다
+- **왼쪽** `고르기로 만들기` — 입력 데이터의 칸을 골라 거르기 → 중복 빼기 → 묶기 · 집계 → 정렬 → 앞에서 몇 개 코드를 만들고 실행
+- **가운데** 코드와 입력 데이터. 입력 데이터에 JSON 이나 엑셀에서 복사한 표를 붙이면 코드에서 `data` 로 씁니다. `Ctrl+Enter` 실행, JavaScript · TypeScript 선택
+  - `바꾸기…`: 엑셀 표 → JSON 배열, 칸 이름 `USER_NM` → `userNm`, JSON 줄 맞추기, JSON → TypeScript 타입 · Vue defineProps
+  - `편집기에 넣기`: 마지막으로 쓰던 편집기의 선택 자리에 코드를 넣음
+- **오른쪽** `출력`(console.log · 오류 · 마지막 값)과 `표`(console.table 이나 마지막 줄의 배열)
+
+알아 둘 것
+- VS Code 에 들어 있는 Node.js 로 돌려 따로 설치할 것이 없습니다. 다른 Node 로 돌리려면 `devBoost.playground.jsBench.nodePath`. `require` 로 Node 기본 모듈을 쓸 수 있습니다
+- TypeScript 는 작업 폴더의 `node_modules/typescript`, 없으면 VS Code 에 들어 있는 것으로 바꿔 돌립니다 (타입 검사는 하지 않음)
+- 한 번 실행은 5초(`devBoost.playground.jsBench.timeoutSeconds`) 안에 끝나야 하고, 출력이 너무 많으면 멈춥니다. `멈추기` 로도 끊습니다
+- 코드는 내 컴퓨터에서 그대로 실행됩니다 (파일 · 네트워크를 쓸 수 있음). 모르는 코드는 읽어 보고 돌리세요
+- 화면을 열 때만 읽고, 닫으면 남는 것이 없습니다
+
+### Code Playground · 정규식 작업대
+
+`Ctrl+Alt+R` 로 엽니다. 편집기에서 글을 골라 둔 채 열면 그 글이 시험 글로 들어오고, 코드는 그 파일에 맞춰(Java 파일이면 Java, JS · TS · Vue 면 JavaScript) 보입니다.
+
+- **만들기** (위, `▲` 로 접기)
+  - `자주 쓰는 것`: 휴대폰 · 사업자번호 · 이메일 · 날짜 · 금액 · 비밀번호 규칙 · MyBatis 파라미터 등 60여 개. 누르면 패턴 · 플래그 · 바꿀 글 · 예시 글이 채워짐
+  - `질문 따라가기`: 어디에 쓰나 → 어떤 글자 → 몇 자 → 띄어쓰기 → 꼭 들어갈 것
+  - `예시로 만들기`: 맞아야 할 글 · 틀려야 할 글을 한 줄에 하나씩 넣으면 패턴을 만듦
+  - `직접 만들기`: 조각(글자 종류 · 낱말 · 아무 글자 · 이 글자 빼고)과 묶음을 쌓아 반복 · 꺼내기(그룹) · 앞뒤 조건을 고름
+- **패턴 · 플래그** — 직접 고쳐도 됩니다. `확인할 글` 에 값을 치면 글 전체가 맞는지(입력값 검사) 바로 보여 줌
+- **시험 글 · 그룹 · 바꾸기** — 맞는 곳을 표시하고, 그룹 표(번호 · 이름 · 값 · 위치), 바꾸기 결과(`$1` · `$<이름>` · `$&`)
+- **코드** — Java `Pattern.compile("…", 플래그)` · JavaScript `/…/플래그` (바꾸기 탭이면 `replaceAll` · `replace` 까지). `복사` · `편집기에 넣기`
+
+알아 둘 것
+- 맞추기는 JavaScript 엔진으로 합니다. 흔히 쓰는 문법은 Java 와 같고, Java 에만 있는 문법(`a++` 같은 소유 수량자, `\p{javaLetter}` 등)은 오류로 나옵니다
+- 같은 글을 여러 번 되짚는 패턴(`(a+)+$` 등)은 1초(`devBoost.playground.regexBench.timeoutSeconds`)가 넘으면 멈춥니다. 계산은 따로 띄운 스레드에서 해 편집기가 멈추지 않습니다
+- 화면을 열 때만 읽고, 닫으면 계산 스레드도 끝납니다
 
 ### API 콘솔
 
