@@ -149,6 +149,9 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 쿼리가 로그에 찍혀야 합니다: MyBatis 는 mapper 로그 수준 DEBUG (예: `logging.level.com.example.mapper=debug`), log4jdbc 는 `jdbc.sqltiming` 또는 `jdbc.sqlonly` 로거
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
+- 플러그인을 켜기(업데이트) 전에 띄워 둔 서버: 터미널에서 SQL 로그를 드래그해 고르고 우클릭 → `SQL 로그 — 고른 로그에서 읽기` (편집기에서 고른 글 · 클립보드의 로그도 됨)
+- Run · Debug(F5, Spring Boot Dashboard)로 띄운 서버는 디버그 콘솔의 출력도 읽습니다
+- 상태바 `SQL n` 은 늘 보입니다. 쿼리가 없을 때 마우스를 올리면 읽고 있는 곳(터미널 · 디버그 세션과 읽은 줄 수)과 못 읽는 까닭(셸 통합이 없는 터미널 등)이 나옵니다
 - 개수: `devBoost.dbConsole.sqlLog.maxQueries`
 
 필요 없는 쿼리 빼기 (수집 필터)

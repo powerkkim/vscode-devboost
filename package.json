@@ -3,7 +3,7 @@
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서, JavaScript · 정규식 작업대 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -289,6 +289,11 @@
       {
         "command": "devBoost.sqlLog.pick",
         "title": "SQL 로그 — 최근 쿼리를 콘솔로",
+        "category": "DevBoost · DB 콘솔"
+      },
+      {
+        "command": "devBoost.sqlLog.readSelection",
+        "title": "SQL 로그 — 고른 로그에서 읽기 (이미 떠 있는 서버의 로그)",
         "category": "DevBoost · DB 콘솔"
       },
       {
@@ -626,6 +631,10 @@
         {
           "command": "devBoost.regexBench.open",
           "when": "config.devBoost.playground.enabled && config.devBoost.playground.regexBench.enabled"
+        },
+        {
+          "command": "devBoost.sqlLog.readSelection",
+          "when": "config.devBoost.dbConsole.enabled && config.devBoost.dbConsole.sqlLog.enabled"
         }
       ],
       "editor/context": [
@@ -834,6 +843,13 @@
           "command": "devBoost.dbConsole.queryBookPick",
           "when": "webviewId == 'devBoostDbConsole' && webviewSection == 'editor'",
           "group": "2_book@2"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "devBoost.sqlLog.readSelection",
+          "when": "config.devBoost.dbConsole.enabled && config.devBoost.dbConsole.sqlLog.enabled",
+          "group": "devboost@1"
         }
       ]
     },
@@ -1169,7 +1185,7 @@
             "type": "boolean",
             "default": true,
             "order": 0,
-            "markdownDescription": "VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)의 SQL 로그(MyBatis `==> Preparing`, log4jdbc `jdbc.sqltiming`·`jdbc.sqlonly`, 그 밖에 SQL 로 시작하는 로그)에서 쿼리를 골라 둠. MyBatis 로그는 `?` 자리에 값을 채움. `Ctrl+Alt+L` 이나 상태바 `SQL n` 으로 여는 창에서 전체 SQL 을 보며 골라 새 DB 콘솔에 옮김 (실행은 콘솔에서 직접)"
+            "markdownDescription": "VS Code 터미널에서 실행한 서버(`gradlew bootRun`, `mvn spring-boot:run`)와 Run · Debug 로 띄운 서버(디버그 콘솔)의 SQL 로그(MyBatis `==> Preparing`, log4jdbc `jdbc.sqltiming`·`jdbc.sqlonly`, 그 밖에 SQL 로 시작하는 로그)에서 쿼리를 골라 둠. MyBatis 로그는 `?` 자리에 값을 채움. `Ctrl+Alt+L` 이나 상태바 `SQL n` 으로 여는 창에서 전체 SQL 을 보며 골라 새 DB 콘솔에 옮김 (실행은 콘솔에서 직접). 이 기능이 켜지기 전에 띄운 서버는 터미널에서 로그를 드래그하고 우클릭 → `SQL 로그 — 고른 로그에서 읽기`"
           },
           "devBoost.dbConsole.sqlLog.autoDetect": {
             "type": "boolean",

@@ -59,8 +59,22 @@ function createVscodeStub(root) {
       return new Disposable(() => items.forEach((d) => d.dispose()));
     }
   }
+  class MarkdownString {
+    constructor(value = '') {
+      this.value = value;
+    }
+    appendMarkdown(t) {
+      this.value += t;
+      return this;
+    }
+    appendText(t) {
+      this.value += t;
+      return this;
+    }
+  }
   const explicit = {
     Uri,
+    MarkdownString,
     EventEmitter,
     Disposable,
     workspace: {
