@@ -11,6 +11,7 @@ import { AtlasPanel } from './ui/atlasPanel';
 export const sourceAtlas: Feature = {
   id: 'sourceAtlas',
   name: 'Source Atlas',
+  switches: ['sourceAtlas.enabled'],
   start(context) {
     const output = vscode.window.createOutputChannel('DevBoost Atlas');
     const dump = vscode.commands.registerCommand('devBoost.sourceAtlas.dump', () => {

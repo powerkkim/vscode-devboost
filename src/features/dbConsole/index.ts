@@ -29,6 +29,7 @@ import { BookDeps, BookTarget, QueryBookPanel, addEntry, pickEntry } from './que
 export const dbConsole: Feature = {
   id: 'dbConsole',
   name: 'DB 콘솔',
+  switches: ['dbConsole.enabled'],
   start(context) {
     const store = new ConnectionStore(context);
     const consoles = new ConsoleStore(context);

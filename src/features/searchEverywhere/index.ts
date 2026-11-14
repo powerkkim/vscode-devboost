@@ -15,6 +15,7 @@ const WARM_UP_DELAY_MS = 2000;
 export const searchEverywhere: Feature = {
   id: 'searchEverywhere',
   name: 'Search Everywhere',
+  switches: ['searchEverywhere.enabled'],
   start(context) {
     const service = new SearchService(context);
     const panelView = new SearchEverywhereView(context, service);

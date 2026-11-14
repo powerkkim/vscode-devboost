@@ -19,7 +19,7 @@ const PICK_KEY = process.platform === 'darwin' ? 'Cmd+Alt+L' : 'Ctrl+Alt+L';
 const IDLE_MS = 300;
 
 function cfg() {
-  return vscode.workspace.getConfiguration('devBoost.sqlLog');
+  return vscode.workspace.getConfiguration('devBoost.dbConsole.sqlLog');
 }
 
 const two = (n: number) => String(n).padStart(2, '0');
@@ -35,8 +35,9 @@ function oneLine(sql: string, max: number): string {
 }
 
 export const sqlLog: Feature = {
-  id: 'sqlLog',
+  id: 'dbConsole.sqlLog',
   name: 'SQL 로그',
+  switches: ['dbConsole.enabled', 'dbConsole.sqlLog.enabled'],
   start(context) {
     const ring = new QueryRing(cfg().get<number>('maxQueries', 10));
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
@@ -132,7 +133,7 @@ export const sqlLog: Feature = {
         refresh();
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('devBoost.sqlLog.maxQueries')) {
+        if (e.affectsConfiguration('devBoost.dbConsole.sqlLog.maxQueries')) {
           ring.setMax(cfg().get<number>('maxQueries', 10));
           refresh();
         }

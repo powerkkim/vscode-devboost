@@ -25,7 +25,7 @@ import {
  *
  * 프로젝트의 tsconfig 에 별칭(paths)이 없어 편집기가 경로를 풀지 못할 때를 위한 것 — 편집기가 이미
  * 다른 파일의 선언을 찾아 주면 아무것도 보태지 않는다. 설정 파일은 건드리지 않고, 별칭은 vite.config ·
- * tsconfig · 개인 설정(devBoost.importJump.aliases)에서 읽는다.
+ * tsconfig · 개인 설정(devBoost.codeTools.importJump.aliases)에서 읽는다.
  * 미리 만들어 두는 색인은 없다: 이름을 누르거나 올렸을 때 그 파일의 import 와 대상 파일 하나만 읽는다.
  */
 
@@ -38,7 +38,7 @@ const ALIAS_TTL_MS = 3000;
 const HOVER_LINES = 30;
 
 function cfg() {
-  return vscode.workspace.getConfiguration('devBoost.importJump');
+  return vscode.workspace.getConfiguration('devBoost.codeTools.importJump');
 }
 
 const slash = (p: string) => p.replace(/\\/g, '/');
@@ -87,8 +87,9 @@ function positionAt(text: string, offset: number): vscode.Position {
 }
 
 export const importJump: Feature = {
-  id: 'importJump',
+  id: 'codeTools.importJump',
   name: 'import 따라가기',
+  switches: ['codeTools.enabled', 'codeTools.importJump.enabled'],
   start() {
     const files = new DiskFiles();
     const importCache = new Map<string, { version: number; imports: ImportStatement[] }>();
@@ -247,7 +248,7 @@ export const importJump: Feature = {
       vscode.languages.registerDefinitionProvider(selector, definition),
       vscode.languages.registerHoverProvider(selector, hover),
       vscode.commands.registerCommand('devBoost.importJump.go', go),
-      vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('devBoost.importJump') && aliasCache.clear()),
+      vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('devBoost.codeTools.importJump') && aliasCache.clear()),
       vscode.workspace.onDidCloseTextDocument((d) => importCache.delete(d.uri.toString())),
     ];
   },

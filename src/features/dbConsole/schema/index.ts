@@ -9,8 +9,9 @@ import { SchemaPanel } from './ui/schemaPanel';
  * 저장한 스키마로 테이블 정의서(Excel: 목차 + 테이블별 시트)를 만든다. 규격: docs/SPEC-db-schema-v8-2026-10-26.md
  */
 export const dbSchema: Feature = {
-  id: 'dbSchema',
-  name: 'DB 스키마',
+  id: 'dbConsole.schema',
+  name: '스키마 · 테이블 정의서',
+  switches: ['dbConsole.enabled', 'dbConsole.schema.enabled'],
   start(context) {
     const oracle = new OracleBridge();
     const deps = { store: new SchemaStore(), oracle };

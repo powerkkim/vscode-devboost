@@ -22,7 +22,7 @@ import { MyBatisPart, TsOptions, javaToMyBatis, javaToTs, parseJavaFields } from
 type OutputMode = 'newDocument' | 'clipboard' | 'insertBelow';
 
 function cfg() {
-  return vscode.workspace.getConfiguration('devBoost.caseConverter');
+  return vscode.workspace.getConfiguration('devBoost.codeTools.caseConverter');
 }
 
 /* ------------------------------------------------------------------ 입력 */
@@ -290,8 +290,9 @@ async function javaToMyBatisSql() {
 }
 
 export const caseConverter: Feature = {
-  id: 'caseConverter',
+  id: 'codeTools.caseConverter',
   name: '케이스 변환',
+  switches: ['codeTools.enabled', 'codeTools.caseConverter.enabled'],
   start() {
     const store = new SchemaStore();
     return [

@@ -13,8 +13,9 @@ import { ParamInput } from './mapper/values';
  *  - 콘솔에서는 왼쪽 패널에서 파라미터 값을 바꾸면 if·foreach 를 다시 풀어 SQL 이 바뀐다 (consoleLink)
  */
 export const mybatisRunner: Feature = {
-  id: 'mybatisRunner',
-  name: 'MyBatis SQL 실행',
+  id: 'dbConsole.mybatis',
+  name: 'Mapper 쿼리 실행',
+  switches: ['dbConsole.enabled', 'dbConsole.mybatis.enabled'],
   start(context) {
     const deps: Deps = {
       store: new RunnerStore(context.workspaceState),
@@ -87,7 +88,7 @@ export const mybatisRunner: Feature = {
       lens
     );
     const cfgWatch = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('devBoost.mybatisRunner.codeLens') || e.affectsConfiguration('devBoost.dbConsole.enabled')) lens.refresh();
+      if (e.affectsConfiguration('devBoost.dbConsole.mybatis.codeLens') || e.affectsConfiguration('devBoost.dbConsole.enabled')) lens.refresh();
     });
 
     return [
@@ -105,7 +106,7 @@ class MapperCodeLens implements vscode.CodeLensProvider, vscode.Disposable {
   }
 
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-    if (!vscode.workspace.getConfiguration('devBoost.mybatisRunner').get<boolean>('codeLens', true)) return [];
+    if (!vscode.workspace.getConfiguration('devBoost.dbConsole.mybatis').get<boolean>('codeLens', true)) return [];
     const text = document.getText();
     if (!looksLikeMapper(text)) return [];
     const doc = parseMapper(text, document.uri.fsPath);

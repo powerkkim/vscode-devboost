@@ -41,6 +41,7 @@ interface FromView {
 export const apiConsole: Feature = {
   id: 'apiConsole',
   name: 'API 콘솔',
+  switches: ['apiConsole.enabled'],
   start(context) {
     const store = new ApiStore(context);
     const jar = new CookieJar();
