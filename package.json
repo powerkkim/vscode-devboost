@@ -2,7 +2,8 @@
   "name": "devboost",
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서 등. 기능별로 켜고 끌 수 있음",
-  "version": "0.28.0",
+  "icon": "resources/icons/devboost.png",
+  "version": "0.28.1",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -28,307 +29,311 @@
       {
         "command": "devBoost.searchEverywhere.open",
         "title": "모두",
-        "category": "Search Everywhere"
+        "category": "DevBoost · Search Everywhere"
       },
       {
         "command": "devBoost.searchEverywhere.classes",
         "title": "클래스",
-        "category": "Search Everywhere"
+        "category": "DevBoost · Search Everywhere"
       },
       {
         "command": "devBoost.searchEverywhere.files",
         "title": "파일",
-        "category": "Search Everywhere"
+        "category": "DevBoost · Search Everywhere"
       },
       {
         "command": "devBoost.searchEverywhere.symbols",
         "title": "심볼",
-        "category": "Search Everywhere"
+        "category": "DevBoost · Search Everywhere"
       },
       {
         "command": "devBoost.searchEverywhere.text",
         "title": "텍스트",
-        "category": "Search Everywhere"
+        "category": "DevBoost · Search Everywhere"
       },
       {
         "command": "devBoost.sourceAtlas.open",
         "title": "Atlas 화면 열기 (열린 .vue 기준)",
-        "category": "Source Atlas"
+        "category": "DevBoost · Source Atlas"
       },
       {
         "command": "devBoost.sourceAtlas.dump",
         "title": "분석 결과 JSON 보기 (열린 .vue 기준)",
-        "category": "Source Atlas"
+        "category": "DevBoost · Source Atlas"
       },
       {
         "command": "devBoost.mybatisRunner.copy",
         "title": "SQL 복사 (마지막 입력값)",
-        "category": "MyBatis"
+        "category": "DevBoost · MyBatis"
       },
       {
         "command": "devBoost.mybatisRunner.runInConsole",
         "title": "DB 콘솔에서 실행 (커서 위치 쿼리)",
-        "category": "MyBatis"
+        "category": "DevBoost · MyBatis"
       },
       {
         "command": "devBoost.dbSchema.open",
         "title": "스키마 가져오기 · 테이블 정의서",
-        "category": "DB 스키마",
+        "category": "DevBoost · DB 스키마",
         "icon": "$(database)"
       },
       {
         "command": "devBoost.caseConverter.convertCase",
         "title": "케이스 변환 (camel · snake · kebab …)",
-        "category": "케이스 변환"
+        "category": "DevBoost · 케이스 변환"
       },
       {
         "command": "devBoost.caseConverter.sqlToJava",
         "title": "SQL·컬럼 이름 → Java 필드",
-        "category": "케이스 변환"
+        "category": "DevBoost · 케이스 변환"
       },
       {
         "command": "devBoost.caseConverter.javaToTs",
         "title": "Java 필드 → TypeScript 인터페이스",
-        "category": "케이스 변환"
+        "category": "DevBoost · 케이스 변환"
       },
       {
         "command": "devBoost.caseConverter.javaToMyBatis",
         "title": "Java 필드 → MyBatis SQL (SELECT·INSERT·UPDATE·resultMap)",
-        "category": "케이스 변환"
+        "category": "DevBoost · 케이스 변환"
       },
       {
         "command": "devBoost.caseConverter.cycleNext",
         "title": "다음 케이스로 바꾸기 (camel → Pascal → snake → SCREAMING → kebab)",
-        "category": "케이스 변환"
+        "category": "DevBoost · 케이스 변환"
       },
       {
         "command": "devBoost.caseConverter.cyclePrev",
         "title": "이전 케이스로 바꾸기",
-        "category": "케이스 변환"
+        "category": "DevBoost · 케이스 변환"
       },
       {
         "command": "devBoost.dbConsole.addConnection",
         "title": "연결 추가",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(add)"
       },
       {
         "command": "devBoost.dbConsole.editConnection",
         "title": "연결 수정",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(edit)"
       },
       {
         "command": "devBoost.dbConsole.removeConnection",
         "title": "연결 삭제",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(trash)"
       },
       {
         "command": "devBoost.dbConsole.testConnection",
         "title": "접속 테스트",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(pulse)"
       },
       {
         "command": "devBoost.dbConsole.connect",
         "title": "접속",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(plug)"
       },
       {
         "command": "devBoost.dbConsole.disconnect",
         "title": "접속 끊기",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "devBoost.dbConsole.openConsole",
         "title": "콘솔 열기",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(terminal)"
       },
       {
         "command": "devBoost.dbConsole.newConsole",
         "title": "새 콘솔 (콘솔 하나 더)",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(add)"
       },
       {
         "command": "devBoost.dbConsole.run",
         "title": "실행 (커서가 있는 문장 / 선택 영역)",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(play)"
       },
       {
         "command": "devBoost.dbConsole.commit",
         "title": "커밋",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(check)"
       },
       {
         "command": "devBoost.dbConsole.rollback",
         "title": "롤백",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(discard)"
       },
       {
         "command": "devBoost.dbConsole.explain",
         "title": "실행계획 (커서가 있는 문장)",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(list-tree)"
       },
       {
         "command": "devBoost.dbConsole.refreshSchema",
         "title": "테이블 목록 새로 고침",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(refresh)"
       },
       {
         "command": "devBoost.dbConsole.insertName",
         "title": "콘솔에 이름 넣기",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.setFilter",
         "title": "테이블 필터",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(filter)"
       },
       {
         "command": "devBoost.dbConsole.clearFilter",
         "title": "테이블 필터 지우기",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(filter-filled)"
       },
       {
         "command": "devBoost.dbConsole.changeSchema",
         "title": "스키마 바꾸기",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(symbol-namespace)"
       },
       {
         "command": "devBoost.dbConsole.selectQuery",
         "title": "SELECT 만들기",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.selectRun",
         "title": "SELECT 실행",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.joinQuery",
         "title": "JOIN 만들기 (고른 테이블)",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.joinRun",
         "title": "JOIN 실행 (고른 테이블)",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.countRun",
         "title": "행 수 세기",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.selectStatement",
         "title": "지금 문장 고르기",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.format",
         "title": "SQL 정렬",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.history",
         "title": "실행 기록",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(history)"
       },
       {
         "command": "devBoost.dbConsole.selectAll",
         "title": "모두 선택",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.queryBook",
         "title": "쿼리 사전",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(book)"
       },
       {
         "command": "devBoost.dbConsole.queryBookPick",
         "title": "쿼리 사전에서 찾아 넣기",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.queryBookForTable",
         "title": "사전에서 쿼리…",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.addToQueryBook",
         "title": "사전에 추가",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.dbConsole.tableInfo",
         "title": "테이블 정보",
-        "category": "DB 콘솔",
+        "category": "DevBoost · DB 콘솔",
         "icon": "$(info)"
       },
       {
         "command": "devBoost.dbConsole.runSql",
         "title": "SQL 을 콘솔에서 실행",
-        "category": "DB 콘솔"
+        "category": "DevBoost · DB 콘솔"
       },
       {
         "command": "devBoost.sqlLog.pick",
         "title": "최근 쿼리를 DB 콘솔로",
-        "category": "SQL 로그"
+        "category": "DevBoost · SQL 로그"
       },
       {
         "command": "devBoost.sqlLog.clear",
         "title": "최근 쿼리 목록 비우기",
-        "category": "SQL 로그"
+        "category": "DevBoost · SQL 로그"
       },
       {
         "command": "devBoost.sqlLog.send",
         "title": "쿼리를 DB 콘솔로",
-        "category": "SQL 로그"
+        "category": "DevBoost · SQL 로그"
       },
       {
         "command": "devBoost.importJump.go",
         "title": "실제 선언으로 이동",
-        "category": "import 따라가기"
+        "category": "DevBoost · import 따라가기"
       },
       {
         "command": "devBoost.apiConsole.open",
         "title": "열기",
-        "category": "API 콘솔"
+        "category": "DevBoost · API 콘솔"
       },
       {
         "command": "devBoost.apiConsole.openEndpoint",
         "title": "이 요청을 API 콘솔에서 열기",
-        "category": "API 콘솔"
+        "category": "DevBoost · API 콘솔"
+      },
+      {
+        "command": "devBoost.apiConsole.openEndpointMenu",
+        "title": "DevBoost: 이 요청을 API 콘솔에서 열기"
       },
       {
         "command": "devBoost.apiConsole.addController",
         "title": "이 Controller 의 요청을 모두 넣기",
-        "category": "API 콘솔"
+        "category": "DevBoost · API 콘솔"
       },
       {
         "command": "devBoost.apiConsole.captureStart",
         "title": "브라우저 캡처 시작",
-        "category": "API 콘솔"
+        "category": "DevBoost · API 콘솔"
       },
       {
         "command": "devBoost.apiConsole.captureStop",
         "title": "브라우저 캡처 끝내기",
-        "category": "API 콘솔"
+        "category": "DevBoost · API 콘솔"
       }
     ],
     "viewsContainers": {
@@ -336,7 +341,7 @@
         {
           "id": "devBoost-sidebar",
           "title": "DevBoost",
-          "icon": "$(rocket)"
+          "icon": "resources/icons/sidebar.svg"
         }
       ],
       "panel": [
@@ -599,6 +604,10 @@
         {
           "command": "devBoost.apiConsole.captureStop",
           "when": "config.devBoost.apiConsole.enabled"
+        },
+        {
+          "command": "devBoost.apiConsole.openEndpointMenu",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -623,7 +632,7 @@
           "group": "devboost@2"
         },
         {
-          "command": "devBoost.apiConsole.openEndpoint",
+          "command": "devBoost.apiConsole.openEndpointMenu",
           "when": "config.devBoost.apiConsole.enabled && editorLangId == java",
           "group": "navigation@97"
         }

@@ -278,6 +278,9 @@ export async function toRequest(ep: Endpoint, opts: ToRequestOptions = {}): Prom
   req.url = '{{baseUrl}}' + joinMapping(context, ep.path).replace(/^\/$/, '');
   const pathVars: KeyValue[] = [];
   const formRows: KeyValue[] = [];
+  /** 요청에 적지 않은 파라미터와 그 까닭 (메모에 적어 둔다 — 왜 비어 있는지 알 수 있게) */
+  const skipped: string[] = [];
+  const cookies: string[] = [];
   let hasFile = false;
   const bodyless = ep.http === 'GET' || ep.http === 'DELETE' || ep.http === 'HEAD';
   const consumes = annArg(ep.method.annotations.find((a) => a.name in MAPPING_ANN), 'consumes') ?? '';
@@ -300,6 +303,7 @@ export async function toRequest(ep: Endpoint, opts: ToRequestOptions = {}): Prom
         hasFile = true;
       } else if (MAPS.has(name) && !annArg(a, 'value', 'name')) {
         // @RequestParam Map<String, String> 은 "모든 파라미터" — 이름을 알 수 없다
+        skipped.push(`${p.name}: 파라미터를 통째로 받는 Map 이라 이름을 알 수 없음`);
       } else {
         req.params.push({ key: argName(a), value: annArg(a, 'defaultValue') ?? '', enabled: !optional(a) });
       }
@@ -316,10 +320,14 @@ export async function toRequest(ep: Endpoint, opts: ToRequestOptions = {}): Prom
       hasFile = true;
       if (fileType) formRows.push({ key: argName(a), value: '', enabled: true, file: true });
       else formRows.push({ key: argName(a), value: sampleText(await sampleOf(raw, ep.cls, ctx)), enabled: true });
+    } else if (a?.name === 'CookieValue') {
+      cookies.push(argName(a));
     } else if (a && a.name !== 'ModelAttribute') {
-      // @AuthenticationPrincipal · @CookieValue · @SessionAttribute … : 요청에 적을 값이 아니다
+      // @AuthenticationPrincipal · @SessionAttribute … : 요청에 적을 값이 아니다
+      skipped.push(`${p.name}: @${a.name} — 서버가 넣는 값`);
     } else if (FRAMEWORK.has(name)) {
       // Spring 이 넣어 주는 것
+      skipped.push(`${p.name}: ${name} — 서버가 넣는 값${/Request$/.test(name) ? ' (메서드 안에서 헤더 · 쿠키 · 파라미터를 직접 읽을 수 있음)' : ''}`);
     } else if (name === 'Pageable' || name === 'PageRequest') {
       req.params.push({ key: 'page', value: '0', enabled: true }, { key: 'size', value: '20', enabled: true }, { key: 'sort', value: '', enabled: false });
     } else if (fileType) {
@@ -331,6 +339,7 @@ export async function toRequest(ep: Endpoint, opts: ToRequestOptions = {}): Prom
     } else if (!MAPS.has(name)) {
       // 객체 파라미터: 필드가 파라미터(GET) 나 form(POST) 으로 온다
       const rows = await flatFields(raw, ep.cls, ctx);
+      if (!rows.length) skipped.push(`${p.name}: ${name} 의 필드를 읽지 못함`);
       if (rows.some((r) => r.file)) hasFile = true;
       if (bodyless) req.params.push(...rows.filter((r) => !r.file).map((r) => ({ key: r.key, value: r.value, enabled: false })));
       else formRows.push(...rows.map((r) => ({ key: r.key, value: r.value, enabled: r.file, ...(r.file ? { file: true } : {}) })));
@@ -345,10 +354,29 @@ export async function toRequest(ep: Endpoint, opts: ToRequestOptions = {}): Prom
       req.bodyForm = formRows;
     }
   }
-  const notes = [`${ep.cls.name}.${ep.method.name}()`];
+  if (cookies.length) {
+    // 쿠키로 받는 값: 브라우저 캡처로 이어받으면 알아서 붙는다. 직접 넣으려면 이 줄을 켜고 값을 적는다
+    req.headers.push({ key: 'Cookie', value: cookies.map((c) => `${c}=`).join('; '), enabled: false });
+    skipped.push(`쿠키 ${cookies.join(', ')}: 브라우저 캡처로 이어받거나, 헤더 탭의 Cookie 줄을 켜고 값을 적으세요`);
+  }
+  const notes = [`${ep.cls.name}.${ep.method.name}(${ep.method.params.map((p) => p.raw ?? p.type).join(', ')})`];
+  if (skipped.length) notes.push('요청에 적지 않은 것:', ...skipped.map((x) => `- ${x}`));
   if (ep.pathUnknown) notes.push('경로가 상수로 적혀 있어 읽지 못했습니다. 주소를 확인하세요.');
   if (ctx.unknown.size) notes.push(`읽지 못한 타입: ${[...ctx.unknown].join(', ')} — 본문·파라미터를 확인하세요.`);
   req.note = notes.join('\n');
   return req;
+}
+
+/** 요청을 채우다 못 읽은 것이 있으면 한 줄로 (화면에서 바로 알려 주려고). 없으면 '' */
+export function warningOf(req: ApiRequest): string {
+  const lines = req.note.split('\n');
+  const unknown = lines.find((l) => l.startsWith('읽지 못한 타입'));
+  const path = lines.find((l) => l.startsWith('경로가 상수'));
+  const fields = lines.find((l) => l.includes('의 필드를 읽지 못함'));
+  const cookie = lines.find((l) => l.startsWith('- 쿠키 '));
+  const empty = !req.params.length && !req.pathVars?.length && req.bodyMode === 'none' && !req.headers.some((h) => h.enabled);
+  // 채울 것이 없어 비어 있는 것은 고장이 아니라는 것을 알려 준다
+  const nothing = empty && !unknown && !fields ? (cookie ? `${cookie.replace(/^- /, '').split(':')[0]} 로 값을 받는 메서드` : lines.includes('요청에 적지 않은 것:') ? '파라미터 · 본문을 받지 않는 메서드' : '') : '';
+  return [path && '경로를 읽지 못함', unknown && unknown.split(' — ')[0], fields && fields.replace(/^- /, ''), nothing].filter(Boolean).join(' · ');
 }
 

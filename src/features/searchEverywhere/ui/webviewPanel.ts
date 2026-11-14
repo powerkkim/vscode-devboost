@@ -48,7 +48,8 @@ export class SearchEverywherePanel {
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       { enableScripts: true, localResourceRoots: [mediaRoot] }
     );
-    this.panel.iconPath = new vscode.ThemeIcon('search');
+    const icons = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icons');
+    this.panel.iconPath = { light: vscode.Uri.joinPath(icons, 'search-light.svg'), dark: vscode.Uri.joinPath(icons, 'search-dark.svg') };
 
     this.session = new WebviewSession(this.panel.webview, service, {
       kindLabel: mode === 'window' ? '떠 있는 창' : '탭',

@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { JavaClass, parseJava } from '../sourceAtlas/backend/javaParser';
-import { Endpoint, ResolveClass, readEndpoints, toRequest } from './controller';
+import { Endpoint, ResolveClass, readEndpoints, toRequest, warningOf } from './controller';
 import { ApiRequest } from './model';
 import { SpringServer, findSpringServer } from './springConfig';
 
@@ -54,8 +54,8 @@ export class EndpointLens implements vscode.CodeLensProvider {
       const line = Math.max(0, (e.method.startLine ?? e.method.line) - 1);
       out.push(
         new vscode.CodeLens(new vscode.Range(line, 0, line, 0), {
-          title: `$(play) API 콘솔  ${e.http} ${e.path || '/'}`,
-          tooltip: 'API 콘솔에서 이 요청을 엽니다 (처음이면 모음에 넣습니다)',
+          title: `$(rocket) API 콘솔  ${e.http} ${e.path || '/'}`,
+          tooltip: 'DevBoost API 콘솔에서 이 요청을 엽니다 (처음이면 모음에 넣습니다)',
           command: 'devBoost.apiConsole.openEndpoint',
           arguments: [doc.uri, e.origin],
         })
@@ -66,8 +66,8 @@ export class EndpointLens implements vscode.CodeLensProvider {
       const line = Math.max(0, cls.line - 1);
       out.push(
         new vscode.CodeLens(new vscode.Range(line, 0, line, 0), {
-          title: `$(add) API 콘솔에 모두 넣기 (${n})`,
-          tooltip: '이 Controller 의 요청을 모두 API 콘솔 모음에 넣습니다 (이미 있는 것은 그대로 둡니다)',
+          title: `$(rocket) API 콘솔에 모두 넣기 (${n})`,
+          tooltip: '이 Controller 의 요청을 모두 DevBoost API 콘솔 모음에 넣습니다 (이미 있는 것은 그대로 둡니다)',
           command: 'devBoost.apiConsole.addController',
           arguments: [doc.uri, cls.fqcn],
         })
@@ -112,12 +112,23 @@ function makeResolver(): ResolveClass {
     const pick = (list: JavaClass[]) => list.find((c) => c.name === last && (parts.length < 2 || c.outer === parts[parts.length - 2])) ?? list.find((c) => c.name === last);
     const own = pick(await classesOf(from.file));
     if (own) return own;
-    // 파일 이름은 가장 바깥 타입의 이름
-    const top = parts[0];
-    const files = await filesNamed(top);
+    // 파일 이름은 가장 바깥 타입의 이름. import com.x.AuthDto.RefreshRequest 처럼 안에 든 타입을 바로 가져왔으면 그 바깥 타입(AuthDto)
+    let top = parts[0];
+    let files = await filesNamed(top);
+    if (!files.length && parts.length === 1) {
+      const outer = from.imports
+        .filter((i) => i.endsWith('.' + last))
+        .map((i) => i.split('.').slice(0, -1).filter((x) => /^[A-Z]/.test(x))[0])
+        .find(Boolean);
+      if (outer) {
+        top = outer;
+        files = await filesNamed(top);
+      }
+    }
     if (!files.length) return undefined;
-    const imported = from.imports.find((i) => i.endsWith('.' + top));
-    const wanted = (imported ?? `${from.pkg}.${top}`).replace(/\./g, path.sep) + '.java';
+    const imported = from.imports.find((i) => i.endsWith('.' + top) || i.includes('.' + top + '.'));
+    const importedTop = imported ? imported.slice(0, imported.indexOf('.' + top) + top.length + 1) : undefined;
+    const wanted = (importedTop ?? `${from.pkg}.${top}`).replace(/\./g, path.sep) + '.java';
     const sorted = files.slice().sort((a, b) => Number(b.fsPath.endsWith(wanted)) - Number(a.fsPath.endsWith(wanted)));
     for (const f of sorted.slice(0, 3)) {
       const hit = pick(await classesOf(f.fsPath));
@@ -150,6 +161,8 @@ export interface EndpointRequests {
   requests: ApiRequest[];
   /** 환경에 baseUrl 이 없을 때 넣을 값 */
   baseUrl: string;
+  /** 읽지 못한 것이 있으면 한 줄 (요청 하나를 열었을 때만) */
+  warning: string;
 }
 
 /** 매핑 메서드들을 요청으로 */
@@ -158,5 +171,5 @@ export async function endpointsToRequests(uri: vscode.Uri, endpoints: Endpoint[]
   const resolve = makeResolver();
   const requests: ApiRequest[] = [];
   for (const e of endpoints) requests.push(await toRequest(e, { contextPath: server.contextPath, resolve }));
-  return { folder: endpoints[0]?.cls.name ?? 'Controller', requests, baseUrl: `http://localhost:${server.port ?? 8080}` };
+  return { folder: endpoints[0]?.cls.name ?? 'Controller', requests, baseUrl: `http://localhost:${server.port ?? 8080}`, warning: requests.length === 1 ? warningOf(requests[0]) : '' };
 }
