@@ -1217,7 +1217,7 @@
             },
             "default": [],
             "order": 4,
-            "markdownDescription": "수집 제외 — 이 낱말이 든 쿼리는 모으지 않음 (최근 쿼리 자리를 차지하지 않게). 쿼리 id(SQL 머리 주석) · mapper 이름 · SQL 글(테이블 이름 등)에서 찾음. 대소문자 무시, 낱말 단위(`TB_USER` 는 `TB_USER_ROLE` 에 맞지 않음), `*` 는 이름 글자 여럿. 예: `[\"selectCommonCode\", \"CommonMapper\", \"TB_COMM*\", \"*Session*\"]`. 목록 창(`Ctrl+Alt+L`) 위의 필터 줄에서 더하고 ✕ 로 뺌 — 빼면 그 낱말로 빠져 있던 최근 쿼리(50개까지)가 목록으로 돌아옴"
+            "markdownDescription": "수집 제외 — 이 낱말이 든 쿼리는 모으지 않음 (최근 쿼리 자리를 차지하지 않게). 쿼리 id(SQL 머리 주석) · mapper 이름 · SQL 글(테이블 이름 등)에서 찾음. 대소문자 무시, 낱말 단위(`TB_USER` 는 `TB_USER_ROLE` 에 맞지 않음), `*` 는 이름 글자 여럿. 예: `[\"selectCommonCode\", \"CommonMapper\", \"TB_COMM*\", \"*Session*\"]`. 목록 창(`Ctrl+Alt+L`) 오른쪽 아래 `수집 제외` 칸에서 더하고(⊕ · 직접 입력) ✕ 로 뺌 — 빼면 그 낱말로 빠져 있던 최근 쿼리(50개까지)가 목록으로 돌아옴"
           },
           "devBoost.dbConsole.sqlLog.include": {
             "type": "array",

@@ -6,7 +6,7 @@ import { newNonce } from '../../../core/webview';
  * 최근 쿼리를 고르는 창: 왼쪽 목록(종류·쿼리 id·테이블·조건), 오른쪽에 고른 쿼리의 전체 SQL.
  * 창을 연 순간의 목록을 그대로 보여 준다 — 그 뒤에 들어온 쿼리는 다시 열어야 보인다 (고르는 동안 목록이 밀리지 않게).
  * 다른 곳을 누르면 닫힌다.
- * 위의 수집 필터 줄에서 제외 · 포함 낱말을 보고 더하고 지운다. 고른 쿼리의 쿼리 id · 테이블로 바로 제외 · 포함도 된다.
+ * 오른쪽 아래 수집 필터 칸에서 제외 · 포함 낱말을 보고(칩) 더하고(⊕ 고른 쿼리의 id · 테이블, 또는 직접 입력) ✕ 로 뺀다.
  * 필터를 바꾸면 목록을 다시 받는다 (풀린 쿼리는 돌아오고, 걸린 쿼리는 빠진다). 쿼리가 없으면 왜 없는지를 보인다.
  */
 
@@ -139,11 +139,6 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       <input id="filter" type="text" placeholder="테이블 · 이름 · 값으로 찾기 (띄어 쓰면 모두 포함)" spellcheck="false" autocomplete="off">
       <span class="count" id="count"></span>
     </div>
-    <div class="rules" title="모을 때 거르는 필터 (쿼리 id · mapper 이름 · SQL 글에서 낱말 단위로, 대소문자 무시, * 는 이름 글자 여럿)">
-      <div class="rule"><span class="lbl">수집 제외</span><span class="chips" id="exChips"></span><input id="exAdd" type="text" placeholder="+ 낱말 (Enter)" spellcheck="false" autocomplete="off"></div>
-      <div class="rule"><span class="lbl">포함만</span><span class="chips" id="inChips"></span><input id="inAdd" type="text" placeholder="+ 낱말 (비우면 모두 모음)" spellcheck="false" autocomplete="off">
-        <label class="latest"><input type="checkbox" id="latestOnly"> 같은 쿼리는 최근 하나만</label><span class="sp"></span><span id="filtered"></span></div>
-    </div>
     <div class="main">
       <div id="list"></div>
       <div class="right">
@@ -153,8 +148,11 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
           <button class="primary" id="send">새 콘솔로 옮기기</button>
           <button id="copy">복사</button>
         </div>
-        <div class="excl" id="exclRow"><span class="lbl" title="누르면 이 쿼리 id · 테이블이 든 쿼리는 모으지 않습니다 (목록에서도 빠짐, 위 필터 줄에서 ✕ 로 되돌림)">제외</span><span id="exclBtns"></span></div>
-        <div class="excl" id="inclRow"><span class="lbl" title="누르면 포함 목록에 든 것만 모읍니다 (위 필터 줄에서 ✕ 로 되돌림)">포함만</span><span id="inclBtns"></span></div>
+        <div class="rules" title="모을 때 거르는 필터 — 쿼리 id · mapper 이름 · SQL 글에서 낱말 단위로 찾음 (대소문자 무시, * 는 이름 글자 여럿)">
+          <div class="rule"><span class="lbl">수집 제외</span><span class="words"><span class="chips" id="exChips"></span><span class="sugg" id="exSugg"></span></span><input id="exAdd" type="text" placeholder="+ 낱말 (Enter)" spellcheck="false" autocomplete="off"></div>
+          <div class="rule"><span class="lbl">포함만</span><span class="words"><span class="chips" id="inChips"></span><span class="sugg" id="inSugg"></span></span><input id="inAdd" type="text" placeholder="+ 낱말 (비우면 모두)" spellcheck="false" autocomplete="off"></div>
+          <div class="rule"><label class="latest"><input type="checkbox" id="latestOnly"> 같은 쿼리는 최근 하나만</label><span class="sp"></span><span id="filtered"></span></div>
+        </div>
       </div>
     </div>
     <div class="foot">

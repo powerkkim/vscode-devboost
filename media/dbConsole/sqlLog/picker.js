@@ -27,9 +27,11 @@
   function removeRule(kind, word) {
     sendRules({ ...rules, [kind]: rules[kind].filter((x) => x !== word) }, `"${word}" ${kind === 'exclude' ? '수집 제외' : '포함'}에서 뺌`);
   }
+  /** 수집 필터 칸: 걸린 낱말(칩, ✕ 로 빼기) · 고른 쿼리의 id · 테이블 제안(⊕ 로 더하기) */
   function renderRules() {
-    for (const [kind, id] of [['exclude', 'exChips'], ['include', 'inChips']]) {
-      const box = $(id);
+    const q = all.find((x) => x.id === cur && shown.includes(x));
+    for (const [kind, chipsId, suggId] of [['exclude', 'exChips', 'exSugg'], ['include', 'inChips', 'inSugg']]) {
+      const box = $(chipsId);
       box.textContent = '';
       for (const w of rules[kind]) {
         const chip = document.createElement('span');
@@ -43,7 +45,18 @@
         chip.appendChild(x);
         box.appendChild(chip);
       }
-      if (!rules[kind].length) box.appendChild(div('none', kind === 'exclude' ? '없음' : '없음 (모두 모음)'));
+      const sugg = $(suggId);
+      sugg.textContent = '';
+      for (const x of q ? q.excludes : []) {
+        if (has(rules[kind], x.word)) continue;
+        const b = document.createElement('button');
+        b.className = 'small ' + x.kind;
+        b.textContent = '⊕ ' + (x.kind === 'query' ? 'id ' : '') + x.word;
+        b.title = kind === 'exclude' ? `${x.kind === 'query' ? '이 쿼리' : '이 테이블'}가 든 쿼리는 모으지 않음` : `${x.kind === 'query' ? '이 쿼리' : '이 테이블'}가 든 쿼리만 모음`;
+        b.addEventListener('click', () => addRule(kind, x.word));
+        sugg.appendChild(b);
+      }
+      if (!rules[kind].length && !sugg.childElementCount) box.appendChild(div('none', kind === 'exclude' ? '없음' : '없음 (모두 모음)'));
     }
     $('latestOnly').checked = !!rules.latestOnly;
   }
@@ -134,21 +147,7 @@
     } else {
       $sql.textContent = '';
     }
-    // 고른 쿼리의 쿼리 id · 테이블로 바로 제외 · 포함
-    for (const [kind, id, row] of [['exclude', 'exclBtns', 'exclRow'], ['include', 'inclBtns', 'inclRow']]) {
-      const box = $(id);
-      box.textContent = '';
-      for (const x of q ? q.excludes : []) {
-        if (has(rules[kind], x.word)) continue;
-        const b = document.createElement('button');
-        b.className = 'small ' + x.kind;
-        b.textContent = x.word;
-        b.title = kind === 'exclude' ? `${x.kind === 'query' ? '이 쿼리' : '이 테이블'}가 든 쿼리는 모으지 않음` : `${x.kind === 'query' ? '이 쿼리' : '이 테이블'}가 든 쿼리만 모음`;
-        b.addEventListener('click', () => addRule(kind, x.word));
-        box.appendChild(b);
-      }
-      $(row).style.display = box.childElementCount ? '' : 'none';
-    }
+    renderRules();
     const on = $list.querySelector('.row.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
   }
