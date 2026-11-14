@@ -144,6 +144,29 @@ test('쿠키 이어받기 · 경로 값', () => {
   assert.deepStrictEqual([kept.pathVars.length, kept.origin], [2, 'A#b()']);
 });
 
+test('응답에서 값 꺼내기 · 주소 틀 맞추기', () => {
+  const j = { data: { accessToken: 'T', items: [{ id: 7 }, { id: 8 }], 'a.b': 1, obj: { x: 1 }, zero: 0, none: null }, ok: true };
+  const pick = (w, json = j) => M.pickValue(json, [['X-Token', 'hh']], w);
+  assert.deepStrictEqual(
+    ['data.accessToken', 'data.items[1].id', 'data["a.b"]', 'data.obj', 'ok', 'data.zero', ' data.accessToken '].map((w) => pick(w)),
+    ['T', '8', '1', '{"x":1}', 'true', '0', 'T']
+  );
+  assert.deepStrictEqual(['data.nope', 'data.none', 'data..x', 'data.items[9].id', 'data.accessToken.x', '', '[0]'].map((w) => pick(w)), [undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+  assert.strictEqual(pick('[0].id', [{ id: 3 }]), '3');
+  assert.strictEqual(pick('@header.x-token'), 'hh');
+  assert.strictEqual(pick('@header.none'), undefined);
+  assert.strictEqual(pick('@header.x-token', undefined), 'hh'); // JSON 이 아닌 응답에서도 헤더는
+
+  assert.deepStrictEqual(M.matchTemplate('{{baseUrl}}/plm/api/base/users/{userId}', 'http://localhost:5173/plm/api/base/users/7?x=1'), { vars: { userId: '7' }, fixed: 4 });
+  // 프록시 · context-path 차이: 뒤에서부터 맞춘다
+  assert.deepStrictEqual(M.matchTemplate('{{baseUrl}}/api/base/users/{userId:[0-9]+}', 'http://h/proxy/api/base/users/a%20b'), { vars: { userId: 'a b' }, fixed: 3 });
+  assert.deepStrictEqual(M.matchTemplate('http://localhost:8080/api/users', 'http://localhost:5173/api/users'), { vars: {}, fixed: 2 });
+  assert.strictEqual(M.matchTemplate('{{baseUrl}}/api/base/users', 'http://h/api/base/users/7'), undefined);
+  assert.strictEqual(M.matchTemplate('{{baseUrl}}/api/base/users/{id}', 'http://h/api/base/users'), undefined);
+  assert.strictEqual(M.matchTemplate('{{baseUrl}}/{a}/{b}', 'http://h/x/y'), undefined); // 글자가 하나도 안 맞으면 아니다
+  assert.deepStrictEqual(M.normalizeData({ collections: [{ kind: 'request', name: 'x', extract: [{ key: 'id', value: 'data.id' }] }] }).collections[0].extract, [{ key: 'id', value: 'data.id', enabled: true }]);
+});
+
 /** 시험용 WebSocket 서버: 받은 글을 되돌려 주고, 'big' 이면 큰 글을 조각으로 나눠 보낸다 */
 function wsServer() {
   const frame = (opcode, payload, fin = true) => {

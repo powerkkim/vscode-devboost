@@ -36,6 +36,8 @@ export interface ApiRequest {
   pathVars?: KeyValue[];
   /** Controller 에서 만든 요청이면 "클래스#메서드" — 같은 것을 두 번 만들지 않으려고 */
   origin?: string;
+  /** 응답이 오면 환경 변수로 저장할 값: key 는 변수 이름, value 는 응답에서의 위치 (data.items[0].id, @header.X-Token) */
+  extract?: KeyValue[];
 }
 
 export interface ApiFolder {
@@ -118,6 +120,7 @@ export function normalizeData(raw: unknown): ApiData {
     ...(r.example && typeof r.example === 'object' ? { example: { status: Number(r.example.status) || 0, body: String(r.example.body ?? ''), savedAt: Number(r.example.savedAt) || 0 } } : {}),
     ...(Array.isArray(r.pathVars) && r.pathVars.length ? { pathVars: kv(r.pathVars) } : {}),
     ...(typeof r.origin === 'string' && r.origin ? { origin: r.origin } : {}),
+    ...(Array.isArray(r.extract) && r.extract.length ? { extract: kv(r.extract) } : {}),
   });
   const node = (n: unknown): ApiNode | undefined => {
     if (!n || typeof n !== 'object') return undefined;
@@ -174,6 +177,67 @@ export function fill(text: string, vars: Variables, missing?: Set<string>): stri
     if (!changed) break;
   }
   return out;
+}
+
+/**
+ * 응답에서 값 하나를 꺼낸다. 위치는 data.items[0].id 처럼 점과 [번호]로, 이름에 점이 있으면 ["a.b"] 로.
+ * @header.이름 은 응답 헤더. 없으면 undefined. 객체 · 배열은 JSON 글로 돌려준다.
+ */
+export function pickValue(json: unknown, headers: [string, string][], where: string): string | undefined {
+  const w = where.trim();
+  if (!w) return undefined;
+  const head = w.match(/^@header\.(.+)$/i);
+  if (head) return headers.find(([k]) => k.toLowerCase() === head[1].trim().toLowerCase())?.[1];
+  let cur: unknown = json;
+  const re = /\[\s*(\d+)\s*\]|\[\s*"((?:[^"\\]|\\.)*)"\s*\]|\.?([^.[\]]+)/g;
+  let at = 0;
+  for (let m = re.exec(w); m; m = re.exec(w)) {
+    if (m.index !== at) return undefined; // 읽을 수 없는 모양
+    at = re.lastIndex;
+    if (cur === null || typeof cur !== 'object') return undefined;
+    if (m[1] !== undefined) cur = Array.isArray(cur) ? cur[Number(m[1])] : undefined;
+    else cur = (cur as Record<string, unknown>)[m[2] !== undefined ? m[2].replace(/\\(.)/g, '$1') : m[3].trim()];
+  }
+  if (at !== w.length || cur === undefined || cur === null) return undefined;
+  return typeof cur === 'object' ? JSON.stringify(cur) : String(cur);
+}
+
+/** 주소에서 호스트 앞부분({{baseUrl}} 이나 http://host)을 뗀 경로 조각들. ? 뒤는 버린다 */
+export function pathPartsOf(url: string): string[] {
+  return url
+    .split(/[?#]/)[0]
+    .replace(/^\{\{[^}]*\}\}/, '')
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '')
+    .split('/')
+    .filter(Boolean);
+}
+
+/**
+ * 요청의 주소 틀(…/users/{id})이 실제 호출의 경로(…/users/7)와 맞는가. 뒤에서부터 맞춘다 (context-path · 프록시 차이를 넘기려고).
+ * 맞으면 경로 값과 "글자 그대로 맞은 조각 수"를 돌려준다.
+ */
+export function matchTemplate(template: string, actualUrl: string): { vars: Record<string, string>; fixed: number } | undefined {
+  const t = pathPartsOf(template);
+  const a = pathPartsOf(actualUrl);
+  if (!t.length || t.length > a.length) return undefined;
+  const vars: Record<string, string> = {};
+  let fixed = 0;
+  for (let i = 1; i <= t.length; i++) {
+    const seg = t[t.length - i];
+    const val = a[a.length - i];
+    const name = seg.match(/^\{([A-Za-z_][\w.-]*)(?::[^{}]*)?\}$/)?.[1];
+    if (name) {
+      try {
+        vars[name] = decodeURIComponent(val);
+      } catch {
+        vars[name] = val;
+      }
+    } else if (/\{\{/.test(seg)) {
+      // 변수가 든 조각은 무엇이든 맞는 것으로
+    } else if (seg === val) fixed++;
+    else return undefined;
+  }
+  return fixed ? { vars, fixed } : undefined;
 }
 
 /* ------------------------------------------------------------------ 요청 만들기 */

@@ -89,7 +89,9 @@ test('매핑 메서드 읽기: 메서드 · 경로 · 이름 · 줄', () => {
   assert.strictEqual(by('list').title, '사용자 목록을 조회한다.');
   assert.strictEqual(by('get').title, '사용자 한 건');
   assert.strictEqual(by('create').title, 'create');
-  assert.strictEqual(by('get').origin, 'com.example.base.controller.UserController#get(Long,String)');
+  assert.strictEqual(by('get').origin, 'com.example.base.controller.UserController#get');
+  // 이름이 같은 매핑 메서드는 둘째부터 번호
+  assert.deepStrictEqual(C.readEndpoints('class A { @GetMapping("/a") void x() {} @PostMapping("/a") void x(String s) {} }', 'a.java').map((e) => e.origin), ['A#x', 'A#x~2']);
   assert.strictEqual(by('export').pathUnknown, true);
   assert.strictEqual(by('get').pathUnknown, false);
   // 어노테이션 줄부터 본문 끝까지가 그 메서드

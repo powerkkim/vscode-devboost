@@ -12,19 +12,20 @@ import { SpringServer, findSpringServer } from './springConfig';
 
 const EXCLUDE = '**/{node_modules,target,build,out,dist,.gradle,.git}/**';
 
-/** 문서 하나의 매핑 메서드들 (문서 버전이 같으면 다시 읽지 않는다) */
-const cache = new Map<string, { version: number; endpoints: Endpoint[] }>();
+/** 문서 하나의 매핑 메서드들 (내용이 같으면 다시 읽지 않는다. 닫았다 다시 연 문서는 버전이 같아도 내용이 다를 수 있다) */
+const cache = new Map<string, { version: number; text: string; endpoints: Endpoint[] }>();
 export function endpointsOf(doc: vscode.TextDocument): Endpoint[] {
   const key = doc.uri.toString();
   const hit = cache.get(key);
-  if (hit && hit.version === doc.version) return hit.endpoints;
+  const text = doc.getText();
+  if (hit && hit.version === doc.version && hit.text === text) return hit.endpoints;
   let endpoints: Endpoint[] = [];
   try {
-    endpoints = readEndpoints(doc.getText(), doc.uri.fsPath);
+    endpoints = readEndpoints(text, doc.uri.fsPath);
   } catch {
     // 읽지 못한 파일은 매핑이 없는 것으로
   }
-  cache.set(key, { version: doc.version, endpoints });
+  cache.set(key, { version: doc.version, text, endpoints });
   if (cache.size > 30) cache.delete(cache.keys().next().value as string);
   return endpoints;
 }

@@ -18,7 +18,7 @@ export interface Endpoint {
   path: string;
   /** 요청 이름: 요약(@Operation) → 주석 첫 줄 → 메서드 이름 */
   title: string;
-  /** "패키지.클래스#메서드(타입,타입)" */
+  /** "패키지.클래스#메서드". 이름이 같은 매핑 메서드가 더 있으면 둘째부터 #메서드~2 (파라미터가 바뀌어도 같은 요청으로 알아보려고 타입은 넣지 않는다) */
   origin: string;
   /** 경로가 글자가 아니라 상수여서 읽지 못함 */
   pathUnknown: boolean;
@@ -118,6 +118,7 @@ export function readEndpoints(source: string, file: string): Endpoint[] {
       // 경로 자리에 글자가 아닌 것(상수)이 있으면 읽지 못한 것
       const first = map.args.trim();
       const pathUnknown = baseUnknown || (!!first && !/"/.test(first) && !/^(method|produces|consumes|params|headers|name)\s*=/.test(first));
+      const nth = out.filter((e) => e.cls === cls && e.method.name === m.name).length + 1;
       const summary = annArg(ann(m.annotations, 'Operation'), 'summary') ?? annArg(ann(m.annotations, 'ApiOperation'), 'value');
       lines ??= source.split(/\r?\n/);
       out.push({
@@ -126,7 +127,7 @@ export function readEndpoints(source: string, file: string): Endpoint[] {
         http,
         path: plainPath(joinMapping(base, paths[0])),
         title: summary?.trim() || docTitle(lines, m.startLine ?? m.line) || m.name,
-        origin: `${cls.fqcn}#${m.name}(${m.params.map((p) => p.type).join(',')})`,
+        origin: `${cls.fqcn}#${m.name}${nth > 1 ? '~' + nth : ''}`,
         pathUnknown,
       });
     }

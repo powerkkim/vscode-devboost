@@ -43,6 +43,10 @@
     capDetail: undefined,
     capFilter: '',
     capTab: 'res',
+    /** 고른 호출과 주소가 맞는 모음의 요청 { id, vars } */
+    capMatch: undefined,
+    /** 요청 id → Controller 에서 새로 읽은 요청 (예전에 넣은 것과 달라졌을 때) */
+    refill: {},
     /** 브라우저에서 이어받은 인증 */
     follow: { on: true, hosts: [] },
   };
@@ -185,6 +189,133 @@
     renderMain();
     toast(`환경 "${env.name}" 에 {{${key}}} 를 저장했습니다`);
   }
+  /** 이 요청의 응답이 올 때마다 그 자리의 값을 변수로 저장하게 한다 (지금 값도 바로 넣는다) */
+  async function addExtract(r, suggest, path, value) {
+    const got = await ask('input', { title: '응답이 올 때마다 변수로 저장', prompt: `변수 이름 — 이 요청의 응답에서 ${path} 를 꺼내 넣습니다`, value: suggest });
+    const key = (got.value || '').trim();
+    if (!key) return;
+    if (!r.extract) r.extract = [];
+    const row = r.extract.find((x) => x.key.trim() === key);
+    if (row) Object.assign(row, { value: path, enabled: true });
+    else r.extract.push({ key, value: path, enabled: true });
+    const env = ensureEnv();
+    setVar(env, key, value);
+    changed(r);
+    persist();
+    renderMain();
+    toast(`{{${key}}} — 이 요청의 응답이 올 때마다 저장합니다`);
+  }
+
+  /** 예전 값은 살리고 모양은 새 것으로: 객체는 새 뼈대의 키, 값은 예전에 적어 둔 것 */
+  function mergeJson(fresh, old) {
+    if (Array.isArray(fresh)) return Array.isArray(old) && old.length ? old.map((x) => mergeJson(fresh[0], x)) : fresh;
+    if (fresh && typeof fresh === 'object') {
+      if (!old || typeof old !== 'object' || Array.isArray(old)) return fresh;
+      const out = {};
+      for (const k of Object.keys(fresh)) out[k] = k in old ? mergeJson(fresh[k], old[k]) : fresh[k];
+      return out;
+    }
+    if (old === undefined || (old !== null && typeof old === 'object')) return fresh;
+    return old;
+  }
+  const mergeRows = (fresh, old) => fresh.map((f) => old.find((o) => o.key === f.key) || f).concat(old.filter((o) => o.key.trim() && !fresh.some((f) => f.key === o.key)));
+  function shapeOf(v) {
+    if (Array.isArray(v)) return [v.length ? shapeOf(v[0]) : null];
+    if (v && typeof v === 'object') return Object.keys(v).sort().map((k) => [k, shapeOf(v[k])]);
+    return 0;
+  }
+  /** Controller 에서 읽은 모양 (값은 빼고): 달라졌는지 볼 때 쓴다 */
+  function signature(r) {
+    let body = r.bodyMode;
+    if (r.bodyMode === 'json') {
+      try {
+        body = shapeOf(JSON.parse(r.bodyText));
+      } catch (_) {
+        body = 'json?';
+      }
+    } else if (r.bodyMode === 'form' || r.bodyMode === 'multipart') body = r.bodyForm.map((x) => x.key + (x.file ? '@' : '')).sort();
+    const keys = (rows) => (rows || []).map((x) => x.key).filter(Boolean).sort();
+    return JSON.stringify([r.method, r.url, keys(r.params), keys(r.headers), r.bodyMode, body]);
+  }
+  /** fresh 에 있는 것이 old 에 다 있는가 (직접 보탠 파라미터 · 헤더는 다른 것으로 치지 않는다) */
+  function sameAsController(old, fresh) {
+    const o = JSON.parse(signature(old));
+    const f = JSON.parse(signature(fresh));
+    const has = (a, b) => b.every((k) => a.includes(k));
+    return o[0] === f[0] && o[1] === f[1] && has(o[2], f[2]) && has(o[3], f[3]) && o[4] === f[4] && JSON.stringify(o[5]) === JSON.stringify(f[5]);
+  }
+  function applyRefill(r) {
+    const fresh = S.refill[r.id];
+    if (!fresh) return;
+    delete S.refill[r.id];
+    r.method = fresh.method;
+    r.url = fresh.url;
+    r.params = mergeRows(fresh.params, r.params);
+    r.headers = mergeRows(fresh.headers, r.headers);
+    const oldPath = r.pathVars || [];
+    r.pathVars = (fresh.pathVars || []).map((f) => oldPath.find((o) => o.key === f.key && o.value) || f);
+    syncPathVars(r);
+    if (fresh.bodyMode === 'json') {
+      let merged = fresh.bodyText;
+      try {
+        merged = JSON.stringify(mergeJson(JSON.parse(fresh.bodyText), r.bodyMode === 'json' ? JSON.parse(r.bodyText) : undefined), null, 2);
+      } catch (_) {
+        // 예전 본문이 JSON 이 아니면 새 뼈대로
+      }
+      r.bodyText = merged;
+    } else if (fresh.bodyMode === 'form' || fresh.bodyMode === 'multipart') r.bodyForm = mergeRows(fresh.bodyForm, r.bodyForm);
+    r.bodyMode = fresh.bodyMode;
+    r.note = fresh.note;
+    changed(r, true);
+    renderMain();
+    toast('Controller 에 맞춰 다시 채웠습니다 (적어 둔 값은 그대로)');
+  }
+
+  /** 캡처한 호출의 값(경로 · 파라미터 · 본문)을 모음의 요청에 채워서 연다 */
+  function fillFromCapture(c, match) {
+    const hit = findNode(S.collections, match.id);
+    if (!hit) return toast('모음에서 사라진 요청입니다.');
+    const r = hit.node;
+    syncPathVars(r);
+    for (const v of r.pathVars || []) if (v.key in match.vars) v.value = match.vars[v.key];
+    const q = c.url.split('#')[0].split('?')[1] || '';
+    const dec = (x) => {
+      try {
+        return decodeURIComponent(x.replace(/\+/g, ' '));
+      } catch (_) {
+        return x;
+      }
+    };
+    const seen = [];
+    for (const p of q.split('&').filter(Boolean)) {
+      const i = p.indexOf('=');
+      const key = dec(i < 0 ? p : p.slice(0, i));
+      const value = i < 0 ? '' : dec(p.slice(i + 1));
+      seen.push(key);
+      const row = r.params.find((x) => x.key === key);
+      if (row) Object.assign(row, { value, enabled: true });
+      else r.params.push({ key, value, enabled: true });
+    }
+    // 브라우저가 보내지 않은 선택 파라미터는 꺼 둔다
+    if (q) for (const row of r.params) if (!seen.includes(row.key)) row.enabled = false;
+    if (c.reqBody && r.method !== 'GET') {
+      try {
+        r.bodyText = JSON.stringify(JSON.parse(c.reqBody), null, 2);
+        r.bodyMode = 'json';
+      } catch (_) {
+        // JSON 이 아닌 본문은 요청의 것을 그대로 둔다
+      }
+    }
+    S.mode = 'col';
+    S.draft = undefined;
+    S.selected = r.id;
+    reveal(r.id);
+    persist();
+    renderSide();
+    renderMain();
+    toast(`브라우저가 보낸 값으로 채웠습니다: ${r.name}`);
+  }
+
   const fmtAgo = (at) => {
     const s = Math.max(0, Math.round((Date.now() - at) / 1000));
     return s < 60 ? '방금' : s < 3600 ? Math.round(s / 60) + '분 전' : s < 86400 ? Math.round(s / 3600) + '시간 전' : Math.round(s / 86400) + '일 전';
@@ -576,6 +707,12 @@
     const got = await ask('captureDetail', { id });
     if (S.capSel !== id) return;
     S.capDetail = got.entry || undefined;
+    S.capMatch = undefined;
+    if (S.mode === 'cap') renderMain();
+    if (!S.capDetail) return;
+    const m = await ask('matchCapture', { id, requests: allRequests(S.collections, []).map((r) => ({ id: r.id, method: r.method, url: r.url })) });
+    if (S.capSel !== id || !m.match) return;
+    S.capMatch = m.match;
     if (S.mode === 'cap') renderMain();
   }
 
@@ -713,7 +850,11 @@
         { class: 'reqline cap' },
         h('span', { class: 'mt ' + c.method, text: c.method }),
         h('span', { class: 'url mono', text: c.url, title: c.url }),
-        h('button', { class: 'primary', text: '요청으로 열기', title: '이 호출과 같은 요청을 만들어 바로 고치고 다시 보냅니다', onclick: () => captureAsRequest(false) }),
+        (() => {
+          const hit = S.capMatch && findNode(S.collections, S.capMatch.id);
+          return hit ? h('button', { class: 'primary', text: `내 요청에 채우기: ${hit.node.name}`, title: '모음에 있는 같은 주소의 요청에 이 호출의 경로 값 · 파라미터 · 본문을 채워서 엽니다', onclick: () => fillFromCapture(c, S.capMatch) }) : null;
+        })(),
+        h('button', { class: S.capMatch && findNode(S.collections, S.capMatch.id) ? '' : 'primary', text: '요청으로 열기', title: '이 호출과 같은 요청을 만들어 바로 고치고 다시 보냅니다', onclick: () => captureAsRequest(false) }),
         h('button', { text: '모음에 넣기', title: '이 호출을 모음에 요청으로 저장합니다', onclick: () => captureAsRequest(true) })
       ),
       h('div', { class: 'tabs' }, tab('res', '응답'), tab('resHeaders', '응답 헤더', (c.resHeaders || []).length), tab('reqHeaders', '요청 헤더', c.reqHeaders.length), tab('reqBody', '요청 본문', c.reqBody ? '●' : 0), right),
@@ -787,6 +928,11 @@
     let first;
     for (const r of m.requests) {
       let hit = existing.find((x) => x.origin && x.origin === r.origin);
+      if (hit) {
+        // 예전에 넣은 뒤로 Controller 가 바뀌었으면 다시 채울 수 있게 알린다
+        if (sameAsController(hit, r)) delete S.refill[hit.id];
+        else S.refill[hit.id] = r;
+      }
       if (!hit) {
         let folder = findFolderNamed(S.collections, m.folder);
         if (!folder) {
@@ -939,6 +1085,7 @@
     if (id === 'headers') return ['헤더', count(r.headers)];
     if (id === 'body') return ['Body', r.bodyMode === 'none' ? 0 : BODY_MODES.find((m) => m[0] === r.bodyMode)[1]];
     if (id === 'auth') return ['인증', r.auth.type === 'none' ? 0 : r.auth.type === 'bearer' ? 'Bearer' : 'Basic'];
+    if (id === 'extract') return ['변수 저장', count(r.extract || [])];
     return ['메모', r.note.trim() ? '●' : 0];
   }
 
@@ -946,7 +1093,7 @@
     const el = document.getElementById('req-tabs');
     if (!el) return;
     el.replaceChildren(
-      ...['params', 'headers', 'body', 'auth', 'note'].map((id) => {
+      ...['params', 'headers', 'body', 'auth', 'extract', 'note'].map((id) => {
         const [name, n] = tabLabel(r, id);
         return h('div', { class: 'tab' + (S.tab === id ? ' on' : ''), onclick: () => ((S.tab = id), persist(), renderTabs(r), renderReqBody(r)) }, name, n ? h('span', { class: 'n', text: String(n) }) : null);
       })
@@ -1069,6 +1216,13 @@
       if (r.auth.type === 'bearer') form.append(...field('토큰', 'token', '{{token}}'));
       if (r.auth.type === 'basic') form.append(...field('아이디', 'username', ''), ...field('비밀번호', 'password', ''));
       el.replaceChildren(types, form, h('div', { class: 'hint', text: `로그인 응답이 내려 준 쿠키(세션)는 닫을 때까지 자동으로 이어 보냅니다. 지금 ${S.cookies}개. 토큰은 환경 변수에 넣고 {{token}} 으로 쓰면 환경마다 바꿀 수 있습니다.` }));
+    } else if (S.tab === 'extract') {
+      if (!r.extract) r.extract = [];
+      el.replaceChildren(
+        kvTable(r.extract, { onChange, keyHint: '변수 이름 (예: token)', valueHint: '응답에서의 위치 (예: data.accessToken)' }),
+        h('div', { class: 'hint', text: '응답이 올 때마다 그 값을 환경 변수에 넣습니다. 다른 요청에서 {{변수이름}} 으로 이어 씁니다 (등록 응답의 id 로 조회, 로그인 응답의 토큰 등).' }),
+        h('div', { class: 'hint', text: '위치: data.items[0].id 처럼 점과 [번호]. 응답 헤더는 @header.이름. 응답의 값을 눌러 "응답이 올 때마다 변수로 저장"을 고르면 여기에 들어옵니다.' })
+      );
     } else {
       const ta = h('textarea', { class: 'note', placeholder: '이 API 가 무엇인지, 필수 값, 주의할 점 등을 적어 둡니다.', oninput: (e) => ((r.note = e.target.value), changed(r)) });
       ta.value = r.note;
@@ -1224,6 +1378,15 @@
         envSelect(),
         h('button', { class: 'link', text: '환경 편집', onclick: openEnvDialog })
       ),
+      S.refill[r.id]
+        ? h(
+            'div',
+            { class: 'tip bar' },
+            'Controller 가 이 요청을 넣은 뒤로 바뀌었습니다 (주소 · 파라미터 · 본문). ',
+            h('button', { class: 'link', text: '다시 채우기', title: '새 모양으로 맞춥니다. 적어 둔 값은 그대로 둡니다', onclick: () => applyRefill(r) }),
+            h('button', { class: 'link', text: '그대로 두기', onclick: () => (delete S.refill[r.id], renderMain()) })
+          )
+        : null,
       h('div', { class: 'reqline' }, method, url, h('button', { id: 'send', class: 'primary', text: '보내기', title: 'Ctrl+Enter', onclick: doSend }), more),
       h('div', { class: 'tabs', id: 'req-tabs' }),
       h('div', { class: 'req-body', id: 'req-body' }),
@@ -1246,7 +1409,8 @@
   const fmtSize = (n) => (n < 1024 ? n + 'B' : n < 1024 * 1024 ? (n / 1024).toFixed(1) + 'KB' : (n / 1024 / 1024).toFixed(2) + 'MB');
 
   /** JSON 나무: 줄 하나씩, 접힌 것은 펼칠 때 그린다 */
-  function jsonNode(key, value, depth, last) {
+  function jsonNode(key, value, depth, last, path, owner) {
+    path = path || '';
     const wrap = h('div', {});
     const line = h('div', { class: 'ln' });
     const comma = last ? '' : ',';
@@ -1270,7 +1434,7 @@
         // 큰 배열은 100개씩
         const upto = Math.min(keys.length, drawn + 100);
         kids.querySelectorAll(':scope > .more').forEach((m) => m.remove());
-        for (let i = drawn; i < upto; i++) kids.appendChild(jsonNode(isArr ? undefined : keys[i], value[keys[i]], depth + 1, i === keys.length - 1));
+        for (let i = drawn; i < upto; i++) kids.appendChild(jsonNode(isArr ? undefined : keys[i], value[keys[i]], depth + 1, i === keys.length - 1, path + (isArr ? `[${i}]` : /^[A-Za-z_$][\w$-]*$/.test(keys[i]) ? (path ? '.' : '') + keys[i] : `[${JSON.stringify(keys[i])}]`), owner));
         drawn = upto;
         if (drawn < keys.length) kids.appendChild(h('div', { class: 'ln more', text: `… ${keys.length - drawn}개 더 보기`, onclick: drawMore }));
       };
@@ -1301,10 +1465,13 @@
         title: '누르면 복사 · 환경 변수로 저장',
         'data-menu': '1',
         onclick: (e) =>
-          menu(e.currentTarget, [
-            ['값 복사', () => vscode.postMessage({ type: 'copy', text: plain })],
-            ['환경 변수로 저장…', () => saveAsVar(typeof key === 'string' ? key : 'value', plain)],
-          ]),
+          menu(
+            e.currentTarget,
+            [
+              ['값 복사', () => vscode.postMessage({ type: 'copy', text: plain })],
+              ['환경 변수로 저장…', () => saveAsVar(typeof key === 'string' ? key : 'value', plain)],
+            ].concat(owner && path ? [['응답이 올 때마다 변수로 저장…', () => addExtract(owner, typeof key === 'string' ? key : 'value', path, plain)]] : [])
+          ),
       }),
       comma
     );
@@ -1433,7 +1600,7 @@
       }
       if (isJson && S.jsonView === 'tree' && !S.find) {
         findInfo.textContent = '';
-        body.append(h('div', { class: 'jt' }, jsonNode(undefined, res.json, 0, true)));
+        body.append(h('div', { class: 'jt' }, jsonNode(undefined, res.json, 0, true, '', r)));
         return;
       }
       const pre = h('pre', { class: 'raw' });
@@ -1583,6 +1750,16 @@
         }
       }
       if (m.ok) S.cookies = m.cookies;
+      if (m.ok && m.extracted && m.extracted.length) {
+        const got = m.extracted.filter((x) => x.value !== undefined);
+        const miss = m.extracted.filter((x) => x.value === undefined);
+        if (got.length) {
+          const env = ensureEnv();
+          for (const x of got) setVar(env, x.key, x.value);
+          persist();
+        }
+        toast((got.length ? `변수 저장: ${got.map((x) => `{{${x.key}}}`).join(', ')}` : '') + (miss.length ? `${got.length ? ' · ' : ''}응답에 없는 값: ${miss.map((x) => x.key).join(', ')}` : ''));
+      }
       S.responses[id] = m;
       S.resTab = 'body';
       S.find = '';

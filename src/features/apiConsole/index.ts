@@ -6,7 +6,7 @@ import { BrowserCapture, findBrowser } from './browser';
 import { AuthFollow, CaptureStore, Captured, capturedToRequest, parseHar, rowOf } from './capture';
 import { EndpointLens, endpointAt, endpointsOf, endpointsToRequests } from './endpoints';
 import { decodeText, explainError, isText, send } from './http';
-import { ApiEnvironment, ApiNode, ApiRequest, CookieJar, buildRequest, exportJson, findNode, importJson, parseCurl, toCurl, variablesOf } from './model';
+import { ApiEnvironment, ApiNode, ApiRequest, CookieJar, buildRequest, exportJson, findNode, importJson, matchTemplate, parseCurl, pickValue, toCurl, variablesOf } from './model';
 import { ApiStore } from './store';
 
 /**
@@ -232,6 +232,20 @@ export const apiConsole: Feature = {
           // 이름은 기본값
         }
         lastBody = { body: res.body, name };
+        // "변수 저장"에 적어 둔 값들을 응답에서 꺼낸다 (성공한 응답에서만)
+        const extracted: { key: string; value?: string }[] = [];
+        const rules = (request.extract ?? []).filter((r) => r.enabled && r.key.trim() && r.value.trim());
+        if (rules.length && res.status < 400) {
+          let json: unknown;
+          if (text) {
+            try {
+              json = JSON.parse(decodeText(res.body, ctype));
+            } catch {
+              // JSON 이 아니면 헤더에서만 꺼낼 수 있다
+            }
+          }
+          for (const r of rules) extracted.push({ key: r.key.trim(), value: pickValue(json, res.headers, r.value) });
+        }
         post({
           type: 'response',
           key,
@@ -250,6 +264,7 @@ export const apiConsole: Feature = {
           sent: { method: built.method, url: built.url, headers: res.sentHeaders, body: built.body && built.body.length <= 200_000 ? built.body.toString('utf8') : built.body ? `(본문 ${built.body.length}바이트)` : '' },
           cookies: jar.count(),
           followed,
+          extracted,
         });
         post({ type: 'history', history: store.addHistory({ at: Date.now(), method: built.method, url: built.url, status: res.status, ms: res.ms, request, environment: env?.name }) });
       } catch (e) {
@@ -288,6 +303,18 @@ export const apiConsole: Feature = {
           const base = variablesOf(envOf(m.envId)).baseUrl;
           // 이어받기가 켜져 있으면 토큰은 요청에 적지 않는다 (보낼 때 최신 것이 붙는다)
           post({ type: 'captureToRequest', token: m.token, request: c ? capturedToRequest(c, { baseUrl: base, dropAuth: followOn }) : null });
+          break;
+        }
+        case 'matchCapture': {
+          // 캡처한 호출과 주소 틀이 맞는 모음의 요청 (글자 그대로 맞은 조각이 가장 많은 것)
+          const c = captured.get(String(m.id));
+          let best: { id: string; vars: Record<string, string>; fixed: number } | undefined;
+          for (const cand of c && Array.isArray(m.requests) ? (m.requests as { id: string; method: string; url: string }[]) : []) {
+            if (String(cand.method).toUpperCase() !== c!.method) continue;
+            const hit = matchTemplate(String(cand.url), c!.url);
+            if (hit && (!best || hit.fixed > best.fixed)) best = { id: cand.id, ...hit };
+          }
+          post({ type: 'matchCapture', token: m.token, match: best ?? null });
           break;
         }
         case 'importHar': {
