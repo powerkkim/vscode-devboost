@@ -398,13 +398,14 @@ test('최근 쿼리 목록: 필터에 걸리면 넣지 않고 세기, 필터 바
   ring.add(Q('SELECT 2 FROM T2', 'M.two'));
   ring.add(Q('SELECT /* a.sel */ 3 FROM T1'));
   assert.deepStrictEqual([ring.items().length, ring.excluded], [3, 1]);
-  assert.strictEqual(ring.setFilter(new QueryFilter([], ['T2']), true), 2, 'T2 하나 + 예전 a.sel 하나');
-  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT /* a.sel */ 3 FROM T1']);
-  assert.strictEqual(ring.excluded, 1, '설정을 바꿔 뺀 것은 세지 않음');
+  // 제외를 TB_LOG → T2 로: T2 · 예전 a.sel 이 빠지고, 걸려 있던 TB_LOG 는 돌아온다
+  assert.deepStrictEqual(ring.setFilter(new QueryFilter([], ['T2']), true), { removed: 2, restored: 1 });
+  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT /* a.sel */ 3 FROM T1', 'INSERT INTO TB_LOG VALUES (1)']);
+  assert.strictEqual(ring.excluded, 1, '걸려 있는 것: T2 (같은 id 로 밀린 예전 a.sel 은 걸린 것이 아님)');
   ring.add(Q('SELECT /* a.sel */ 4 FROM T1'));
   ring.add(Q('SELECT 5 FROM T5'));
   ring.add(Q('SELECT 6 FROM T5'));
-  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT 6 FROM T5', 'SELECT 5 FROM T5', 'SELECT /* a.sel */ 4 FROM T1'], 'id 없는 쿼리는 하나로 합치지 않음');
+  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT 6 FROM T5', 'SELECT 5 FROM T5', 'SELECT /* a.sel */ 4 FROM T1', 'INSERT INTO TB_LOG VALUES (1)'], 'id 없는 쿼리는 하나로 합치지 않음');
   ring.clear();
   assert.deepStrictEqual([ring.items().length, ring.excluded], [0, 0]);
   assert.strictEqual(sameQueryKey(Q('SELECT 1', 'M.x')), 'M.x');
@@ -419,4 +420,43 @@ test('고르는 창의 수집 제외 단추: 쿼리 id(없으면 mapper) · 테�
   ]);
   assert.deepStrictEqual(excludeWords(Q('UPDATE TB_X SET A = 1', 'x.M.upd')).map((x) => x.word), ['x.M.upd', 'TB_X']);
   assert.deepStrictEqual(excludeWords(Q('SELECT 1')), []);
+});
+
+test('최근 쿼리 목록: 필터를 풀면 걸려 있던 쿼리가 차례대로 돌아온다 (최근 50개까지)', () => {
+  const ring = new QueryRing(10, new QueryFilter([], ['TB_CODE']));
+  ring.add(Q('SELECT 1 FROM TB_A'));
+  ring.add(Q('SELECT 2 FROM TB_CODE'));
+  ring.add(Q('SELECT 3 FROM TB_B'));
+  ring.add(Q('SELECT 4 FROM TB_CODE'));
+  assert.deepStrictEqual([ring.items().length, ring.excluded], [2, 2]);
+  assert.deepStrictEqual(ring.setFilter(new QueryFilter(), false), { removed: 0, restored: 2 });
+  assert.deepStrictEqual(ring.items().map((q) => q.sql), ['SELECT 4 FROM TB_CODE', 'SELECT 3 FROM TB_B', 'SELECT 2 FROM TB_CODE', 'SELECT 1 FROM TB_A']);
+  assert.strictEqual(ring.excluded, 0);
+  // 포함만: TB_A 만 남고 나머지는 걸려 있다가, 다시 풀면 돌아온다
+  assert.deepStrictEqual(ring.setFilter(new QueryFilter(['TB_A'], []), false), { removed: 3, restored: 0 });
+  assert.deepStrictEqual(ring.setFilter(new QueryFilter(), false).restored, 3);
+  // 기억은 50개까지, 넘친 것은 개수만
+  const many = new QueryRing(5, new QueryFilter([], ['X']));
+  for (let i = 0; i < 60; i++) many.add(Q(`SELECT ${i} FROM X`));
+  assert.strictEqual(many.excluded, 60);
+  assert.strictEqual(many.setFilter(new QueryFilter(), false).restored, 5, '목록 자리(5)만큼만 돌아옴');
+  assert.deepStrictEqual(many.items()[0].sql, 'SELECT 59 FROM X');
+});
+
+// ── Run · Debug 로 띄운 Java 서버: 실행 설정 바꾸기
+const { redirectJavaLaunch, toTerminalText, MARK } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'launch.js'));
+
+test('Java 실행 설정: 출력 곳을 정하지 않았거나 통합 터미널이면 디버그 콘솔로 받아 확장 터미널에', () => {
+  const base = { type: 'java', request: 'launch', name: 'DemoApplication', mainClass: 'com.x.Demo' };
+  const r = redirectJavaLaunch(base);
+  assert.deepStrictEqual(r, { ...base, console: 'internalConsole', internalConsoleOptions: 'neverOpen', vmArgs: '-Dspring.output.ansi.enabled=ALWAYS', [MARK]: true });
+  assert.strictEqual(base.console, undefined, '원래 설정은 그대로');
+  assert.strictEqual(redirectJavaLaunch({ ...base, console: 'integratedTerminal', vmArgs: '-Xmx1g' }).vmArgs, '-Xmx1g -Dspring.output.ansi.enabled=ALWAYS');
+  assert.deepStrictEqual(redirectJavaLaunch({ ...base, vmArgs: ['-Xmx1g'] }).vmArgs, ['-Xmx1g', '-Dspring.output.ansi.enabled=ALWAYS']);
+  assert.strictEqual(redirectJavaLaunch({ ...base, vmArgs: '-Dspring.output.ansi.enabled=NEVER' }).vmArgs, '-Dspring.output.ansi.enabled=NEVER');
+  // 따로 정해 둔 출력 곳 · attach · 다른 언어는 그대로
+  for (const keep of [{ ...base, console: 'internalConsole' }, { ...base, console: 'externalTerminal' }, { ...base, request: 'attach' }, { type: 'node', request: 'launch' }]) {
+    assert.strictEqual(redirectJavaLaunch(keep), keep);
+  }
+  assert.strictEqual(toTerminalText('a\nb\r\nc'), 'a\r\nb\r\nc');
 });

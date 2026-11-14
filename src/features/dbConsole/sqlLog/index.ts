@@ -2,13 +2,15 @@ import * as vscode from 'vscode';
 import { Feature } from '../../../core/feature';
 import { LogReader, LoggedQuery, QueryFilter, QueryRing, consoleText, queryInfo, queryTitle } from './parse';
 import { closeSqlLogPicker, showSqlLogPicker } from './picker';
+import { registerServerTerminals } from './serverTerminal';
 
 /**
  * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 로그(MyBatis·log4jdbc·SQL 로 시작하는 로그)에서
  * 쿼리를 골라 값까지 채워 두고, 고르면 새 DB 콘솔에 옮긴다 (실행은 하지 않는다).
  *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
- * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 디버그 콘솔 출력,
+ * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 출력
+ * (Java 서버는 디버그 출력으로 받아 확장이 만든 터미널에 보인다 — serverTerminal.ts),
  * 그리고 사용자가 고른 로그(`SQL 로그: 고른 로그에서 읽기` — 이미 떠 있는 서버의 로그). 쿼리는 메모리에만 둔다.
  * 상태바는 늘 보이고, 쿼리가 없으면 왜 없는지(읽는 곳 · 셸 통합이 없는 터미널 · 읽은 줄 수)를 알려 준다.
  * 수집 필터(include · exclude 낱말, 같은 쿼리 id 는 최신 하나만)는 모을 때 걸러, 필요 없는 공통 쿼리가 자리를 차지하지 않게 한다.
@@ -54,10 +56,13 @@ export const sqlLog: Feature = {
     status.name = 'DevBoost SQL 로그';
     let disposed = false;
 
+    const serverTerminals = registerServerTerminals(() => cfg().get<boolean>('debugTerminal', true));
+
     /** 지금 읽고 있는 곳 (터미널 명령 · 디버그 세션) → 읽은 줄 수 */
     const sources = new Map<object, { label: string; lines: number }>();
-    /** 지금까지 읽은 줄 수 (끝난 것 포함) */
+    /** 지금까지 읽은 줄 수 · 찾은 쿼리 수 (끝난 것 포함) */
     let linesRead = 0;
+    let found = 0;
 
     /** 쿼리가 없을 때 까닭과 할 일 (상태바 · 목록 열기에서 같이 쓴다) */
     const diagnose = (): string[] => {
@@ -67,7 +72,9 @@ export const sqlLog: Feature = {
         out.push(`읽는 중: ${reading.map((r) => `${r.label} (${r.lines}줄)`).join(', ')}`);
         if (!ring.items().length && !ring.excluded) {
           out.push(
-            linesRead
+            found
+              ? '목록을 비웠습니다. 화면을 조회하면 다시 모입니다.'
+              : linesRead
               ? '로그는 읽고 있지만 SQL 로그를 아직 찾지 못했습니다. 화면을 한 번 조회해 보고, 그래도 없으면 설정 loggers 에 SQL 로그 줄의 로거 이름을 적어 주세요.'
               : '아직 출력이 없습니다. 화면을 한 번 조회해 보세요.'
           );
@@ -75,8 +82,17 @@ export const sqlLog: Feature = {
       } else {
         out.push('읽고 있는 터미널 명령 · 디버그 세션이 없습니다. 이 기능이 켜지기 전에 띄운 서버는 읽지 못합니다 — 서버를 VS Code 터미널에서 다시 띄우거나, 터미널에서 로그를 드래그하고 우클릭 → "SQL 로그 — 고른 로그에서 읽기".');
       }
-      const noShell = vscode.window.terminals.filter((t) => 'shellIntegration' in t && !t.shellIntegration).map((t) => t.name);
-      if (noShell.length) out.push(`셸 통합이 없는 터미널(읽지 못함): ${noShell.join(', ')} — 명령 프롬프트(cmd)이거나 셸 통합이 꺼진 터미널입니다. PowerShell · Git Bash 터미널에서 띄워 주세요.`);
+      const noShell = vscode.window.terminals.filter((t) => 'shellIntegration' in t && !t.shellIntegration && !serverTerminals.owns(t)).map((t) => t.name);
+      const debugTerms = noShell.filter((n) => /^(Run|Debug): /.test(n));
+      const plainTerms = noShell.filter((n) => !/^(Run|Debug): /.test(n));
+      if (debugTerms.length) {
+        out.push(
+          cfg().get<boolean>('debugTerminal', true)
+            ? `Java 디버거가 만든 터미널(${debugTerms.join(', ')})은 읽지 못합니다. 서버를 멈추고 Run · Debug 로 다시 띄우면 DevBoost 가 읽을 수 있는 터미널에 보여 줍니다.`
+            : `Java 디버거가 만든 터미널(${debugTerms.join(', ')})은 읽지 못합니다. 설정 devBoost.dbConsole.sqlLog.debugTerminal 을 켜고 서버를 다시 띄우세요.`
+        );
+      }
+      if (plainTerms.length) out.push(`셸 통합이 없는 터미널(읽지 못함): ${plainTerms.join(', ')} — 명령 프롬프트(cmd)이거나 셸 통합이 꺼진 터미널입니다. PowerShell · Git Bash 터미널에서 띄워 주세요.`);
       if (typeof vscode.window.onDidStartTerminalShellExecution !== 'function') out.push('이 VS Code 는 터미널 출력을 읽지 못합니다 (1.93 이상 필요). 고른 로그에서 읽기는 됩니다.');
       return out;
     };
@@ -85,13 +101,13 @@ export const sqlLog: Feature = {
       const list = ring.items();
       status.text = `$(database) SQL ${list.length}`;
       const md = new vscode.MarkdownString(undefined, true);
-      md.isTrusted = { enabledCommands: ['devBoost.sqlLog.send', 'devBoost.sqlLog.readSelection'] };
+      md.isTrusted = { enabledCommands: ['devBoost.sqlLog.send', 'devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick'] };
       if (!list.length) {
         md.appendMarkdown('**SQL 로그** — 모은 쿼리가 없습니다\n\n');
         for (const line of diagnose()) md.appendMarkdown(`- ${line.replace(/[[\]\\*_`]/g, '\\$&')}\n`);
-        md.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection)\n\n');
+        md.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection) · [$(filter) 수집 필터](command:devBoost.sqlLog.pick)\n\n');
       }
-      if (ring.excluded) md.appendMarkdown(`$(filter) 수집 필터로 뺀 쿼리 ${ring.excluded}개 (설정 \`exclude\` · \`include\`)\n\n`);
+      if (ring.excluded) md.appendMarkdown(`[$(filter) 수집 필터로 빠진 쿼리 ${ring.excluded}개](command:devBoost.sqlLog.pick) — 목록 창 위에서 필터를 풀면 돌아옵니다\n\n`);
       if (list.length) md.appendMarkdown('**최근 쿼리** — 누르면 새 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
       for (const q of list) {
         const arg = encodeURIComponent(JSON.stringify([q.id]));
@@ -121,30 +137,39 @@ export const sqlLog: Feature = {
       }
     };
 
-    /** 고르는 창을 연다 — 연 순간의 목록 그대로 (그 뒤 들어온 쿼리는 다시 열면 보인다) */
+    /** 지금 수집 필터 */
+    const currentFilter = () => ({ include: cfg().get<string[]>('include', []), exclude: cfg().get<string[]>('exclude', []), latestOnly: cfg().get<boolean>('latestOnly', false) });
+
+    /** 고르는 창을 연다 — 연 순간의 목록 그대로 (그 뒤 들어온 쿼리는 다시 열면 보인다). 쿼리가 없어도 열어 까닭과 필터를 보인다 */
     const pick = () => {
-      if (!ring.items().length) {
-        const why = ring.excluded
-          ? `읽은 쿼리 ${ring.excluded}개는 모두 수집 필터에 걸렸습니다 (설정 devBoost.dbConsole.sqlLog.exclude · include).`
-          : diagnose().join(' ');
-        void vscode.window.showInformationMessage(`모은 쿼리가 없습니다. ${why}`, '고른 로그에서 읽기').then((a) => a && readSelection());
-        return;
-      }
-      showSqlLogPicker(context, { items: () => ring.items(), send, timeText, excluded: () => ring.excluded, exclude, accepts: (q) => ring.accepts(q) });
+      showSqlLogPicker(context, {
+        items: () => ring.items(),
+        send,
+        timeText,
+        excluded: () => ring.excluded,
+        filter: currentFilter,
+        setFilter,
+        diagnose: () => (ring.items().length ? [] : diagnose()),
+        readSelection: () => readSelection(),
+      });
     };
 
     /**
-     * 낱말을 수집 제외(exclude)에 더한다. 설정을 적어 둔 곳(작업 영역이 있으면 그곳, 없으면 사용자)에 넣고,
-     * 이미 모인 목록에도 바로 적용한다. 이미 있으면 그대로 둔다
+     * 수집 필터를 바꾼다: 바뀐 설정만 적어 둔 곳(작업 영역에 적어 뒀으면 그곳, 아니면 사용자)에 쓰고, 모인 목록에 바로 적용한다.
+     * 걸려 있던 최근 쿼리는 풀리면 목록으로 돌아온다
      */
-    const exclude = async (word: string) => {
-      const list = cfg().get<string[]>('exclude', []);
-      if (list.some((w) => w.toLowerCase() === word.toLowerCase())) return;
-      const where = cfg().inspect<string[]>('exclude')?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-      const next = [...list, word];
-      ring.setFilter(new QueryFilter(cfg().get<string[]>('include', []), next), cfg().get<boolean>('latestOnly', false));
+    const setFilter = async (next: { include: string[]; exclude: string[]; latestOnly: boolean }) => {
+      const clean = (list: string[]) => [...new Map(list.map((w) => w.trim()).filter(Boolean).map((w) => [w.toLowerCase(), w])).values()];
+      const want = { include: clean(next.include), exclude: clean(next.exclude), latestOnly: !!next.latestOnly };
+      const result = ring.setFilter(new QueryFilter(want.include, want.exclude), want.latestOnly);
       refresh();
-      await cfg().update('exclude', next, where);
+      const now = currentFilter();
+      for (const key of ['include', 'exclude', 'latestOnly'] as const) {
+        if (JSON.stringify(now[key]) === JSON.stringify(want[key])) continue;
+        const where = cfg().inspect(key)?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+        await cfg().update(key, want[key], where);
+      }
+      return result;
     };
 
     const newReader = () => new LogReader(Date.now, { auto: cfg().get<boolean>('autoDetect', true), keywords: cfg().get<string[]>('loggers', []) });
@@ -159,8 +184,9 @@ export const sqlLog: Feature = {
       sources.set(key, source);
       refresh();
       let idle: ReturnType<typeof setTimeout> | undefined;
-      const take = (found: LoggedQuery[]) => {
-        for (const q of found) ring.add(q);
+      const take = (list: LoggedQuery[]) => {
+        found += list.length;
+        for (const q of list) ring.add(q);
       };
       return {
         push(chunk: string) {
@@ -213,6 +239,7 @@ export const sqlLog: Feature = {
             if (m.type !== 'event' || m.event !== 'output' || !m.body?.output) return;
             const cat = m.body.category ?? 'console';
             if (cat !== 'stdout' && cat !== 'stderr' && cat !== 'console') return;
+            serverTerminals.output(session, m.body.output);
             (src ??= openSource(session, `디버그 "${session.name}"`)).push(m.body.output);
           },
           onWillStopSession: () => src?.end(),
@@ -271,6 +298,7 @@ export const sqlLog: Feature = {
       vscode.commands.registerCommand('devBoost.sqlLog.pick', pick),
       vscode.commands.registerCommand('devBoost.sqlLog.readSelection', readSelection),
       vscode.debug.registerDebugAdapterTrackerFactory('*', debugTracker),
+      ...serverTerminals.disposables,
       vscode.window.onDidOpenTerminal(refresh),
       vscode.window.onDidCloseTerminal(refresh),
       vscode.commands.registerCommand('devBoost.sqlLog.send', (id: number) => send(ring.get(Number(id)))),

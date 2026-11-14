@@ -41,4 +41,20 @@ button.small { padding: 1px 8px; font-size: 0.9em; font-family: var(--vscode-edi
 button.small.query::before { content: 'id '; opacity: 0.6; font-family: var(--vscode-font-family); }
 .foot .ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
 .foot .err { color: var(--vscode-errorForeground); }
-#exclBtns { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+#exclBtns, #inclBtns { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.rules { display: flex; flex-direction: column; gap: 4px; padding: 0 0 8px; }
+.rule { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 26px; }
+.rule .lbl { width: 64px; color: var(--vscode-descriptionForeground); }
+.rule .sp { flex: 1; }
+.chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border-radius: 10px; font-family: var(--vscode-editor-font-family); font-size: 0.9em; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
+.chip.include { background: var(--vscode-charts-blue, #3794ff); color: #fff; }
+.chip .x { padding: 0 5px; border: 0; background: transparent; color: inherit; opacity: 0.75; font-size: 0.9em; }
+.chip .x:hover { opacity: 1; background: transparent; }
+.none { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+#exAdd, #inAdd { width: 170px; box-sizing: border-box; padding: 2px 6px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; font: inherit; font-size: 0.92em; outline: none; }
+#exAdd:focus, #inAdd:focus { border-color: var(--vscode-focusBorder); }
+.latest { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+#filtered { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.empty .why { margin-top: 8px; line-height: 1.5; font-size: 0.92em; }
+.empty button { margin-top: 12px; }
