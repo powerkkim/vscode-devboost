@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
 import type { BookEntry } from './entry';
 import { fillQuery, matches, newEntryText } from './entry';
 import { QueryBookStore } from './store';
+import { newNonce } from '../../../core/webview';
 
 /** 사전이 콘솔에 넣을 때 쓰는 것 (콘솔이 구현) */
 export interface BookTarget {
@@ -130,8 +130,8 @@ export class QueryBookPanel {
   }
 
   private html(webview: vscode.Webview): string {
-    const nonce = randomBytes(16).toString('base64');
-    const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'queryBook', f));
+    const nonce = newNonce();
+    const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'dbConsole', 'queryBook', f));
     return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">

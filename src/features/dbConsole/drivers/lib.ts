@@ -3,7 +3,8 @@ import * as path from 'path';
 /**
  * DB 드라이버 라이브러리(pg, mysql2)는 확장 본체에 넣지 않고 dist/drivers/<이름>.js 로 따로 묶는다.
  * 그 DB에 처음 접속할 때 여기서 읽으므로, 쓰지 않는 DB의 라이브러리는 메모리에 올라오지 않는다.
- * (Oracle 은 본체에 함께 들어 있다)
+ * (Oracle 의 oracledb 도 dist/drivers/oracle.js 로 따로 묶는다 — 코드에서는 require('oracledb') 그대로 쓰고,
+ *  묶을 때 esbuild.mjs 의 SPLIT_LIBS 가 그 파일을 읽도록 바꾼다)
  */
 const loaded = new Map<string, unknown>();
 

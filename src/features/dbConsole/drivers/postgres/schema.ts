@@ -1,5 +1,5 @@
 import type { CollectedSchema, Relation, SchemaReader, TableColumn } from '../../driver/types';
-import type { ColumnType, ConstraintInfo, IndexInfo } from '../../../dbSchema/schema/types';
+import type { ColumnType, ConstraintInfo, IndexInfo } from '../../schema/types';
 
 /**
  * PostgreSQL 딕셔너리 조회 (pg_catalog). vscode·pg 모듈에 의존하지 않는다 — 쿼리 함수를 받는다.

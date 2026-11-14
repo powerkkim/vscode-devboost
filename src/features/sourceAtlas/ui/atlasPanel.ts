@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { randomBytes } from 'crypto';
-import { analyzeSourceAsync, clearAtlasCaches } from '../pipeline';
+import { atlasOptions, clearAtlasCaches, loadPipeline } from '../lazy';
+import { newNonce } from '../../../core/webview';
 
 /**
  * Atlas 화면(Webview). 한 번에 하나만 띄우고, 다시 열면 같은 패널에서 새 파일을 분석한다.
@@ -110,23 +110,13 @@ export class AtlasPanel {
     const run = ++this.runId;
     const isStale = () => run !== this.runId || this.disposed;
     try {
-      const cfg = vscode.workspace.getConfiguration('devBoost.sourceAtlas');
       const started = Date.now();
       const file = path.relative(this.workspaceRoot, this.rootFile).split(path.sep).join('/');
       post({ type: 'loading', run, file, step: { index: 0, total: 0, label: '분석 준비 중' } });
       // 상태 표시줄에도 진행 표시 (웹뷰 안의 진행 막대와 함께)
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Source Atlas 분석 중' }, async () => {
-        const result = await analyzeSourceAsync(this.rootFile, {
-          workspaceRoot: this.workspaceRoot,
-          maxDepth: cfg.get<number>('maxDepth', 3),
-          maxUp: cfg.get<number>('maxUpDepth', 3),
-          backend: cfg.get<boolean>('backend.enabled', true),
-          backendDepth: cfg.get<number>('backend.maxDepth', 6),
-          vite: cfg.get<boolean>('vite.enabled', true) ? {} : false,
-          contextPath: cfg.get<string>('backend.contextPath', '') || undefined,
-          aliases: cfg.get<Record<string, string>>('aliases', {}),
-          fresh: this.fresh,
-        }, (step) => {
+        const { analyzeSourceAsync } = await loadPipeline();
+        const result = await analyzeSourceAsync(this.rootFile, atlasOptions(this.workspaceRoot, this.fresh), (step) => {
           if (!isStale()) post({ type: 'loading', run, file, step, elapsedMs: Date.now() - started });
         }, isStale);
         if (!result || isStale()) return;
@@ -149,7 +139,7 @@ export class AtlasPanel {
     const base = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'sourceAtlas');
     const js = wv.asWebviewUri(vscode.Uri.joinPath(base, 'app.js'));
     const css = wv.asWebviewUri(vscode.Uri.joinPath(base, 'app.css'));
-    const nonce = randomBytes(16).toString('base64');
+    const nonce = newNonce();
     // Vue Flow 가 노드 위치를 style 속성으로 주므로 style-src 는 'unsafe-inline' 이 필요하다. 스크립트는 nonce 로만 허용.
     return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">

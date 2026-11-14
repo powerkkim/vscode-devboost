@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.29.0 - 2026-11-14
+- **JavaScript 작업대** (새 묶음 Code Playground, `Ctrl+Alt+J`) — 예제 데이터와 함께 JavaScript · TypeScript 를 바로 돌려 보는 화면
+  - 실무 예제 500여 개(넣기 · 빼기, 중복, 묶기 · 집계, 날짜, 금액, 트리, 엑셀, 검증 …)를 찾아 고르면 코드 · 입력 데이터가 채워지고 바로 실행
+  - 고르기로 만들기: 입력 데이터의 칸을 골라 거르기 → 중복 빼기 → 묶기 → 정렬 → 앞에서 몇 개 코드를 만듦
+  - 입력 데이터는 JSON 이나 엑셀에서 복사한 표. 바꾸기: 엑셀 표 → JSON, `USER_NM` → `userNm`, JSON → TypeScript 타입 · Vue defineProps
+  - 결과는 출력과 표로. 5초 제한 · 멈추기 · 출력 한도. VS Code 에 들어 있는 Node.js 로 돌려 따로 설치할 것 없음
+  - 편집기에서 고른 코드로 열기, `편집기에 넣기`. 스위치 `devBoost.playground.enabled` · `devBoost.playground.jsBench.enabled`
+- **정규식 작업대** (Code Playground, `Ctrl+Alt+R`) — 정규식을 만들고 시험 글에 맞춰 보는 화면
+  - 만들기: 자주 쓰는 정규식 60여 개, 질문 따라가기, 예시로 만들기(맞아야 할 글 · 틀려야 할 글), 직접 만들기(조각 · 묶음 · 반복 · 꺼내기 · 앞뒤 조건)
+  - 시험 글에 맞는 곳 표시, 그룹 표, 바꾸기 결과, 확인할 글(글 전체가 맞는지)
+  - Java `Pattern.compile` · JavaScript `/…/` 코드로 복사 · 편집기에 넣기. 편집기에서 고른 글로 열기
+  - 계산은 따로 띄운 스레드에서, 1초가 넘는 패턴은 멈춤 (편집기가 멈추지 않음). 스위치 `devBoost.playground.regexBench.enabled`
+- **기능을 여섯 묶음으로 정리** — Search Everywhere / DB 콘솔 / API 콘솔 / Source Atlas / 코드 도구 / Code Playground
+  - **DB 콘솔** 안으로: DB 연결 · 콘솔, Mapper 쿼리 실행(MyBatis), SQL 로그, 스키마 · 테이블 정의서. `devBoost.dbConsole.enabled` 를 끄면 모두 꺼지고, 안의 기능은 따로도 끌 수 있음
+  - **코드 도구** (새 묶음): import 따라가기, 케이스 변환. 묶음 스위치 `devBoost.codeTools.enabled`
+  - 명령 팔레트의 이름도 묶음에 맞춤: `DevBoost · DB 콘솔: …`, `DevBoost · 코드 도구: …`. 단축키는 그대로
+- **설정 이름이 바뀜** — `devBoost.mybatisRunner.*` → `devBoost.dbConsole.mybatis.*`, `devBoost.sqlLog.*` → `devBoost.dbConsole.sqlLog.*`, `devBoost.dbSchema.enabled` → `devBoost.dbConsole.schema.enabled`, `devBoost.importJump.*` → `devBoost.codeTools.importJump.*`, `devBoost.caseConverter.*` → `devBoost.codeTools.caseConverter.*`
+  - 예전 이름으로 적어 둔 값(사용자 · 작업 영역)은 처음 켤 때 새 이름으로 옮겨짐. 예전 이름은 설정 화면에 "이름이 바뀜" 으로 표시
+- **가벼워짐** — Oracle 드라이버와 Source Atlas 의 분석 라이브러리를 본체에서 떼어, 그 기능을 처음 쓸 때만 읽음. 본체 2.47MB → 0.50MB, 켤 때 읽는 시간과 메모리가 1/4 수준 (Oracle · Atlas 를 쓰지 않으면 끝까지 읽지 않음)
+- **코드 정리** — 기능 폴더를 묶음별로 옮기고, 화면마다 따로 있던 같은 코드를 한 곳으로. 동작은 그대로
+- 설정 설명의 테이블 정의서 형식을 실제(Excel)와 맞춤
+
 ## 0.28.1 - 2026-11-14
 - **아이콘** — 확장 아이콘(남색 바탕의 로켓)을 넣고, 로켓에 기능 표시를 겹친 아이콘 세트로 맞춤: 사이드바는 로켓 + DB, API 콘솔 탭은 로켓 + 주고받는 화살표, Search Everywhere 탭은 로켓 + 돋보기
 - **DevBoost 의 기능임을 알아보게** — 명령 팔레트의 모든 명령이 `DevBoost · API 콘솔: 열기` 처럼 `DevBoost ·` 로 시작 (`devboost` 만 쳐도 전체가 나옴). Controller 위 표시와 상태바에는 로켓, 우클릭 메뉴는 `DevBoost: 이 요청을 API 콘솔에서 열기`, API 콘솔 화면 머리에 `DevBoost` 표시

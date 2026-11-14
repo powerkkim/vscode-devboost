@@ -1,0 +1,92 @@
+/* 정규식 작업대: 위(만들기) / 패턴 · 확인할 글 / 시험 글 · 그룹 · 바꾸기 / 코드 */
+html, body { height: 100%; }
+body { margin: 0; padding: 0; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+.wrap { display: flex; flex-direction: column; height: 100vh; }
+section { flex: none; border-bottom: 1px solid var(--vscode-panel-border); }
+.hidden { display: none !important; }
+.dim { color: var(--vscode-descriptionForeground); }
+.pad { padding: 8px; }
+.sp { flex: 1; }
+.error { color: var(--vscode-errorForeground); }
+.ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
+.warn { color: var(--vscode-editorWarning-foreground); }
+.lbl { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+.row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; flex-wrap: wrap; }
+label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+input[type="radio"], input[type="checkbox"] { margin: 0; }
+
+input[type="text"], input[type="number"], select, textarea {
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent);
+  font-family: inherit; font-size: inherit; padding: 3px 6px; border-radius: 2px; min-width: 0; box-sizing: border-box;
+}
+input:focus, select:focus, textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+select { color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border-color: var(--vscode-dropdown-border, transparent); }
+input.num { width: 64px; }
+input.short { width: 90px; }
+input.name { width: 140px; }
+button { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; padding: 4px 10px; border-radius: 2px; cursor: pointer; font-family: inherit; font-size: inherit; }
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.primary:hover { background: var(--vscode-button-hoverBackground); }
+
+/* 만들기 */
+.tabs { display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 8px; background: var(--vscode-sideBarSectionHeader-background, transparent); border-bottom: 1px solid var(--vscode-panel-border); }
+#fold { padding: 0 8px; }
+.make .body { max-height: 38vh; overflow: auto; }
+.pane { padding: 6px 8px; }
+#presetSearch { width: 280px; margin-bottom: 4px; }
+.cat { margin: 6px 0 3px; font-weight: 600; color: var(--vscode-descriptionForeground); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { padding: 2px 8px; }
+.form { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; }
+.form > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.checks { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.two textarea { width: 100%; height: 96px; resize: vertical; font-family: var(--vscode-editor-font-family); }
+#composePane .row { padding: 4px 0; }
+.card { border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 4px 8px; margin: 4px 0; }
+.card.bunch { border-style: dashed; }
+.cardHead { display: flex; align-items: center; justify-content: space-between; }
+.tools button { padding: 0 6px; margin-left: 2px; }
+.line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 3px 0; }
+.line .lbl { min-width: 58px; }
+.line input[type="text"]:not(.short):not(.name) { flex: 1; min-width: 160px; }
+.inner { margin: 4px 0 4px 14px; }
+
+/* 패턴 */
+.pattern .slash { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 1.2em; }
+#pattern { flex: 1; min-width: 200px; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); }
+#pattern.bad { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+.flags { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+#check { width: 320px; font-family: var(--vscode-editor-font-family); }
+
+/* 시험 글 · 그룹 · 바꾸기 */
+.main { flex: 1; min-height: 120px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-bottom: 1px solid var(--vscode-panel-border); }
+.col { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--vscode-panel-border); }
+.col:last-child { border-right: 0; }
+.head { display: flex; align-items: center; gap: 14px; height: 28px; padding: 0 8px; flex: none; border-bottom: 1px solid var(--vscode-panel-border); }
+.title { font-weight: 600; }
+.col .pane { flex: 1; min-height: 0; overflow: auto; padding: 0; }
+.sampleBox { position: relative; flex: 1; min-height: 0; background: var(--vscode-editor-background); }
+#marks, #sample {
+  position: absolute; inset: 0; margin: 0; padding: 6px 8px; box-sizing: border-box; border: 0; border-radius: 0;
+  font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); line-height: 1.5; tab-size: 4;
+  white-space: pre; overflow: auto; letter-spacing: normal;
+}
+#marks { color: transparent; pointer-events: none; overflow: hidden; }
+#marks mark { color: transparent; border-radius: 2px; background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33)); outline: 1px solid var(--vscode-editor-findMatchHighlightBorder, transparent); }
+#marks mark.empty { display: inline-block; width: 0; border-left: 2px solid var(--vscode-editorCursor-foreground); background: none; vertical-align: text-bottom; height: 1.2em; }
+#sample { background: transparent; color: var(--vscode-editor-foreground); resize: none; caret-color: var(--vscode-editorCursor-foreground); }
+table { border-collapse: collapse; width: 100%; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); }
+th, td { padding: 2px 8px; border-bottom: 1px solid var(--vscode-panel-border); text-align: left; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+th { position: sticky; top: 0; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); font-weight: 600; }
+tr.first td { border-top: 1px solid var(--vscode-panel-border); }
+td.val { color: var(--vscode-textPreformat-foreground, var(--vscode-foreground)); }
+#replacePane .row { padding: 6px 8px; }
+#replacement { flex: 1; font-family: var(--vscode-editor-font-family); }
+#replaced { margin: 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); line-height: 1.5; }
+
+/* 코드 */
+.code { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 0; }
+#codeText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family); padding: 3px 6px; background: var(--vscode-textCodeBlock-background); border-radius: 2px; }
+#status { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

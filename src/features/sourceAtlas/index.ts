@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Feature } from '../../core/feature';
-import { analyzeSource } from './pipeline';
+import { atlasOptions, loadPipeline } from './lazy';
 import { AtlasPanel } from './ui/atlasPanel';
 
 /**
@@ -11,9 +11,10 @@ import { AtlasPanel } from './ui/atlasPanel';
 export const sourceAtlas: Feature = {
   id: 'sourceAtlas',
   name: 'Source Atlas',
+  switches: ['sourceAtlas.enabled'],
   start(context) {
     const output = vscode.window.createOutputChannel('DevBoost Atlas');
-    const dump = vscode.commands.registerCommand('devBoost.sourceAtlas.dump', () => {
+    const dump = vscode.commands.registerCommand('devBoost.sourceAtlas.dump', async () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (!doc || !doc.fileName.endsWith('.vue')) {
         void vscode.window.showWarningMessage('Source Atlas: 분석할 .vue 파일을 먼저 열어 주세요.');
@@ -24,20 +25,10 @@ export const sourceAtlas: Feature = {
         void vscode.window.showWarningMessage('Source Atlas: 워크스페이스 폴더 안의 파일만 분석할 수 있습니다.');
         return;
       }
-      const cfg = vscode.workspace.getConfiguration('devBoost.sourceAtlas');
       const started = Date.now();
       try {
-        const { graph, notes } = analyzeSource(doc.fileName, {
-          workspaceRoot: folder.uri.fsPath,
-          maxDepth: cfg.get<number>('maxDepth', 3),
-          maxUp: cfg.get<number>('maxUpDepth', 3),
-          backend: cfg.get<boolean>('backend.enabled', true),
-          backendDepth: cfg.get<number>('backend.maxDepth', 6),
-          vite: cfg.get<boolean>('vite.enabled', true) ? {} : false,
-          contextPath: cfg.get<string>('backend.contextPath', '') || undefined,
-          aliases: cfg.get<Record<string, string>>('aliases', {}),
-          fresh: true,
-        });
+        const { analyzeSource } = await loadPipeline();
+        const { graph, notes } = analyzeSource(doc.fileName, atlasOptions(folder.uri.fsPath, true));
         output.clear();
         notes.forEach((n) => output.appendLine(`// ${n}`));
         output.appendLine(`// ${path.basename(doc.fileName)} — 노드 ${graph.nodes.length}, 엣지 ${graph.edges.length}, ${Date.now() - started}ms`);

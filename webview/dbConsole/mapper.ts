@@ -4,7 +4,7 @@
 import type { EditorView } from '@codemirror/view';
 import type { EditorState } from '@codemirror/state';
 import type { DialectRules, Statement } from '../../src/features/dbConsole/sql/statements';
-import { parseMapperHeader } from '../../src/features/mybatisRunner/mapper/consoleSql';
+import { parseMapperHeader } from '../../src/features/dbConsole/mybatis/mapper/consoleSql';
 import { currentTargets } from './assist';
 
 type InputType = 'auto' | 'string' | 'number' | 'date' | 'list' | 'json' | 'null' | 'empty';

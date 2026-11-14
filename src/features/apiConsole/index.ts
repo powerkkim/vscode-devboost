@@ -8,6 +8,7 @@ import { EndpointLens, endpointAt, endpointsOf, endpointsToRequests } from './en
 import { decodeText, explainError, isText, send } from './http';
 import { ApiEnvironment, ApiNode, ApiRequest, CookieJar, buildRequest, exportJson, findNode, importJson, matchTemplate, parseCurl, pickValue, toCurl, variablesOf } from './model';
 import { ApiStore } from './store';
+import { newNonce } from '../../core/webview';
 
 /**
  * API 콘솔: API 요청을 모음(폴더)으로 저장해 두고 보내 보는 화면. 편집기 탭으로 열린다.
@@ -26,13 +27,6 @@ function cfg() {
   return vscode.workspace.getConfiguration('devBoost.apiConsole');
 }
 
-function nonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let s = '';
-  for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-
 interface FromView {
   type: string;
   [k: string]: unknown;
@@ -41,6 +35,7 @@ interface FromView {
 export const apiConsole: Feature = {
   id: 'apiConsole',
   name: 'API 콘솔',
+  switches: ['apiConsole.enabled'],
   start(context) {
     const store = new ApiStore(context);
     const jar = new CookieJar();
@@ -470,7 +465,7 @@ export const apiConsole: Feature = {
       );
       const css = panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'app.css'));
       const js = panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'app.js'));
-      const n = nonce();
+      const n = newNonce();
       panel.webview.html = `<!DOCTYPE html>
 <html lang="ko">
 <head>

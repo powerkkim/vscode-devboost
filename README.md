@@ -4,19 +4,25 @@
 
 ## 기능
 
-| 기능 | 단축키 | 켜기/끄기 설정 |
-|---|---|---|
-| **Search Everywhere** — 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
-| **MyBatis SQL 실행** — mapper XML 쿼리를 DB 콘솔에서 실행, 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림 | `Ctrl+Alt+Enter`·우클릭 `DB 콘솔에서 실행` / 쿼리 위 `▶ 콘솔에서 실행`·`SQL 복사` | `devBoost.mybatisRunner.enabled` |
-| **Source Atlas** — 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
-| **DB 스키마** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DevBoost · DB 스키마: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbSchema.enabled` |
-| **DB 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` |
-| **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `DevBoost · 케이스 변환:` / 선택 영역 우클릭 | `devBoost.caseConverter.enabled` |
-| **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 DB 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.sqlLog.enabled` |
-| **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.importJump.enabled` |
-| **API 콘솔** — API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기). Controller 메서드에서 바로 열기, 브라우저 캡처로 실제 호출과 로그인 상태 이어받기 | `Ctrl+Alt+A` / Controller 위 `API 콘솔` | `devBoost.apiConsole.enabled` |
+기능은 여섯 묶음입니다. 묶음 스위치를 끄면 그 안의 기능이 모두 꺼지고, 묶음 안의 기능은 따로도 끌 수 있습니다.
+
+| 묶음 | 기능 | 단축키 | 켜기/끄기 설정 |
+|---|---|---|---|
+| **Search Everywhere** | 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
+| **DB 콘솔** | **DB 연결 · 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` (묶음) |
+| | **Mapper 쿼리 실행** — MyBatis mapper XML 쿼리를 콘솔에서 실행, 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림 | `Ctrl+Alt+Enter`·우클릭 / 쿼리 위 `▶ 콘솔에서 실행`·`SQL 복사` | `devBoost.dbConsole.mybatis.enabled` |
+| | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.dbConsole.sqlLog.enabled` |
+| | **스키마 · 테이블 정의서** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DevBoost · DB 콘솔: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbConsole.schema.enabled` |
+| **API 콘솔** | API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기). Controller 메서드에서 바로 열기, 브라우저 캡처로 실제 호출과 로그인 상태 이어받기 | `Ctrl+Alt+A` / Controller 위 `API 콘솔` | `devBoost.apiConsole.enabled` |
+| **Source Atlas** | 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
+| **코드 도구** | **import 따라가기** — `@/…` 별칭으로 가져온 이름을 누르면 import 줄이 아니라 실제 선언으로, 올리면 선언 내용 | `Ctrl+클릭` / `Ctrl+Alt+F12` | `devBoost.codeTools.enabled` (묶음) · `devBoost.codeTools.importJump.enabled` |
+| | **케이스 변환** — camel·snake·kebab 변환, SQL → Java 필드, Java → TypeScript·MyBatis SQL | 명령 팔레트 `DevBoost · 코드 도구:` / 선택 영역 우클릭 | `devBoost.codeTools.caseConverter.enabled` |
+| **Code Playground** | **JavaScript 작업대** — 예제 데이터와 함께 JS · TS 를 바로 실행, 실무 예제 500여 개, 칸을 골라 배열 가공 코드 만들기 | `Ctrl+Alt+J` / 코드를 고르고 우클릭 | `devBoost.playground.enabled` (묶음) · `devBoost.playground.jsBench.enabled` |
+| | **정규식 작업대** — 자주 쓰는 정규식 · 질문 · 예시로 정규식을 만들고 시험 글에 맞춰 보기, 그룹 · 바꾸기, JavaScript · Java 코드로 복사 | `Ctrl+Alt+R` / 글을 고르고 우클릭 | `devBoost.playground.regexBench.enabled` |
 
 기능을 끄려면 설정(`Ctrl+,`) → `DevBoost` 검색 → 체크 해제. 바로 반영됩니다.
+
+0.29.0 에서 설정 이름이 묶음에 맞게 바뀌었습니다 (`devBoost.sqlLog.*` → `devBoost.dbConsole.sqlLog.*` 등). 예전 이름으로 적어 둔 값은 처음 켤 때 새 이름으로 옮겨집니다.
 
 ### Search Everywhere
 
@@ -44,7 +50,7 @@
 - 언어 서버(Java·TS 등)는 쓰지 않습니다. 모든 탭이 ripgrep 으로 만든 색인·파일 목록·텍스트로 찾습니다 (색인은 메모리에만, 프로젝트 크기만큼). jar 안의 클래스는 검색되지 않고, jar 파일 이름은 파일 탭에서 찾을 수 있습니다
 - 동작 기록: 보기 → 출력 → 오른쪽 드롭다운 **DevBoost**. 검색별 시간, 쓰는 ripgrep, 색인 만들기·갱신, 창을 닫아 멈춘 것이 찍힙니다
 
-### 케이스 변환
+### 코드 도구 · 케이스 변환
 
 | 명령 | 하는 일 |
 |---|---|
@@ -56,7 +62,7 @@
 - **단축키 롤업**: 이름 위에 커서를 두고 `Alt+Shift+U` 를 누를 때마다 camel → Pascal → snake → SCREAMING_SNAKE → kebab 순으로 바뀜 (`Ctrl+Alt+Shift+U` 는 반대 방향, 우클릭 메뉴에도 있음)
 - 입력: 선택 영역 → (mapper XML 이면) 커서 위치 쿼리 → (`.sql`·`.java` 이면) 현재 파일 → 클립보드 순서. 같은 파일의 `<include refid>` 는 풀어서 반영
 - 타입: `DB 스키마`로 스키마를 가져와 두었다면 실제 컬럼 타입·설명을 쓰고(`SELECT *`·테이블 이름만 넣어도 컬럼을 펼침), 없으면 컬럼 이름으로 추정
-- 결과는 새 문서로 열림. 클립보드·선택 영역 아래 삽입으로 바꾸려면 설정 `devBoost.caseConverter.output`
+- 결과는 새 문서로 열림. 클립보드·선택 영역 아래 삽입으로 바꾸려면 설정 `devBoost.codeTools.caseConverter.output`
 
 ### 설정
 
@@ -98,7 +104,7 @@ DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙
 | `devBoost.dbConsole.sessionPerConsole` | 콘솔마다 따로 접속 (기본 켬). 끄면 모든 콘솔이 접속 하나를 같이 씀 |
 | `devBoost.dbConsole.idleCloseMinutes` | 콘솔 2부터의 접속을 이 시간(분) 동안 안 쓰면 닫음 (기본 30, `0` 이면 닫지 않음). 커밋하지 않은 변경이 있으면 두고 |
 
-### DB 스키마 · 테이블 정의서
+### DB 콘솔 · 스키마 · 테이블 정의서
 
 두 가지로 가져옵니다.
 
@@ -115,7 +121,7 @@ DB 마다 다른 것(접속·실행·딕셔너리·오류 안내·SQL 글 규칙
 - 회사·인터넷에서 쓰던 컬럼 명세 쿼리 결과(한글 별칭: 테이블명, 컬럼명, 데이터유형, 기본값 …)도 가져올 수 있습니다
 - 규격과 수집 쿼리: [docs/SPEC-db-schema-v8-2026-10-26.md](docs/SPEC-db-schema-v8-2026-10-26.md)
 
-### SQL 로그
+### DB 콘솔 · SQL 로그
 
 VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-boot:run`) 로그의 쿼리를 읽어 기억해 둡니다.
 
@@ -143,13 +149,13 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 쿼리가 로그에 찍혀야 합니다: MyBatis 는 mapper 로그 수준 DEBUG (예: `logging.level.com.example.mapper=debug`), log4jdbc 는 `jdbc.sqltiming` 또는 `jdbc.sqlonly` 로거
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
-- 개수: `devBoost.sqlLog.maxQueries`
+- 개수: `devBoost.dbConsole.sqlLog.maxQueries`
 
 안 잡히는 로그가 있을 때
-- `devBoost.sqlLog.loggers` 에 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적습니다. 예: `["SQL_LOG"]` → 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리로 읽습니다
-- SQL 이 아닌 로그가 섞여 잡히면 `devBoost.sqlLog.autoDetect` 를 끕니다
+- `devBoost.dbConsole.sqlLog.loggers` 에 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적습니다. 예: `["SQL_LOG"]` → 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리로 읽습니다
+- SQL 이 아닌 로그가 섞여 잡히면 `devBoost.dbConsole.sqlLog.autoDetect` 를 끕니다
 
-### import 따라가기
+### 코드 도구 · import 따라가기
 
 `import { UserType } from '@/types/user'` 로 가져온 `UserType` 을 `Ctrl+클릭`했을 때 같은 파일의 import 줄로만 가고, 다시 누르면 쓰던 곳으로 돌아오는 경우가 있습니다. 프로젝트의 tsconfig 에 경로 별칭(`paths`)이 없어 편집기가 `@/…` 를 풀지 못할 때입니다. 이 기능은 설정 파일을 건드리지 않고 별칭을 직접 풀어 실제 선언을 찾습니다.
 
@@ -162,12 +168,48 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 별칭은 `vite.config` 의 `resolve.alias` → `tsconfig`/`jsconfig` 의 `paths` → 관례(`@`·`~` → `src`) 순으로 찾습니다. 맞지 않으면 개인 설정에 적습니다.
 
 ```json
-"devBoost.importJump.aliases": { "@": "src", "@comp": "src/components" }
+"devBoost.codeTools.importJump.aliases": { "@": "src", "@comp": "src/components" }
 ```
 
 - 편집기가 이미 다른 파일의 선언을 찾아 주는 프로젝트에서는 아무것도 보태지 않습니다
 - 미리 만드는 색인이 없습니다. 이름을 누르거나 올렸을 때 그 파일의 import 와 대상 파일만 읽습니다
-- 끄면(`devBoost.importJump.enabled`) 편집기 원래 동작 그대로입니다
+- 끄면(`devBoost.codeTools.importJump.enabled`) 편집기 원래 동작 그대로입니다
+
+### Code Playground · JavaScript 작업대
+
+`Ctrl+Alt+J` 로 엽니다. 편집기에서 코드를 골라 둔 채 열면(우클릭 `JavaScript 작업대 열기`) 그 코드가 들어옵니다.
+
+- **왼쪽** `예제` — 찾기 칸에 낱말(날짜, 금액, 중복, 트리 …)을 치고 예제를 고르면 코드 · 입력 데이터가 채워지고 바로 실행됩니다. `화면 전용` 예제(Vue · React · 브라우저)는 실행하지 않고 복사해 씁니다
+- **왼쪽** `고르기로 만들기` — 입력 데이터의 칸을 골라 거르기 → 중복 빼기 → 묶기 · 집계 → 정렬 → 앞에서 몇 개 코드를 만들고 실행
+- **가운데** 코드와 입력 데이터. 입력 데이터에 JSON 이나 엑셀에서 복사한 표를 붙이면 코드에서 `data` 로 씁니다. `Ctrl+Enter` 실행, JavaScript · TypeScript 선택
+  - `바꾸기…`: 엑셀 표 → JSON 배열, 칸 이름 `USER_NM` → `userNm`, JSON 줄 맞추기, JSON → TypeScript 타입 · Vue defineProps
+  - `편집기에 넣기`: 마지막으로 쓰던 편집기의 선택 자리에 코드를 넣음
+- **오른쪽** `출력`(console.log · 오류 · 마지막 값)과 `표`(console.table 이나 마지막 줄의 배열)
+
+알아 둘 것
+- VS Code 에 들어 있는 Node.js 로 돌려 따로 설치할 것이 없습니다. 다른 Node 로 돌리려면 `devBoost.playground.jsBench.nodePath`. `require` 로 Node 기본 모듈을 쓸 수 있습니다
+- TypeScript 는 작업 폴더의 `node_modules/typescript`, 없으면 VS Code 에 들어 있는 것으로 바꿔 돌립니다 (타입 검사는 하지 않음)
+- 한 번 실행은 5초(`devBoost.playground.jsBench.timeoutSeconds`) 안에 끝나야 하고, 출력이 너무 많으면 멈춥니다. `멈추기` 로도 끊습니다
+- 코드는 내 컴퓨터에서 그대로 실행됩니다 (파일 · 네트워크를 쓸 수 있음). 모르는 코드는 읽어 보고 돌리세요
+- 화면을 열 때만 읽고, 닫으면 남는 것이 없습니다
+
+### Code Playground · 정규식 작업대
+
+`Ctrl+Alt+R` 로 엽니다. 편집기에서 글을 골라 둔 채 열면 그 글이 시험 글로 들어오고, 코드는 그 파일에 맞춰(Java 파일이면 Java, JS · TS · Vue 면 JavaScript) 보입니다.
+
+- **만들기** (위, `▲` 로 접기)
+  - `자주 쓰는 것`: 휴대폰 · 사업자번호 · 이메일 · 날짜 · 금액 · 비밀번호 규칙 · MyBatis 파라미터 등 60여 개. 누르면 패턴 · 플래그 · 바꿀 글 · 예시 글이 채워짐
+  - `질문 따라가기`: 어디에 쓰나 → 어떤 글자 → 몇 자 → 띄어쓰기 → 꼭 들어갈 것
+  - `예시로 만들기`: 맞아야 할 글 · 틀려야 할 글을 한 줄에 하나씩 넣으면 패턴을 만듦
+  - `직접 만들기`: 조각(글자 종류 · 낱말 · 아무 글자 · 이 글자 빼고)과 묶음을 쌓아 반복 · 꺼내기(그룹) · 앞뒤 조건을 고름
+- **패턴 · 플래그** — 직접 고쳐도 됩니다. `확인할 글` 에 값을 치면 글 전체가 맞는지(입력값 검사) 바로 보여 줌
+- **시험 글 · 그룹 · 바꾸기** — 맞는 곳을 표시하고, 그룹 표(번호 · 이름 · 값 · 위치), 바꾸기 결과(`$1` · `$<이름>` · `$&`)
+- **코드** — Java `Pattern.compile("…", 플래그)` · JavaScript `/…/플래그` (바꾸기 탭이면 `replaceAll` · `replace` 까지). `복사` · `편집기에 넣기`
+
+알아 둘 것
+- 맞추기는 JavaScript 엔진으로 합니다. 흔히 쓰는 문법은 Java 와 같고, Java 에만 있는 문법(`a++` 같은 소유 수량자, `\p{javaLetter}` 등)은 오류로 나옵니다
+- 같은 글을 여러 번 되짚는 패턴(`(a+)+$` 등)은 1초(`devBoost.playground.regexBench.timeoutSeconds`)가 넘으면 멈춥니다. 계산은 따로 띄운 스레드에서 해 편집기가 멈추지 않습니다
+- 화면을 열 때만 읽고, 닫으면 계산 스레드도 끝납니다
 
 ### API 콘솔
 
