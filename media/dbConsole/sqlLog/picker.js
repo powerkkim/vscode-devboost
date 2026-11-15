@@ -11,6 +11,55 @@
   let all = [];
   let shown = [];
   let cur = -1; // 고른 쿼리의 id
+  let rules = { include: [], exclude: [], latestOnly: false };
+  let diagnosis = [];
+
+  /** 필터를 바꿔 달라고 보낸다 (확장이 저장하고 목록을 다시 보낸다) */
+  function sendRules(next, note) {
+    vscode.postMessage({ type: 'setFilter', filter: next, note });
+  }
+  const has = (list, w) => list.some((x) => x.toLowerCase() === w.toLowerCase());
+  function addRule(kind, word) {
+    word = word.trim();
+    if (!word || has(rules[kind], word)) return;
+    sendRules({ ...rules, [kind]: [...rules[kind], word] }, `"${word}" ${kind === 'exclude' ? '수집 제외' : '포함'}에 더함`);
+  }
+  function removeRule(kind, word) {
+    sendRules({ ...rules, [kind]: rules[kind].filter((x) => x !== word) }, `"${word}" ${kind === 'exclude' ? '수집 제외' : '포함'}에서 뺌`);
+  }
+  /** 수집 필터 칸: 걸린 낱말(칩, ✕ 로 빼기) · 고른 쿼리의 id · 테이블 제안(⊕ 로 더하기) */
+  function renderRules() {
+    const q = all.find((x) => x.id === cur && shown.includes(x));
+    for (const [kind, chipsId, suggId] of [['exclude', 'exChips', 'exSugg'], ['include', 'inChips', 'inSugg']]) {
+      const box = $(chipsId);
+      box.textContent = '';
+      for (const w of rules[kind]) {
+        const chip = document.createElement('span');
+        chip.className = 'chip ' + kind;
+        chip.textContent = w;
+        const x = document.createElement('button');
+        x.className = 'x';
+        x.textContent = '✕';
+        x.title = '빼기 — 이 낱말로 빠져 있던 최근 쿼리는 목록으로 돌아옵니다';
+        x.addEventListener('click', () => removeRule(kind, w));
+        chip.appendChild(x);
+        box.appendChild(chip);
+      }
+      const sugg = $(suggId);
+      sugg.textContent = '';
+      for (const x of q ? q.excludes : []) {
+        if (has(rules[kind], x.word)) continue;
+        const b = document.createElement('button');
+        b.className = 'small ' + x.kind;
+        b.textContent = '⊕ ' + (x.kind === 'query' ? 'id ' : '') + x.word;
+        b.title = kind === 'exclude' ? `${x.kind === 'query' ? '이 쿼리' : '이 테이블'}가 든 쿼리는 모으지 않음` : `${x.kind === 'query' ? '이 쿼리' : '이 테이블'}가 든 쿼리만 모음`;
+        b.addEventListener('click', () => addRule(kind, x.word));
+        sugg.appendChild(b);
+      }
+      if (!rules[kind].length && !sugg.childElementCount) box.appendChild(div('none', kind === 'exclude' ? '없음' : '없음 (모두 모음)'));
+    }
+    $('latestOnly').checked = !!rules.latestOnly;
+  }
 
   const KEYWORDS = new Set(
     ('SELECT FROM WHERE AND OR NOT IN IS NULL LIKE BETWEEN EXISTS JOIN LEFT RIGHT FULL INNER OUTER CROSS ON GROUP BY ORDER HAVING UNION ALL ' +
@@ -56,7 +105,18 @@
     $list.textContent = '';
     $('count').textContent = shown.length === all.length ? `최근 쿼리 ${all.length}` : `${shown.length} / ${all.length}`;
     if (!shown.length) {
-      $list.appendChild(div('empty', all.length ? '맞는 쿼리가 없습니다.' : '읽은 쿼리가 없습니다.'));
+      if (all.length) $list.appendChild(div('empty', '맞는 쿼리가 없습니다.'));
+      else {
+        const box = div('empty');
+        box.appendChild(div('', '모은 쿼리가 없습니다.'));
+        for (const line of diagnosis) box.appendChild(div('why', line));
+        const b = document.createElement('button');
+        b.textContent = '고른 로그에서 읽기';
+        b.title = '터미널에서 SQL 로그를 드래그해 고른 뒤 누르세요 (편집기에서 고른 글 · 클립보드도 됨)';
+        b.addEventListener('click', () => vscode.postMessage({ type: 'readSelection' }));
+        box.appendChild(b);
+        $list.appendChild(box);
+      }
     }
     for (const q of shown) {
       const row = div('row' + (q.id === cur ? ' on' : ''));
@@ -87,17 +147,7 @@
     } else {
       $sql.textContent = '';
     }
-    // 수집 제외 단추: 쿼리 id · 테이블
-    const $ex = $('exclBtns');
-    $ex.textContent = '';
-    for (const x of q ? q.excludes : []) {
-      const b = document.createElement('button');
-      b.className = 'small ' + x.kind;
-      b.textContent = x.word;
-      b.title = (x.kind === 'query' ? '이 쿼리' : '이 테이블') + '가 든 쿼리는 앞으로 모으지 않음';
-      b.addEventListener('click', () => vscode.postMessage({ type: 'exclude', word: x.word }));
-      $ex.appendChild(b);
-    }
+    renderRules();
     const on = $list.querySelector('.row.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
   }
@@ -135,6 +185,7 @@
   $('copy').addEventListener('click', () => act('copy'));
   document.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
+    if (e.target && (e.target.id === 'exAdd' || e.target.id === 'inAdd') && e.key !== 'Escape') return;
     if (e.key === 'ArrowDown') move(1);
     else if (e.key === 'ArrowUp') move(-1);
     else if (e.key === 'PageDown') move(5);
@@ -146,27 +197,36 @@
     e.preventDefault();
   });
   function filtered(n) {
-    $('filtered').textContent = n ? `수집 필터로 뺀 쿼리 ${n}` : '';
+    $('filtered').textContent = n ? `필터로 빠져 있는 쿼리 ${n}` : '';
   }
+  for (const [kind, id] of [['exclude', 'exAdd'], ['include', 'inAdd']]) {
+    $(id).addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      e.stopPropagation();
+      addRule(kind, e.target.value);
+      e.target.value = '';
+    });
+  }
+  $('latestOnly').addEventListener('change', (e) => sendRules({ ...rules, latestOnly: e.target.checked }, e.target.checked ? '같은 쿼리는 최근 하나만' : '같은 쿼리도 모두'));
 
   window.addEventListener('message', (e) => {
     const m = e.data;
-    if (m.type === 'excluded') {
+    if (m.type === 'init') {
+      const keep = m.note ? cur : -1; // 필터를 바꿔 다시 받은 목록이면 고른 쿼리 · 찾기 글을 그대로
+      rules = m.filter;
+      diagnosis = m.diagnose || [];
+      renderRules();
       const $note = $('note');
-      if (m.error) {
-        $note.textContent = '제외하지 못했습니다: ' + m.error;
-        $note.className = 'err';
+      $note.textContent = m.note || '';
+      $note.className = /못했/.test(m.note || '') ? 'err' : 'ok';
+      filtered(m.excluded);
+      if (m.note) {
+        all = m.items.map((q) => Object.assign(q, { search: [q.title, q.mapper, q.verb, q.tables, q.sql].join('\n').toLowerCase() }));
+        cur = keep;
+        applyFilter();
         return;
       }
-      all = all.filter((q) => !m.ids.includes(q.id));
-      $note.textContent = `"${m.word}" 수집 제외${m.ids.length ? ` · 목록에서 ${m.ids.length}개 뺌` : ''}`;
-      $note.className = 'ok';
-      filtered(m.excluded);
-      applyFilter();
-      return;
-    }
-    if (m.type === 'init') {
-      filtered(m.excluded);
       all = m.items.map((q) => Object.assign(q, { search: [q.title, q.mapper, q.verb, q.tables, q.sql].join('\n').toLowerCase() }));
       $('opened').textContent = m.openedAt + ' 에 연 목록';
       $filter.value = '';

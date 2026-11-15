@@ -6,8 +6,15 @@ import { newNonce } from '../../../core/webview';
  * 최근 쿼리를 고르는 창: 왼쪽 목록(종류·쿼리 id·테이블·조건), 오른쪽에 고른 쿼리의 전체 SQL.
  * 창을 연 순간의 목록을 그대로 보여 준다 — 그 뒤에 들어온 쿼리는 다시 열어야 보인다 (고르는 동안 목록이 밀리지 않게).
  * 다른 곳을 누르면 닫힌다.
- * 고른 쿼리의 쿼리 id · 테이블을 "수집 제외" 에 더할 수 있다 — 더하면 이 창의 목록에서도 그 쿼리들을 뺀다.
+ * 오른쪽 아래 수집 필터 칸에서 제외 · 포함 낱말을 보고(칩) 더하고(⊕ 고른 쿼리의 id · 테이블, 또는 직접 입력) ✕ 로 뺀다.
+ * 필터를 바꾸면 목록을 다시 받는다 (풀린 쿼리는 돌아오고, 걸린 쿼리는 빠진다). 쿼리가 없으면 왜 없는지를 보인다.
  */
+
+export interface SqlLogFilter {
+  include: string[];
+  exclude: string[];
+  latestOnly: boolean;
+}
 
 type Entry = LoggedQuery & { id: number };
 
@@ -17,12 +24,16 @@ interface Deps {
   /** 고른 쿼리를 DB 콘솔로 */
   send: (q: LoggedQuery) => Promise<void>;
   timeText: (ms: number) => string;
-  /** 수집 필터로 뺀 쿼리 수 */
+  /** 수집 필터로 빠져 있는 쿼리 수 */
   excluded: () => number;
-  /** 낱말을 수집 제외에 더한다 */
-  exclude: (word: string) => Promise<void>;
-  /** 지금 필터를 통과하는지 */
-  accepts: (q: LoggedQuery) => boolean;
+  /** 지금 수집 필터 */
+  filter: () => SqlLogFilter;
+  /** 수집 필터를 바꾼다 (목록에서 빠진 수 · 돌아온 수) */
+  setFilter: (f: SqlLogFilter) => Promise<{ removed: number; restored: number }>;
+  /** 쿼리가 없을 때 까닭 */
+  diagnose: () => string[];
+  /** 고른 로그에서 읽기 */
+  readSelection: () => Promise<void>;
 }
 
 let current: vscode.WebviewPanel | undefined;
@@ -47,11 +58,14 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
   const subs: vscode.Disposable[] = [];
   let sending = false;
 
-  const post = () =>
+  const post = (note = '') =>
     panel.webview.postMessage({
       type: 'init',
+      note,
       openedAt: deps.timeText(Date.now()),
       excluded: deps.excluded(),
+      filter: deps.filter(),
+      diagnose: deps.diagnose(),
       items: snapshot.map((q) => ({
         id: q.id,
         title: queryTitle(q),
@@ -66,7 +80,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
     });
 
   panel.webview.onDidReceiveMessage(
-    async (m: { type: string; id?: number; word?: string }) => {
+    async (m: { type: string; id?: number; filter?: SqlLogFilter; note?: string }) => {
       const q = snapshot.find((x) => x.id === m.id);
       if (m.type === 'ready') {
         void post();
@@ -75,16 +89,19 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       } else if (m.type === 'copy' && q) {
         await vscode.env.clipboard.writeText(consoleText(q, deps.timeText(q.time)));
         void panel.webview.postMessage({ type: 'copied' });
-      } else if (m.type === 'exclude' && m.word) {
+      } else if (m.type === 'setFilter' && m.filter) {
+        let note = m.note ?? '';
         try {
-          await deps.exclude(m.word);
+          const r = await deps.setFilter(m.filter);
+          const parts = [r.removed ? `${r.removed}개 빠짐` : '', r.restored ? `${r.restored}개 돌아옴` : ''].filter(Boolean);
+          if (parts.length) note += ` · 목록에서 ${parts.join(' · ')}`;
         } catch (e) {
-          void panel.webview.postMessage({ type: 'excluded', word: m.word, ids: [], error: String(e instanceof Error ? e.message : e) });
-          return;
+          note = '필터를 저장하지 못했습니다: ' + (e instanceof Error ? e.message : String(e));
         }
-        const gone = snapshot.filter((x) => !deps.accepts(x)).map((x) => x.id);
-        snapshot = snapshot.filter((x) => !gone.includes(x.id));
-        void panel.webview.postMessage({ type: 'excluded', word: m.word, ids: gone, excluded: deps.excluded() });
+        snapshot = deps.items().map((x) => ({ ...x }));
+        void post(note);
+      } else if (m.type === 'readSelection') {
+        await deps.readSelection();
       } else if (m.type === 'send' && q && !sending) {
         sending = true; // 콘솔이 열리며 포커스가 옮겨 가도 여기서 닫는다
         panel.dispose();
@@ -131,7 +148,11 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
           <button class="primary" id="send">새 콘솔로 옮기기</button>
           <button id="copy">복사</button>
         </div>
-        <div class="excl"><span class="lbl" title="누르면 앞으로 이 쿼리 id · 테이블이 든 쿼리는 모으지 않습니다 (설정 exclude 에 더함)">수집 제외</span><span id="exclBtns"></span></div>
+        <div class="rules" title="모을 때 거르는 필터 — 쿼리 id · mapper 이름 · SQL 글에서 낱말 단위로 찾음 (대소문자 무시, * 는 이름 글자 여럿)">
+          <div class="rule"><span class="lbl">수집 제외</span><span class="words"><span class="chips" id="exChips"></span><span class="sugg" id="exSugg"></span></span><input id="exAdd" type="text" placeholder="+ 낱말 (Enter)" spellcheck="false" autocomplete="off"></div>
+          <div class="rule"><span class="lbl">포함만</span><span class="words"><span class="chips" id="inChips"></span><span class="sugg" id="inSugg"></span></span><input id="inAdd" type="text" placeholder="+ 낱말 (비우면 모두)" spellcheck="false" autocomplete="off"></div>
+          <div class="rule"><label class="latest"><input type="checkbox" id="latestOnly"> 같은 쿼리는 최근 하나만</label><span class="sp"></span><span id="filtered"></span></div>
+        </div>
       </div>
     </div>
     <div class="foot">
@@ -141,7 +162,6 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       <span><kbd>Esc</kbd> 닫기</span>
       <span class="sp"></span>
       <span id="note"></span>
-      <span id="filtered"></span>
       <span id="opened"></span>
     </div>
   </div>

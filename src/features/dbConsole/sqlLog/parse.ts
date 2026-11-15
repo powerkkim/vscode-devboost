@@ -567,15 +567,22 @@ export function sameQueryKey(q: LoggedQuery): string {
   return queryId(q.sql) || q.mapper;
 }
 
+/** 필터에 걸려 빠진 쿼리를 이만큼 기억해 둔다 (필터를 풀면 목록으로 돌아온다) */
+export const EXCLUDED_KEEP = 50;
+
+type Entry = LoggedQuery & { id: number };
+
 /**
  * 최근 쿼리 목록 (새 것부터, 최대 max 개). 같은 쿼리가 연달아 찍히면(같은 SQL · mapper) 한 건으로 합친다.
- * 필터에 걸린 쿼리는 넣지 않고 개수만 센다 (excluded). latestOnly 면 같은 쿼리 id 의 예전 것은 뺀다
+ * 필터에 걸린 쿼리는 목록에 넣지 않고 따로 최근 EXCLUDED_KEEP 개까지 기억한다 — 필터를 바꾸면 다시 나눠, 풀린 것은 목록으로 돌아온다.
+ * latestOnly 면 같은 쿼리 id 의 예전 것은 뺀다
  */
 export class QueryRing {
-  private list: (LoggedQuery & { id: number })[] = [];
+  private list: Entry[] = [];
+  private held: Entry[] = [];
+  /** 기억할 자리가 없어 버린 걸린 쿼리 수 */
+  private dropped = 0;
   private seq = 0;
-  /** 필터로 뺀 쿼리 수 (지운 뒤부터) */
-  excluded = 0;
 
   constructor(
     private max: number,
@@ -583,20 +590,31 @@ export class QueryRing {
     private latestOnly = false
   ) {}
 
+  /** 필터에 걸려 빠져 있는 쿼리 수 (지운 뒤부터) */
+  get excluded(): number {
+    return this.held.length + this.dropped;
+  }
+
   setMax(max: number) {
     this.max = Math.max(1, max);
     this.list.length = Math.min(this.list.length, this.max);
   }
 
-  /** 필터 · 같은 id 하나만을 바꾸고 이미 모인 목록에도 적용한다. 뺀 쿼리 수를 돌려준다 (excluded 에는 세지 않음) */
-  setFilter(filter: QueryFilter, latestOnly: boolean): number {
+  /**
+   * 필터 · 같은 id 하나만을 바꾸고, 목록과 걸려 있던 쿼리를 다시 나눈다.
+   * 돌려주는 것: removed(목록에서 빠진 수) · restored(걸려 있다 돌아온 수)
+   */
+  setFilter(filter: QueryFilter, latestOnly: boolean): { removed: number; restored: number } {
     this.filter = filter;
     this.latestOnly = latestOnly;
-    const before = this.list.length;
-    this.list = this.list.filter((q) => filter.accepts(q));
+    const before = new Set(this.list.map((q) => q.id));
+    const all = [...this.list, ...this.held].sort((x, y) => y.id - x.id);
+    let list = all.filter((q) => filter.accepts(q));
+    this.held = all.filter((q) => !filter.accepts(q)).slice(0, EXCLUDED_KEEP);
+    this.dropped = 0; // 버린 것은 새 필터에 걸리는지 알 수 없으니 세지 않는다
     if (latestOnly) {
       const seen = new Set<string>();
-      this.list = this.list.filter((q) => {
+      list = list.filter((q) => {
         const key = sameQueryKey(q);
         if (!key) return true;
         if (seen.has(key)) return false;
@@ -604,44 +622,52 @@ export class QueryRing {
         return true;
       });
     }
-    return before - this.list.length;
+    this.list = list.slice(0, this.max);
+    const now = new Set(this.list.map((q) => q.id));
+    return { removed: [...before].filter((id) => !now.has(id)).length, restored: [...now].filter((id) => !before.has(id)).length };
   }
 
   accepts(q: LoggedQuery): boolean {
     return this.filter.accepts(q);
   }
 
-  /** 넣었으면 true, 필터에 걸렸으면 false */
+  /** 목록에 넣었으면 true, 필터에 걸렸으면 false */
   add(q: LoggedQuery): boolean {
-    if (!this.filter.accepts(q)) {
-      this.excluded++;
-      return false;
-    }
     const top = this.list[0];
     if (top && top.sql === q.sql && top.mapper === q.mapper) {
       this.list[0] = Object.assign(q, { id: top.id });
       return true;
     }
+    const entry = Object.assign(q, { id: ++this.seq });
+    if (!this.filter.accepts(q)) {
+      this.held.unshift(entry);
+      if (this.held.length > EXCLUDED_KEEP) {
+        this.held.length = EXCLUDED_KEEP;
+        this.dropped++;
+      }
+      return false;
+    }
     if (this.latestOnly) {
       const key = sameQueryKey(q);
       if (key) this.list = this.list.filter((x) => sameQueryKey(x) !== key);
     }
-    this.list.unshift(Object.assign(q, { id: ++this.seq }));
+    this.list.unshift(entry);
     if (this.list.length > this.max) this.list.length = this.max;
     return true;
   }
 
-  items(): readonly (LoggedQuery & { id: number })[] {
+  items(): readonly Entry[] {
     return this.list;
   }
 
-  get(id: number): (LoggedQuery & { id: number }) | undefined {
+  get(id: number): Entry | undefined {
     return this.list.find((q) => q.id === id);
   }
 
   clear() {
     this.list = [];
-    this.excluded = 0;
+    this.held = [];
+    this.dropped = 0;
   }
 }
 

@@ -150,21 +150,19 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
 - 플러그인을 켜기(업데이트) 전에 띄워 둔 서버: 터미널에서 SQL 로그를 드래그해 고르고 우클릭 → `SQL 로그 — 고른 로그에서 읽기` (편집기에서 고른 글 · 클립보드의 로그도 됨)
-- Run · Debug(F5, Spring Boot Dashboard)로 띄운 서버는 디버그 콘솔의 출력도 읽습니다
+- Run · Debug(F5, Spring Boot Dashboard, `Run` · `Debug` 링크)로 띄운 Java 서버는 DevBoost 가 만든 터미널(`Debug: 앱 이름`)에 로그를 그대로 보이면서 읽습니다. `Ctrl+C` 나 터미널 닫기로 서버를 멈춥니다 (Java 디버거가 만드는 원래 터미널은 VS Code 가 출력을 넘겨주지 않아 읽을 수 없기 때문). 끄려면 `devBoost.dbConsole.sqlLog.debugTerminal`
 - 상태바 `SQL n` 은 늘 보입니다. 쿼리가 없을 때 마우스를 올리면 읽고 있는 곳(터미널 · 디버그 세션과 읽은 줄 수)과 못 읽는 까닭(셸 통합이 없는 터미널 등)이 나옵니다
 - 개수: `devBoost.dbConsole.sqlLog.maxQueries`
 
-필요 없는 쿼리 빼기 (수집 필터)
-- 공통코드 · 세션 확인처럼 늘 찍히는 쿼리가 최근 목록을 채우면, 모을 때부터 뺍니다 (뺀 쿼리는 자리를 차지하지 않음)
-- 고르는 창에서 쿼리를 고르고 아래 `수집 제외` 의 쿼리 id · 테이블 단추를 누르면 바로 빠지고 설정에 더해집니다
-- 직접 적기: `devBoost.dbConsole.sqlLog.exclude` (빼기) · `include` (적은 것만 모으기). 쿼리 id · mapper 이름 · SQL 글에서 찾고, 대소문자 무시 · 낱말 단위 · `*` 는 이름 글자 여럿
-
-```json
-"devBoost.dbConsole.sqlLog.exclude": ["selectCommonCode", "CommonMapper", "TB_COMM*"]
-```
-
-- 같은 쿼리는 최근 한 건만: `devBoost.dbConsole.sqlLog.latestOnly`
-- 뺀 개수는 상태바 `SQL n` 에 마우스를 올리면 보입니다
+필요 없는 쿼리 빼기 · 필요한 것만 모으기 (수집 필터)
+- 목록 창(`Ctrl+Alt+L`) 오른쪽 아래 `수집 제외` · `포함만` 칸에서 관리합니다
+  - `수집 제외`: 이 낱말이 든 쿼리는 모으지 않음 / `포함만`: 적으면 이 낱말이 든 쿼리만 모음
+  - 걸린 낱말은 칩으로 보이고 ✕ 로 뺍니다. 빼면 그 낱말로 빠져 있던 최근 쿼리(50개까지)가 목록으로 돌아옵니다
+  - 쿼리를 고르면 그 쿼리 id · 테이블이 `⊕` 로 나와 한 번에 더할 수 있고, 오른쪽 칸에 낱말을 직접 치고 Enter 로도 더합니다
+  - `같은 쿼리는 최근 하나만`: 같은 쿼리 id 는 최근 한 건만
+- 낱말은 쿼리 id · mapper 이름 · SQL 글에서 찾고, 대소문자 무시 · 낱말 단위(`TB_USER` 는 `TB_USER_ROLE` 에 맞지 않음) · `*` 는 이름 글자 여럿(`TB_COMM*`)
+- 설정 `devBoost.dbConsole.sqlLog.exclude` · `include` · `latestOnly` 에 저장됩니다 (settings.json 에서 직접 고쳐도 됨)
+- 쿼리가 없어도 목록 창이 열려 왜 없는지(읽는 곳 · 못 읽는 터미널)를 보여 줍니다
 
 안 잡히는 로그가 있을 때
 - `devBoost.dbConsole.sqlLog.loggers` 에 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적습니다. 예: `["SQL_LOG"]` → 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리로 읽습니다

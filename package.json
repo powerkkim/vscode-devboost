@@ -3,7 +3,7 @@
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서, JavaScript · 정규식 작업대 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -1217,7 +1217,7 @@
             },
             "default": [],
             "order": 4,
-            "markdownDescription": "수집 제외 — 이 낱말이 든 쿼리는 모으지 않음 (최근 쿼리 자리를 차지하지 않게). 쿼리 id(SQL 머리 주석) · mapper 이름 · SQL 글(테이블 이름 등)에서 찾음. 대소문자 무시, 낱말 단위(`TB_USER` 는 `TB_USER_ROLE` 에 맞지 않음), `*` 는 이름 글자 여럿. 예: `[\"selectCommonCode\", \"CommonMapper\", \"TB_COMM*\", \"*Session*\"]`. 고르는 창의 `수집 제외` 단추로도 더해짐"
+            "markdownDescription": "수집 제외 — 이 낱말이 든 쿼리는 모으지 않음 (최근 쿼리 자리를 차지하지 않게). 쿼리 id(SQL 머리 주석) · mapper 이름 · SQL 글(테이블 이름 등)에서 찾음. 대소문자 무시, 낱말 단위(`TB_USER` 는 `TB_USER_ROLE` 에 맞지 않음), `*` 는 이름 글자 여럿. 예: `[\"selectCommonCode\", \"CommonMapper\", \"TB_COMM*\", \"*Session*\"]`. 목록 창(`Ctrl+Alt+L`) 오른쪽 아래 `수집 제외` 칸에서 더하고(⊕ · 직접 입력) ✕ 로 뺌 — 빼면 그 낱말로 빠져 있던 최근 쿼리(50개까지)가 목록으로 돌아옴"
           },
           "devBoost.dbConsole.sqlLog.include": {
             "type": "array",
@@ -1233,6 +1233,12 @@
             "default": false,
             "order": 6,
             "markdownDescription": "같은 쿼리(같은 쿼리 id · mapper 메서드)는 가장 최근 한 건만 남김. 화면을 여러 번 조회해도 목록이 같은 쿼리로 채워지지 않음"
+          },
+          "devBoost.dbConsole.sqlLog.debugTerminal": {
+            "type": "boolean",
+            "default": true,
+            "order": 7,
+            "markdownDescription": "Run · Debug(F5, Spring Boot Dashboard, `Run` · `Debug` 링크)로 띄운 Java 서버의 로그를 DevBoost 가 만든 터미널(`Debug: 앱 이름`)에 보이면서 SQL 을 모음. Java 디버거가 만드는 터미널은 VS Code 가 출력을 넘겨주지 않아 읽을 수 없기 때문. 서버는 디버그 콘솔로 받아 그 터미널에 그대로 쓰고(색 포함), `Ctrl+C` 나 터미널 닫기로 멈춤. 서버에 키보드 입력은 보낼 수 없음. 실행 설정에 `console` 을 따로 적어 둔 경우(`internalConsole` · `externalTerminal`)는 건드리지 않음. 끄면 Java 디버거의 원래 터미널"
           }
         }
       },
