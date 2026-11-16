@@ -12,6 +12,8 @@ declare module 'oracledb' {
     connectTimeout?: number;
     /** TCP 연결에 허용할 시간 (초) */
     transportConnectTimeout?: number;
+    /** 쉬는 접속에 확인 신호를 보내는 간격 (분) */
+    expireTime?: number;
   }
 
   /** 칸의 타입 (DB_TYPE_NUMBER 등과 === 로 비교한다) */

@@ -9,7 +9,7 @@ import { tags as t } from '@lezer/highlight';
 import { splitStatements, statementAt, type Statement, type DialectRules } from '../../src/features/dbConsole/sql/statements';
 import { bindNames, inferType, BIND_TYPES, type BindType } from '../../src/features/dbConsole/sql/binds';
 import { rulesOf } from '../../src/features/dbConsole/driver/dialects';
-import { inlineResults, anchorOf, addRunning, setResult, appendRows, moreFailed, markDropped, refreshAll, regroup } from './inline';
+import { inlineResults, anchorOf, addRunning, setResult, txEnded, appendRows, moreFailed, markDropped, refreshAll, regroup } from './inline';
 import { tableNames as tableNameMarks, tableNamesTheme } from './tables';
 import { columnSources, tableRefs } from '../../src/features/dbConsole/sql/tableRefs';
 import { toSnippet } from '../../src/features/dbConsole/querybook/entry';
@@ -602,6 +602,11 @@ window.addEventListener('message', (event) => {
       const dirty = $('dirty');
       dirty.classList.toggle('hidden', !m.dirty);
       $('dirtyText').textContent = `커밋 안 한 변경 ${m.dirty}건`;
+      // 커밋할 것이 있을 때만 커밋·롤백 버튼을 도드라지게 (없으면 보통 버튼 — 커밋이 끝났음을 한눈에)
+      $('commit').classList.toggle('attn', !!m.dirty);
+      $('rollback').classList.toggle('attn', !!m.dirty);
+      $('commit').title = m.dirty ? `커밋 — 변경 ${m.dirty}건을 확정합니다` : '커밋할 변경이 없습니다';
+      $('rollback').title = m.dirty ? `롤백 — 변경 ${m.dirty}건을 되돌립니다` : '롤백할 변경이 없습니다';
       for (const id of ['run', 'explain', 'commit', 'rollback']) $<HTMLButtonElement>(id).disabled = !m.name || !!m.busy;
       // 한 DB에만 있는 기능은 그 DB 접속일 때만 보인다
       $('outputBox').classList.toggle('hidden', !m.features?.serverOutput);
@@ -694,7 +699,10 @@ window.addEventListener('message', (event) => {
       insertBookSnippet(m.query, m.values ?? {}, m.title);
       break;
     case 'hint':
-      hint(m.message, 'warn');
+      hint(m.message, m.plain ? '' : 'warn');
+      break;
+    case 'txEnd':
+      txEnded(editor, m.what);
       break;
     case 'dialog':
       kinds = m.kinds ?? [];

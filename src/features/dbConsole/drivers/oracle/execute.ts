@@ -178,14 +178,27 @@ export async function explainPlan(connection: Connection, sql: string, binds: Bi
   const started = Date.now();
   const id = `DEVBOOST_${Date.now() % 100000000}_${++planSeq}`;
   const explain = `EXPLAIN PLAN SET STATEMENT_ID = '${id}' FOR ${sql}`;
+  // EXPLAIN PLAN 은 PLAN_TABLE 에 행을 넣어 트랜잭션을 연다. 계획을 읽은 뒤 그 행을 되돌려, 실행계획만 봤는데
+  // 열린 트랜잭션이 남지 않게 한다. 이미 열린 트랜잭션(사용자의 커밋 전 변경)이 있으면 SAVEPOINT 까지만 되돌린다
+  const had = await connection
+    .execute('select dbms_transaction.local_transaction_id from dual')
+    .then((x) => x.rows?.[0]?.[0] != null, () => undefined as boolean | undefined);
+  const SP = 'DEVBOOST_PLAN_SP';
+  if (had) await connection.execute(`SAVEPOINT ${SP}`);
   try {
-    await connection.execute(explain, toDriverBinds(oracledb, binds), { autoCommit: false });
-  } catch (e) {
-    // EXPLAIN PLAN 은 바인드 값을 쓰지 않는다(값 없이 계획만 만든다). 값을 넘겨서 난 바인드 오류면 값 없이 다시
-    if (!Object.keys(binds).length || !BIND_ERRORS.test(String((e as Error)?.message ?? e))) throw e;
-    await connection.execute(explain, [], { autoCommit: false });
+    try {
+      await connection.execute(explain, toDriverBinds(oracledb, binds), { autoCommit: false });
+    } catch (e) {
+      // EXPLAIN PLAN 은 바인드 값을 쓰지 않는다(값 없이 계획만 만든다). 값을 넘겨서 난 바인드 오류면 값 없이 다시
+      if (!Object.keys(binds).length || !BIND_ERRORS.test(String((e as Error)?.message ?? e))) throw e;
+      await connection.execute(explain, [], { autoCommit: false });
+    }
+    const r = await connection.execute(`SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${id}', 'TYPICAL'))`, [], { autoCommit: false });
+    return { lines: (r.rows ?? []).map((row) => String(row[0] ?? '')), ms: Date.now() - started };
+  } finally {
+    if (had === false) await connection.rollback().catch(() => undefined);
+    else if (had) await connection.execute(`ROLLBACK TO SAVEPOINT ${SP}`).catch(() => undefined);
+    // had 를 알 수 없으면(권한) 건드리지 않는다 — 사용자의 변경을 되돌릴 수 없으니
   }
-  const r = await connection.execute(`SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${id}', 'TYPICAL'))`, [], { autoCommit: false });
-  return { lines: (r.rows ?? []).map((row) => String(row[0] ?? '')), ms: Date.now() - started };
 }
 

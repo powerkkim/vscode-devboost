@@ -143,6 +143,8 @@ export class PgConnection implements DbConnection {
     }
 
     const isQuery = info.kind === 'query' && !info.forUpdate;
+    // 이 문장 때문에 트랜잭션을 여는가 (실패하면 통째로 닫는다 — 바뀐 것 없는 트랜잭션을 열어 두지 않게)
+    const began = !isQuery && !this.inTx;
     if (!isQuery) await this.ensureTx();
     const guarded = this.inTx;
     if (guarded) await this.raw.query(`SAVEPOINT ${SAVEPOINT}`);
@@ -165,7 +167,10 @@ export class PgConnection implements DbConnection {
       return result;
     } catch (e) {
       // 이 문장만 되돌린다 (트랜잭션이 막히지 않게, 앞의 변경은 남는다)
-      if (guarded && this.healthy) await this.raw.query(`ROLLBACK TO SAVEPOINT ${SAVEPOINT}`).catch(() => undefined);
+      if (began && this.healthy) {
+        await this.raw.query('ROLLBACK').catch(() => undefined);
+        this.inTx = false;
+      } else if (guarded && this.healthy) await this.raw.query(`ROLLBACK TO SAVEPOINT ${SAVEPOINT}`).catch(() => undefined);
       throw e;
     }
   }
@@ -232,6 +237,15 @@ export class PgConnection implements DbConnection {
     this.inTx = false;
   }
 
+  /** 서버가 응답마다 알려 주는 트랜잭션 상태 (I: 없음, T: 열림, E: 실패한 채 열림). 서버에 다녀오지 않는다 */
+  async hasOpenTransaction(): Promise<boolean | undefined> {
+    const raw = this.raw as unknown as { getTransactionStatus?: () => string | null; _txStatus?: string | null };
+    const st = typeof raw.getTransactionStatus === 'function' ? raw.getTransactionStatus() : raw._txStatus;
+    if (st !== 'I' && st !== 'T' && st !== 'E') return undefined;
+    this.inTx = st !== 'I'; // 프로시저 안에서 끝난 트랜잭션 등, 드라이버가 아는 것과 다르면 서버 쪽을 따른다
+    return this.inTx;
+  }
+
   /** 실행 중인 문장 취소: 다른 접속으로 pg_cancel_backend */
   async cancel() {
     const pid = (this.raw as unknown as { processID?: number }).processID;
@@ -269,6 +283,9 @@ export function clientConfig(cfg: DbConnectionConfig, password: string): ClientC
     password,
     connectionTimeoutMillis: 10_000,
     application_name: 'DevBoost',
+    // 쉬는 접속에 TCP 확인 신호 (끊긴 접속을 양쪽이 빨리 알아채게)
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 60_000,
     // 값은 서버가 보낸 글 그대로 (숫자 정밀도·날짜 시간대가 바뀌지 않게)
     types: { getTypeParser: () => (v: string) => v } as unknown as ClientConfig['types'],
   };

@@ -71,7 +71,7 @@ test('콘솔마다 따로 접속하고, 끊기는 그 연결의 접속을 모두
   assert.equal(sessions.countOf('A'), 0);
   assert.equal(sessions.isConnected('B'), true);
   assert.equal(server.alive(), 1);
-  sessions.dispose();
+  await sessions.dispose();
   assert.equal(server.alive(), 0, '끄면 남은 접속도 닫는다');
 });
 
@@ -85,7 +85,7 @@ test('같은 콘솔에서 접속을 두 번 눌러도 접속은 하나만 연다
   server.release();
   assert.equal(await p1, await p2);
   assert.equal(server.opened, 1);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('접속하는 사이에 닫으면(콘솔을 닫음) 열린 접속을 바로 닫고, 쓰는 쪽에는 ConnectAborted', async () => {
@@ -97,18 +97,20 @@ test('접속하는 사이에 닫으면(콘솔을 닫음) 열린 접속을 바로
   await sessions.disconnect('A#2');
   server.release();
   await assert.rejects(p, (e) => e instanceof ConnectAborted);
+  await new Promise((r) => setTimeout(r, 5));
   assert.equal(sessions.isConnected('A#2'), false);
   assert.equal(server.alive(), 0, '서버에 남지 않는다');
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('접속하는 사이에 기능을 끄면(VS Code 닫기) 열린 접속을 바로 닫는다', async () => {
   const { server, sessions } = make();
   server.hold = true;
   const p = sessions.connect(cfg('A'), 'pw', 'A#2');
-  sessions.dispose();
+  await sessions.dispose();
   server.release();
   await assert.rejects(p, (e) => e instanceof ConnectAborted);
+  await new Promise((r) => setTimeout(r, 5));
   assert.equal(server.alive(), 0);
   await assert.rejects(sessions.connect(cfg('A'), 'pw', 'A#3'), (e) => e instanceof ConnectAborted, '끈 뒤에는 새로 열지 않는다');
   assert.equal(server.opened, 1);
@@ -139,6 +141,8 @@ test('오래 안 쓴 콘솔 접속만 닫는다: 기본 접속·실행 중·커�
   sessions.get('A#3').lastUsed = now - 60_000;
 
   assert.deepEqual(sessions.closeIdle(now), ['A#2']);
+
+  await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(closedIdle, ['A#2']);
   assert.equal(sessions.isConnected('A'), true, '기본 접속은 사용자가 끊을 때까지');
   assert.equal(sessions.isConnected('A#3'), true, '커밋하지 않은 변경이 있으면 닫지 않는다 (롤백되지 않게)');
@@ -149,12 +153,13 @@ test('오래 안 쓴 콘솔 접속만 닫는다: 기본 접속·실행 중·커�
   await running;
   dirty.clear();
   assert.deepEqual(sessions.closeIdle(Date.now() + 10_000).sort(), ['A#3', 'A#4', 'A#5']);
+  await new Promise((r) => setTimeout(r, 5));
   assert.equal(server.alive(), 1, '기본 접속만 남는다');
 
   // 닫은 뒤 다시 쓰면 새로 접속한다
   const again = await sessions.connect(cfg('A'), 'pw', 'A#2');
   assert.notEqual(again, c2);
-  sessions.dispose();
+  await sessions.dispose();
   assert.equal(server.alive(), 0);
 });
 
@@ -163,9 +168,11 @@ test('안 쓰는 시간을 0 으로 두면 닫지 않는다', async () => {
   const c2 = await sessions.connect(cfg('A'), 'pw', 'A#2');
   c2.lastUsed = 0;
   assert.deepEqual(sessions.closeIdle(Date.now()), []);
+  await new Promise((r) => setTimeout(r, 5));
   sessions.setIdleClose(1000);
   assert.deepEqual(sessions.closeIdle(Date.now()), ['A#2']);
-  sessions.dispose();
+  await new Promise((r) => setTimeout(r, 5));
+  await sessions.dispose();
 });
 
 test('use() 는 쓴 시각을 남긴다 (쓰는 동안은 안 쓴 것으로 보지 않는다)', async () => {
@@ -174,7 +181,7 @@ test('use() 는 쓴 시각을 남긴다 (쓰는 동안은 안 쓴 것으로 보�
   s.lastUsed = 0;
   await s.use(async () => undefined);
   assert.ok(Date.now() - s.lastUsed < 1000);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('콘솔 접속이 끊기면 onDidLose 에 접속 키와 연결 id 를 함께 준다', async () => {
@@ -187,7 +194,7 @@ test('콘솔 접속이 끊기면 onDidLose 에 접속 키와 연결 id 를 함�
   assert.equal(lost.length, 1);
   assert.equal(lost[0].id, 'A#2');
   assert.equal(lost[0].connectionId, 'A');
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('여러 번 열고 닫아도 서버에 남는 접속이 없다', async () => {
@@ -201,7 +208,7 @@ test('여러 번 열고 닫아도 서버에 남는 접속이 없다', async () =
   assert.equal(server.opened, 60);
   assert.equal(server.alive(), 0);
   assert.equal(sessions.size, 0);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('실행 중에 닫으면 먼저 서버에서 멈추고(cancel) 끝난 뒤 닫는다 (서버에 일하는 세션이 남지 않게)', async () => {
@@ -221,7 +228,7 @@ test('실행 중에 닫으면 먼저 서버에서 멈추고(cancel) 끝난 뒤 �
   await new Promise((r) => setImmediate(r)); // 쿼리가 서버에서 도는 중
   await s.close();
   await q;
-  assert.deepEqual(order, ['cancel', 'query ended', 'close']);
+  assert.deepEqual(order, ['cancel', 'query ended', 'close']); // rollback 이 없는 접속
 });
 
 test('멈추지 않는 쿼리도 기다리다 닫는다 (닫기가 실패하면 끝나는 대로 닫음)', async () => {
@@ -249,4 +256,139 @@ test('멈추지 않는 쿼리도 기다리다 닫는다 (닫기가 실패하면 
   await q;
   await closing;
   assert.deepEqual(order, ['cancel', 'close refused', 'close']);
+});
+
+// ── 0.33.0: 닫기 전 롤백 · 커밋 안 한 채 방치 · 접속 수 상한 ──
+const { idleAction, roomFor, UNCOMMITTED_WARN_MS } = require(path.join(OUT, 'txGuard.js'));
+
+test('접속을 닫기 전에 ROLLBACK 을 직접 보낸다 (커밋하지 않은 변경 · 잠금을 닫기 동작에 맡기지 않는다)', async () => {
+  const order = [];
+  const conn = { isHealthy: () => true, cancel: async () => {}, rollback: async () => void order.push('rollback'), close: async () => void order.push('close'), extras: {} };
+  const s = new DbSession(oracleDriver, conn, { product: 'Oracle', version: '19', schema: 'U', dbName: 'D', ms: 1 });
+  await s.close();
+  assert.deepEqual(order, ['rollback', 'close']);
+});
+
+test('실행 중에 닫으면: 멈춤 → 끝남 → ROLLBACK → 닫기', async () => {
+  const order = [];
+  let stop;
+  const conn = {
+    isHealthy: () => true,
+    cancel: async () => {
+      order.push('cancel');
+      stop(new Error('cancelled'));
+    },
+    rollback: async () => void order.push('rollback'),
+    close: async () => void order.push('close'),
+    extras: {},
+  };
+  const s = new DbSession(oracleDriver, conn, { product: 'Oracle', version: '19', schema: 'U', dbName: 'D', ms: 1 });
+  const q = s.use(() => new Promise((_, rej) => (stop = rej))).catch(() => order.push('query ended'));
+  await new Promise((r) => setImmediate(r));
+  await s.close();
+  await q;
+  assert.deepEqual(order, ['cancel', 'query ended', 'rollback', 'close']);
+});
+
+test('ROLLBACK 이 실패하거나 답이 없어도 접속은 닫는다. 끊긴 접속에는 보내지 않는다', async () => {
+  const mk = (rollback, healthy = true) => {
+    const order = [];
+    const conn = { isHealthy: () => healthy, cancel: async () => {}, rollback: () => (order.push('rollback'), rollback()), close: async () => void order.push('close'), extras: {} };
+    return { order, s: new DbSession(oracleDriver, conn, { product: 'Oracle', version: '19', schema: 'U', dbName: 'D', ms: 1 }) };
+  };
+  const failed = mk(async () => { throw new Error('ORA-03113'); });
+  await failed.s.close();
+  assert.deepEqual(failed.order, ['rollback', 'close']);
+  const dead = mk(async () => {}, false);
+  await dead.s.close();
+  assert.deepEqual(dead.order, ['close']);
+});
+
+test('커밋하지 않은 채 쉬면: 10분에 알리고(한 번만), 정한 시간에 롤백. 0 이면 알리기만', () => {
+  const M = 60_000;
+  assert.equal(UNCOMMITTED_WARN_MS, 10 * M);
+  assert.equal(idleAction(9 * M, 30 * M, false), 'none');
+  assert.equal(idleAction(10 * M, 30 * M, false), 'warn');
+  assert.equal(idleAction(20 * M, 30 * M, true), 'none', '알림은 한 번만');
+  assert.equal(idleAction(30 * M, 30 * M, true), 'rollback');
+  assert.equal(idleAction(30 * M, 30 * M, false), 'rollback');
+  assert.equal(idleAction(500 * M, 0, true), 'none', '자동 롤백을 끄면 롤백하지 않는다');
+  assert.equal(idleAction(10 * M, 0, false), 'warn');
+  // 롤백 시간이 짧으면 그 절반에서 알린다
+  assert.equal(idleAction(3 * M, 5 * M, false), 'warn');
+  assert.equal(idleAction(2 * M, 5 * M, false), 'none');
+});
+
+test('접속 수 상한: 자리가 있으면 그냥 열고, 없으면 가장 오래 쉰 콘솔 접속을 고른다 (기본 접속 · 커밋 전 · 실행 중은 빼고)', () => {
+  const s = (key, o = {}) => ({ key, consoleOnly: key.includes('#'), dirty: false, running: false, lastUsed: 100, ...o });
+  assert.deepEqual(roomFor([s('A'), s('A#2')], 5), { ok: true });
+  const full = [s('A', { lastUsed: 1 }), s('A#2', { lastUsed: 50 }), s('A#3', { lastUsed: 10, dirty: true }), s('A#4', { lastUsed: 20, running: true }), s('A#5', { lastUsed: 30 })];
+  assert.deepEqual(roomFor(full, 5), { ok: false, victim: 'A#5' }, '기본 접속(A) · 커밋 전(A#3) · 실행 중(A#4)은 닫지 않는다');
+  const stuck = full.map((x) => (x.consoleOnly ? { ...x, dirty: true } : x));
+  assert.deepEqual(roomFor(stuck, 5), { ok: false, victim: undefined }, '닫을 수 있는 접속이 없으면 열지 않는다');
+});
+
+// ── 소스 검토에서 찾은 것 ──
+const info = { product: 'Oracle', version: '19', schema: 'U', dbName: 'D', ms: 1 };
+
+test('닫기를 시작한 접속은 새 일을 받지 않는다 (닫는 중의 ROLLBACK 과 다음 문장이 겹치지 않게)', async () => {
+  const order = [];
+  let stop;
+  const conn = {
+    isHealthy: () => true,
+    cancel: async () => stop(new Error('cancelled')),
+    rollback: async () => void order.push('rollback'),
+    close: async () => void order.push('close'),
+    extras: {},
+  };
+  const s = new DbSession(oracleDriver, conn, info);
+  // 문장 여러 개를 차례로 실행하는 중: 첫 문장이 멈추면 바로 다음 문장을 보낸다
+  const first = s.use(() => new Promise((_, rej) => (stop = rej))).catch(() => s.use(async () => void order.push('next statement')).catch((e) => order.push('refused: ' + e.message.slice(0, 9))));
+  await new Promise((r) => setImmediate(r));
+  await s.close();
+  await first;
+  assert.deepEqual(order, ['refused: 접속을 닫았습니다', 'rollback', 'close']);
+  await assert.rejects(s.use(async () => 1), /접속을 닫았습니다/);
+  await s.close(); // 두 번 닫아도 한 번만
+  assert.equal(order.filter((x) => x === 'close').length, 1);
+});
+
+test('롤백이 오래 걸려 닫기가 거절되면, 롤백이 끝나는 대로 다시 닫는다 (접속을 버려두지 않는다)', async () => {
+  const order = [];
+  let finishRollback;
+  let rolling = false;
+  const conn = {
+    isHealthy: () => true,
+    cancel: async () => {},
+    rollback: () => ((rolling = true), new Promise((r) => (finishRollback = () => ((rolling = false), order.push('rollback done'), r())))),
+    close: async () => {
+      if (rolling) {
+        order.push('close refused');
+        throw new Error('NJS-081: connection busy');
+      }
+      order.push('close');
+    },
+    extras: {},
+  };
+  const s = new DbSession(oracleDriver, conn, info);
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms, ...a) => realSetTimeout(fn, Math.min(ms, 20), ...a); // 2초 기다림을 줄인다
+  try {
+    const closing = s.close();
+    await new Promise((r) => realSetTimeout(r, 60));
+    assert.deepEqual(order, ['close refused']);
+    finishRollback();
+    await closing;
+    assert.deepEqual(order, ['close refused', 'rollback done', 'close']);
+  } finally {
+    global.setTimeout = realSetTimeout;
+  }
+});
+
+test('트랜잭션 상태를 묻는데 서버가 답하지 않으면 기다리지 않는다 (닫기가 멈추지 않게)', async () => {
+  const conn = { isHealthy: () => true, hasOpenTransaction: () => new Promise(() => {}), cancel: async () => {}, rollback: async () => {}, close: async () => {}, extras: {} };
+  const s = new DbSession(oracleDriver, conn, info);
+  const t = Date.now();
+  assert.equal(await s.openTransaction(30), undefined);
+  assert.ok(Date.now() - t < 500);
 });

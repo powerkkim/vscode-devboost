@@ -97,7 +97,7 @@ test('주기 확인: 끊긴 접속만 목록에서 빼고 알린다, 살아 있�
   assert.equal(conns.a.state.closed, 1, '끊긴 접속도 드라이버 쪽은 닫아 정리');
   assert.deepEqual(await sessions.checkNow(), [], '이미 뺀 접속은 다시 알리지 않음');
   assert.equal(lost.length, 1);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('쿼리를 실행하는 중인 접속은 확인을 건너뛴다 (긴 쿼리를 끊김으로 오인하지 않게)', async () => {
@@ -114,7 +114,7 @@ test('쿼리를 실행하는 중인 접속은 확인을 건너뛴다 (긴 쿼리
   assert.equal(s.busy, false);
   assert.deepEqual(await sessions.checkNow(), ['a'], '실행이 끝난 뒤에는 확인한다');
   assert.equal(lost.length, 1);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('확인하는 사이에 쿼리가 시작됐거나 사용자가 끊었으면 판정하지 않는다', async () => {
@@ -133,7 +133,7 @@ test('확인하는 사이에 쿼리가 시작됐거나 사용자가 끊었으면
   await sessions.disconnect('a'); // 확인 도중 사용자가 끊음
   assert.deepEqual(await check2, []);
   assert.equal(lost.length, 0, '사용자가 끊은 것은 "끊겼습니다"로 알리지 않는다');
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('쓰다가 난 오류: 접속이 끊겨서 난 것이면 목록에서 빼고 알린다', async () => {
@@ -145,7 +145,7 @@ test('쓰다가 난 오류: 접속이 끊겨서 난 것이면 목록에서 빼�
   assert.equal(sessions.isConnected('a'), false);
   assert.match(lost[0].reason, /NJS-500/);
   assert.equal(sessions.reportError('a', err('NJS-500')), false, '이미 빠진 접속');
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -160,7 +160,7 @@ test('소켓 확인: 서버에 다녀오지 않고 닫힌 연결을 알아챈다
   assert.equal(sessions.isConnected('a'), false);
   assert.equal(lost.length, 1);
   assert.equal(conns.a.state.pings, 0, '서버에는 한 번도 다녀오지 않음');
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('서버 확인: 정한 간격이 찼을 때만 다녀온다 (소켓 확인 때마다 다녀오지 않음)', async () => {
@@ -176,7 +176,7 @@ test('서버 확인: 정한 간격이 찼을 때만 다녀온다 (소켓 확인 
   await wait(300);
   assert.equal(sessions.isConnected('a'), false, '서버 확인이 알아챔');
   assert.match(lost[0].reason, /답이 없습니다/);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('서버 확인을 끄면(0) 말없이 끊긴 접속은 스스로 알아채지 못하고, 직접 확인하거나 쓸 때 안다', async () => {
@@ -188,7 +188,7 @@ test('서버 확인을 끄면(0) 말없이 끊긴 접속은 스스로 알아채�
   assert.equal(sessions.isConnected('b'), true);
   assert.equal(conns.b.state.pings, 0);
   assert.deepEqual(await sessions.checkNow(), ['b']);
-  sessions.dispose();
+  await sessions.dispose();
 });
 
 test('접속·끊기 기본 동작과 정리', async () => {
@@ -201,6 +201,6 @@ test('접속·끊기 기본 동작과 정리', async () => {
   assert.equal(sessions.isConnected('a'), false);
   assert.equal(conns.a.state.closed, 1);
   await sessions.connect(cfg('b'), 'pw');
-  sessions.dispose();
+  await sessions.dispose();
   assert.equal(conns.b.state.closed, 1, '기능을 끄면 열린 접속을 모두 닫는다');
 });

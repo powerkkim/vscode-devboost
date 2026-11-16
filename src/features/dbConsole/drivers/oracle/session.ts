@@ -40,6 +40,16 @@ export class OracleConnection implements DbConnection {
     return this.raw.rollback();
   }
 
+  /** 이 세션의 트랜잭션 id 가 있으면 열린 트랜잭션이 있다 (세션 자기 상태만 읽는다 — 테이블 · 잠금과 무관, v$ 권한 불필요) */
+  async hasOpenTransaction(): Promise<boolean | undefined> {
+    try {
+      const r = await this.raw.execute('select dbms_transaction.local_transaction_id from dual');
+      return r.rows?.[0]?.[0] != null;
+    } catch {
+      return undefined; // DBMS_TRANSACTION 실행 권한을 막아 둔 DB
+    }
+  }
+
   cancel() {
     return this.raw.breakExecution();
   }
@@ -67,6 +77,8 @@ export async function openOracle(cfg: DbConnectionConfig, password: string): Pro
     connectString: buildConnectString(cfg),
     connectTimeout: CONNECT_TIMEOUT_SEC,
     transportConnectTimeout: CONNECT_TIMEOUT_SEC,
+    // 쉬는 접속에 1분마다 확인 신호: 방화벽이 조용히 끊은 접속을 빨리 알아채고, 서버에 반쪽 세션이 오래 남지 않게
+    expireTime: 1,
   });
   try {
     const r = await raw.execute(`select sys_context('userenv','current_schema'), sys_context('userenv','db_name') from dual`);
