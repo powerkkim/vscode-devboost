@@ -58,8 +58,8 @@ export interface SessionsOptions {
 export const DEFAULT_CHECK_MS = 5 * 60_000;
 /** 소켓 상태만 보는 확인: 30초마다 (네트워크를 쓰지 않는다) */
 export const DEFAULT_LOCAL_CHECK_MS = 30_000;
-/** 콘솔만 쓰는 접속을 안 쓰면 닫는 시간: 30분 */
-export const DEFAULT_IDLE_CLOSE_MS = 30 * 60_000;
+/** 콘솔만 쓰는 접속을 안 쓰면 닫는 시간: 10분 */
+export const DEFAULT_IDLE_CLOSE_MS = 10 * 60_000;
 /** 서버 확인에서 답을 기다리는 시간: 10초 (느린 망에서 멀쩡한 접속을 끊김으로 잡지 않게 넉넉히) */
 export const DEFAULT_PING_TIMEOUT_MS = 10_000;
 
@@ -112,6 +112,9 @@ export class Sessions {
   private idleCloseMs: number;
   /** 닫으면 안 되는 접속인가 (커밋하지 않은 변경·실행 중). 콘솔이 정한다 */
   private keepOpen: (key: string) => boolean = () => false;
+  /** 쉬는 접속을 닫기 직전에 한 번 더 묻는다 (서버에 열린 트랜잭션이 있는지 등). false 면 닫지 않는다 */
+  private confirmIdle: ((key: string) => Promise<boolean>) | undefined;
+  private readonly confirming = new Set<string>();
   private readonly idle = new Emitter<string>();
   /** 오래 안 써서 닫았을 때 (접속 키) */
   readonly onDidCloseIdle = this.idle.event;
@@ -142,6 +145,11 @@ export class Sessions {
     this.keepOpen = fn;
   }
 
+  /** 쉬는 접속을 닫기 직전의 확인 (없으면 묻지 않고 닫는다) */
+  setConfirmIdle(fn: ((key: string) => Promise<boolean>) | undefined) {
+    this.confirmIdle = fn;
+  }
+
   /** 그 연결에 열린(또는 여는 중인) 접속 키들 */
   keysOf(connectionId: string): string[] {
     return [...new Set([...this.open.keys(), ...this.opening.keys()])].filter((k) => connectionOfKey(k) === connectionId);
@@ -150,6 +158,11 @@ export class Sessions {
   /** 그 연결에 열린 접속 수 (기본 + 콘솔별) */
   countOf(connectionId: string): number {
     return [...this.open.keys()].filter((k) => connectionOfKey(k) === connectionId).length;
+  }
+
+  /** 열린 접속 모두 (접속 키와 접속). 상태바 · 접속 목록에 */
+  list(): { key: string; session: DbSession }[] {
+    return [...this.open].map(([key, session]) => ({ key, session }));
   }
 
   /** 열린 접속 수 (모든 연결) */
@@ -240,10 +253,21 @@ export class Sessions {
     } else if (!want && this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
+      this.lastTick = 0;
     }
   }
 
+  private lastTick = 0;
+
   private tick() {
+    // 타이머가 한참 밀렸다 = 컴퓨터가 잠들었다 깼다: 접속이 죽었을 수 있으니 바로 서버에 다녀와 확인한다
+    const now = Date.now();
+    const slept = this.lastTick > 0 && now - this.lastTick > this.localCheckMs * 3 + 5000;
+    this.lastTick = now;
+    if (slept) {
+      void this.checkNow();
+      return;
+    }
     this.closeIdle();
     if (this.checkEveryMs > 0 && Date.now() - this.lastServerCheck >= this.checkEveryMs) {
       void this.checkNow(); // 서버에 다녀오는 확인 (소켓 확인 포함)
@@ -258,19 +282,37 @@ export class Sessions {
   /** 오래 안 쓴 콘솔 접속을 닫는다 (기본 접속은 사용자가 끊을 때까지 둔다). 실행 중이거나 커밋하지 않은 변경이 있으면 두고 */
   closeIdle(now = Date.now()): string[] {
     if (!(this.idleCloseMs > 0)) return [];
-    const closed: string[] = [];
-    for (const [key, s] of [...this.open]) {
-      if (!isConsoleKey(key) || s.busy || now - s.lastUsed < this.idleCloseMs || this.keepOpen(key)) continue;
-      this.open.delete(key);
-      void s.close().catch(() => undefined);
-      closed.push(key);
+    const idle = (key: string, s: DbSession) => isConsoleKey(key) && !s.busy && now - s.lastUsed >= this.idleCloseMs && !this.keepOpen(key);
+    const close = (list: [string, DbSession][]) => {
+      const closed: string[] = [];
+      for (const [key, s] of list) {
+        if (this.open.get(key) !== s) continue;
+        this.open.delete(key);
+        void s.close().catch(() => undefined);
+        closed.push(key);
+      }
+      if (closed.length) {
+        this.schedule();
+        this.changed.fire();
+        for (const k of closed) this.idle.fire(k);
+      }
+      return closed;
+    };
+    const candidates = [...this.open].filter(([key, s]) => idle(key, s));
+    const confirm = this.confirmIdle;
+    if (!confirm) return close(candidates);
+    // 닫기 직전에 묻는다 (서버에 다녀온다). 묻는 사이에 쓰기 시작했으면 닫지 않는다
+    for (const [key, s] of candidates) {
+      if (this.confirming.has(key)) continue;
+      this.confirming.add(key);
+      void confirm(key)
+        .catch(() => true)
+        .then((ok) => {
+          this.confirming.delete(key);
+          if (ok && !this.disposed && this.open.get(key) === s && idle(key, s)) close([[key, s]]);
+        });
     }
-    if (closed.length) {
-      this.schedule();
-      this.changed.fire();
-      for (const k of closed) this.idle.fire(k);
-    }
-    return closed;
+    return [];
   }
 
   /**
@@ -314,7 +356,7 @@ export class Sessions {
   private drop(id: string, s: DbSession, reason: string) {
     this.open.delete(id);
     this.schedule();
-    void s.close().catch(() => undefined); // 이미 끊긴 접속이라 실패해도 된다 (드라이버 쪽 자원 정리)
+    void s.close(0, false).catch(() => undefined); // 이미 끊긴 접속이라 실패해도 된다 (드라이버 쪽 자원 정리, ROLLBACK 은 보내지 않는다)
     this.changed.fire();
     this.lost.fire({ id, connectionId: connectionOfKey(id), reason });
   }

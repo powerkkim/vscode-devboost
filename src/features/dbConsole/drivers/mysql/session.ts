@@ -302,6 +302,9 @@ export function connectionConfig(cfg: DbConnectionConfig, password: string): obj
     user: cfg.user.trim() || undefined,
     password,
     connectTimeout: 10_000,
+    // 쉬는 접속에 TCP 확인 신호 (끊긴 접속을 양쪽이 빨리 알아채게)
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 60_000,
     dateStrings: true,
     supportBigNumbers: true,
     bigNumberStrings: true,

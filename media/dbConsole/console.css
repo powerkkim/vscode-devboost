@@ -697,3 +697,30 @@ body.vscode-light .cm-tbl-alias * {
   outline: 1px solid rgba(240, 180, 0, 0.6);
   border-radius: 2px;
 }
+
+/* 변경한 문장 옆: 커밋 전 → 커밋됨 · 롤백됨 */
+.ir-tx {
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 0.9em;
+  border: 1px solid transparent;
+}
+.ir-tx.pending {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.ir-tx.committed {
+  color: var(--ok);
+}
+.ir-tx.rolled {
+  color: var(--muted);
+}
+.ir-done:has(.ir-tx.rolled) .ir-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+/* 커밋할 것이 있을 때의 커밋 · 롤백 버튼 */
+button.attn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
