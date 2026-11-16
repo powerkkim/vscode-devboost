@@ -327,3 +327,68 @@ test('접속 수 상한: 자리가 있으면 그냥 열고, 없으면 가장 오
   const stuck = full.map((x) => (x.consoleOnly ? { ...x, dirty: true } : x));
   assert.deepEqual(roomFor(stuck, 5), { ok: false, victim: undefined }, '닫을 수 있는 접속이 없으면 열지 않는다');
 });
+
+// ── 소스 검토에서 찾은 것 ──
+const info = { product: 'Oracle', version: '19', schema: 'U', dbName: 'D', ms: 1 };
+
+test('닫기를 시작한 접속은 새 일을 받지 않는다 (닫는 중의 ROLLBACK 과 다음 문장이 겹치지 않게)', async () => {
+  const order = [];
+  let stop;
+  const conn = {
+    isHealthy: () => true,
+    cancel: async () => stop(new Error('cancelled')),
+    rollback: async () => void order.push('rollback'),
+    close: async () => void order.push('close'),
+    extras: {},
+  };
+  const s = new DbSession(oracleDriver, conn, info);
+  // 문장 여러 개를 차례로 실행하는 중: 첫 문장이 멈추면 바로 다음 문장을 보낸다
+  const first = s.use(() => new Promise((_, rej) => (stop = rej))).catch(() => s.use(async () => void order.push('next statement')).catch((e) => order.push('refused: ' + e.message.slice(0, 9))));
+  await new Promise((r) => setImmediate(r));
+  await s.close();
+  await first;
+  assert.deepEqual(order, ['refused: 접속을 닫았습니다', 'rollback', 'close']);
+  await assert.rejects(s.use(async () => 1), /접속을 닫았습니다/);
+  await s.close(); // 두 번 닫아도 한 번만
+  assert.equal(order.filter((x) => x === 'close').length, 1);
+});
+
+test('롤백이 오래 걸려 닫기가 거절되면, 롤백이 끝나는 대로 다시 닫는다 (접속을 버려두지 않는다)', async () => {
+  const order = [];
+  let finishRollback;
+  let rolling = false;
+  const conn = {
+    isHealthy: () => true,
+    cancel: async () => {},
+    rollback: () => ((rolling = true), new Promise((r) => (finishRollback = () => ((rolling = false), order.push('rollback done'), r())))),
+    close: async () => {
+      if (rolling) {
+        order.push('close refused');
+        throw new Error('NJS-081: connection busy');
+      }
+      order.push('close');
+    },
+    extras: {},
+  };
+  const s = new DbSession(oracleDriver, conn, info);
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms, ...a) => realSetTimeout(fn, Math.min(ms, 20), ...a); // 2초 기다림을 줄인다
+  try {
+    const closing = s.close();
+    await new Promise((r) => realSetTimeout(r, 60));
+    assert.deepEqual(order, ['close refused']);
+    finishRollback();
+    await closing;
+    assert.deepEqual(order, ['close refused', 'rollback done', 'close']);
+  } finally {
+    global.setTimeout = realSetTimeout;
+  }
+});
+
+test('트랜잭션 상태를 묻는데 서버가 답하지 않으면 기다리지 않는다 (닫기가 멈추지 않게)', async () => {
+  const conn = { isHealthy: () => true, hasOpenTransaction: () => new Promise(() => {}), cancel: async () => {}, rollback: async () => {}, close: async () => {}, extras: {} };
+  const s = new DbSession(oracleDriver, conn, info);
+  const t = Date.now();
+  assert.equal(await s.openTransaction(30), undefined);
+  assert.ok(Date.now() - t < 500);
+});

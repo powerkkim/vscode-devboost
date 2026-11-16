@@ -356,7 +356,7 @@ export class Sessions {
   private drop(id: string, s: DbSession, reason: string) {
     this.open.delete(id);
     this.schedule();
-    void s.close().catch(() => undefined); // 이미 끊긴 접속이라 실패해도 된다 (드라이버 쪽 자원 정리)
+    void s.close(0, false).catch(() => undefined); // 이미 끊긴 접속이라 실패해도 된다 (드라이버 쪽 자원 정리, ROLLBACK 은 보내지 않는다)
     this.changed.fire();
     this.lost.fire({ id, connectionId: connectionOfKey(id), reason });
   }
