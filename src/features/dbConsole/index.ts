@@ -217,9 +217,9 @@ export const dbConsole: Feature = {
       sessions.setCheckInterval(sec > 0 ? Math.max(30, sec) * 1000 : 0);
     };
     applyCheckInterval();
-    // 콘솔 2부터의 접속: 이 시간 동안 쓰지 않으면 닫는다 (기본 30분, 0 = 닫지 않음). 커밋하지 않은 변경이 있으면 두고
+    // 콘솔 2부터의 접속: 이 시간 동안 쓰지 않으면 닫는다 (기본 10분, 0 = 닫지 않음). 커밋하지 않은 변경이 있으면 두고
     const applyIdleClose = () => {
-      const min = vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('idleCloseMinutes', 30);
+      const min = vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('idleCloseMinutes', 10);
       sessions.setIdleClose(min > 0 ? Math.max(5, min) * 60_000 : 0);
     };
     applyIdleClose();
@@ -377,8 +377,114 @@ export const dbConsole: Feature = {
       return cfg && { connectionId: cfg.id, kind: driverFor(cfg).kind, name: cfg.name };
     };
 
+    // ── 상태바: 서버에 열어 둔 접속 수 · 커밋하지 않은 변경 (늘 보이게 — 잠금을 잡고 있는지 한눈에) ──
+    const sessionStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 91);
+    sessionStatus.name = 'DevBoost DB 접속';
+    sessionStatus.command = 'devBoost.dbConsole.sessions';
+    const agoText = (ms: number) => {
+      const min = Math.floor((Date.now() - ms) / 60_000);
+      return min < 1 ? '방금' : `${min}분 전`;
+    };
+    const refreshSessionStatus = () => {
+      const list = queryConsole.sessionStates();
+      if (!list.length) return sessionStatus.hide();
+      const dirty = list.filter((x) => x.dirty > 0);
+      sessionStatus.text = `$(plug) DB 접속 ${list.length}${dirty.length ? ` · 커밋 전 ${dirty.length}` : ''}`;
+      sessionStatus.backgroundColor = dirty.length ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+      const md = new vscode.MarkdownString();
+      md.appendMarkdown('**서버에 열어 둔 DB 접속** — 누르면 목록 (커밋 · 롤백 · 닫기)\n\n');
+      for (const x of list) {
+        const flags = [x.dirty ? `커밋 전 ${x.dirty}건` : '', x.running ? '실행 중' : '', `마지막 사용 ${agoText(x.lastUsed)}`].filter(Boolean).join(' · ');
+        md.appendMarkdown(`- ${x.label.replace(/[[\]\\*_`]/g, '\\$&')} — ${flags}\n`);
+      }
+      sessionStatus.tooltip = md;
+      sessionStatus.show();
+    };
+    const statusWatchers = [sessions.onDidChange(refreshSessionStatus), queryConsole.onDidChangeState(refreshSessionStatus)];
+    refreshSessionStatus();
+
+    /** 접속 하나를 닫는다 (커밋하지 않은 변경이 있으면 먼저 묻는다) */
+    const closeSession = async (key: string): Promise<boolean> => {
+      const st = queryConsole.sessionStates().find((x) => x.key === key);
+      if (!st) return false;
+      if (st.dirty) {
+        const go = '롤백하고 닫기';
+        const answer = await vscode.window.showWarningMessage(`${st.label} 에 커밋하지 않은 변경 ${st.dirty}건이 있습니다. 접속을 닫으면 롤백됩니다.`, { modal: true }, go);
+        if (answer !== go) return false;
+      }
+      results.dropConnection(key);
+      await sessions.disconnect(key);
+      return true;
+    };
+
+    /** 접속 목록: 어느 콘솔이 접속을 쓰고 있는지 보고, 커밋 · 롤백 · 닫기 */
+    const showSessions = () => {
+      type Item = vscode.QuickPickItem & { key?: string; all?: boolean };
+      const qp = vscode.window.createQuickPick<Item>();
+      qp.title = '서버에 열어 둔 DB 접속';
+      qp.placeholder = '고르면 그 콘솔로 갑니다. 오른쪽 버튼: 커밋 · 롤백 · 접속 닫기';
+      const B = {
+        commit: { iconPath: new vscode.ThemeIcon('check'), tooltip: '커밋' },
+        rollback: { iconPath: new vscode.ThemeIcon('discard'), tooltip: '롤백' },
+        close: { iconPath: new vscode.ThemeIcon('debug-disconnect'), tooltip: '접속 닫기 (콘솔 화면은 그대로)' },
+      };
+      const fill = () => {
+        const list = queryConsole.sessionStates().sort((a, b) => a.label.localeCompare(b.label));
+        const items: Item[] = list.map((x) => ({
+          label: `${x.dirty ? '$(warning)' : x.running ? '$(sync~spin)' : '$(plug)'} ${x.label}`,
+          description: [x.dirty ? `커밋 전 ${x.dirty}건 — 잠금을 잡고 있을 수 있습니다` : '', x.running ? '실행 중' : ''].filter(Boolean).join(' · '),
+          detail: `마지막 사용 ${agoText(x.lastUsed)}${x.consoleOpen ? '' : ' · 콘솔 닫힘'}`,
+          buttons: [...(x.dirty && !x.running ? [B.commit, B.rollback] : []), B.close],
+          key: x.key,
+        }));
+        if (list.length) items.push({ label: '$(close-all) 모든 접속 닫기', description: '커밋하지 않은 변경은 롤백됩니다', all: true });
+        else items.push({ label: '열어 둔 접속이 없습니다' });
+        qp.items = items;
+      };
+      fill();
+      const watch = [sessions.onDidChange(fill), queryConsole.onDidChangeState(fill)];
+      qp.onDidTriggerItemButton(async (e) => {
+        const key = e.item.key;
+        if (!key) return;
+        if (e.button === B.commit) await queryConsole.endTransactionOf(key, 'commit');
+        else if (e.button === B.rollback) await queryConsole.endTransactionOf(key, 'rollback');
+        else await closeSession(key);
+      });
+      qp.onDidAccept(async () => {
+        const it = qp.selectedItems[0];
+        if (!it) return;
+        if (it.key) {
+          qp.hide();
+          queryConsole.revealKey(it.key);
+          return;
+        }
+        if (!it.all) return;
+        const list = queryConsole.sessionStates();
+        const dirty = list.reduce((n, x) => n + x.dirty, 0);
+        const go = dirty ? '롤백하고 모두 닫기' : '모두 닫기';
+        const answer = await vscode.window.showWarningMessage(
+          `DB 접속 ${list.length}개를 모두 닫을까요?${dirty ? ` 커밋하지 않은 변경 ${dirty}건은 롤백됩니다.` : ''}`,
+          { modal: true, detail: '콘솔 화면은 그대로 두고, 실행하면 다시 접속합니다.' },
+          go
+        );
+        if (answer !== go) return;
+        for (const x of list) {
+          results.dropConnection(x.key);
+          await sessions.disconnect(x.key);
+        }
+      });
+      qp.onDidHide(() => {
+        watch.forEach((d) => d.dispose());
+        qp.dispose();
+      });
+      qp.show();
+    };
+
     return [
       store,
+      sessionStatus,
+      ...statusWatchers,
+      cmd('sessions', showSessions),
       { dispose: () => sessions.dispose() },
       tree,
       treeView,

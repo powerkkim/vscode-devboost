@@ -58,8 +58,8 @@ export interface SessionsOptions {
 export const DEFAULT_CHECK_MS = 5 * 60_000;
 /** 소켓 상태만 보는 확인: 30초마다 (네트워크를 쓰지 않는다) */
 export const DEFAULT_LOCAL_CHECK_MS = 30_000;
-/** 콘솔만 쓰는 접속을 안 쓰면 닫는 시간: 30분 */
-export const DEFAULT_IDLE_CLOSE_MS = 30 * 60_000;
+/** 콘솔만 쓰는 접속을 안 쓰면 닫는 시간: 10분 */
+export const DEFAULT_IDLE_CLOSE_MS = 10 * 60_000;
 /** 서버 확인에서 답을 기다리는 시간: 10초 (느린 망에서 멀쩡한 접속을 끊김으로 잡지 않게 넉넉히) */
 export const DEFAULT_PING_TIMEOUT_MS = 10_000;
 
@@ -152,6 +152,11 @@ export class Sessions {
     return [...this.open.keys()].filter((k) => connectionOfKey(k) === connectionId).length;
   }
 
+  /** 열린 접속 모두 (접속 키와 접속). 상태바 · 접속 목록에 */
+  list(): { key: string; session: DbSession }[] {
+    return [...this.open].map(([key, session]) => ({ key, session }));
+  }
+
   /** 열린 접속 수 (모든 연결) */
   get size(): number {
     return this.open.size;
@@ -240,10 +245,21 @@ export class Sessions {
     } else if (!want && this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
+      this.lastTick = 0;
     }
   }
 
+  private lastTick = 0;
+
   private tick() {
+    // 타이머가 한참 밀렸다 = 컴퓨터가 잠들었다 깼다: 접속이 죽었을 수 있으니 바로 서버에 다녀와 확인한다
+    const now = Date.now();
+    const slept = this.lastTick > 0 && now - this.lastTick > this.localCheckMs * 3 + 5000;
+    this.lastTick = now;
+    if (slept) {
+      void this.checkNow();
+      return;
+    }
     this.closeIdle();
     if (this.checkEveryMs > 0 && Date.now() - this.lastServerCheck >= this.checkEveryMs) {
       void this.checkNow(); // 서버에 다녀오는 확인 (소켓 확인 포함)

@@ -269,6 +269,9 @@ export function clientConfig(cfg: DbConnectionConfig, password: string): ClientC
     password,
     connectionTimeoutMillis: 10_000,
     application_name: 'DevBoost',
+    // 쉬는 접속에 TCP 확인 신호 (끊긴 접속을 양쪽이 빨리 알아채게)
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 60_000,
     // 값은 서버가 보낸 글 그대로 (숫자 정밀도·날짜 시간대가 바뀌지 않게)
     types: { getTypeParser: () => (v: string) => v } as unknown as ClientConfig['types'],
   };

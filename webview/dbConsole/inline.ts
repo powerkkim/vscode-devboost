@@ -23,6 +23,10 @@ export interface InlineData {
   dropped?: boolean;
   loading?: boolean;
   failed?: string;
+  /** 아직 커밋하지 않은 변경 (또는 FOR UPDATE 로 잡은 잠금) */
+  pending?: boolean;
+  /** 그 변경이 어떻게 끝났나 — 커밋 · 롤백 · 접속이 닫혀 롤백 */
+  ended?: 'commit' | 'rollback' | 'closed';
   collapsed?: boolean;
   sort?: Sort;
 }
@@ -128,6 +132,7 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
         ])
       );
       head.appendChild(button('×', '이 결과를 닫습니다', close));
+      txBadge(head, d);
       if (d.capped) head.appendChild(el('span', 'ir-muted', `최대 ${fmt(maxRows)}행까지 가져왔습니다 (도구 줄의 최대 행 수로 늘릴 수 있습니다)`));
       if (d.failed) head.appendChild(el('span', 'ir-fail', d.failed));
       return head;
@@ -147,8 +152,22 @@ function renderHead(view: EditorView, d: InlineData): HTMLElement {
     default:
       head.appendChild(el('span', 'ir-text', d.text ?? ''));
       if (d.ms !== undefined) head.appendChild(el('span', 'ir-muted', secs(d.ms)));
+      txBadge(head, d);
       head.appendChild(button('×', '이 결과를 닫습니다', close));
       return head;
+  }
+}
+
+/** 변경한 문장 옆의 표시: 커밋 전(노랑) → 커밋됨(초록) · 롤백됨(흐림). 커밋·롤백하면 그 자리에서 바뀐다 */
+function txBadge(head: HTMLElement, d: InlineData) {
+  if (d.pending) {
+    const b = el('span', 'ir-tx pending', d.status === 'rows' ? '잠금 · 커밋 전' : '커밋 전');
+    b.title = '아직 확정하지 않았습니다. 도구 줄의 커밋 또는 롤백으로 끝냅니다';
+    head.appendChild(b);
+  } else if (d.ended) {
+    const text = d.ended === 'commit' ? '✓ 커밋됨' : d.ended === 'rollback' ? '↩ 롤백됨' : '↩ 접속이 닫혀 롤백됨';
+    const b = el('span', `ir-tx ${d.ended === 'commit' ? 'committed' : 'rolled'}`, d.status === 'rows' ? (d.ended === 'commit' ? '✓ 커밋됨 (잠금 풀림)' : '↩ 롤백됨 (잠금 풀림)') : text);
+    head.appendChild(b);
   }
 }
 
@@ -408,6 +427,16 @@ export function markDropped(view: EditorView, ids: number[]) {
     if (d.resultId === undefined || !ids.includes(d.resultId)) continue;
     d.dropped = true;
     d.loading = false;
+    refresh(view, d.key);
+  }
+}
+
+/** 커밋·롤백했다: "커밋 전" 이던 결과를 모두 커밋됨·롤백됨으로 바꾼다 */
+export function txEnded(view: EditorView, what: 'commit' | 'rollback' | 'closed') {
+  for (const d of data.values()) {
+    if (!d.pending) continue;
+    d.pending = false;
+    d.ended = what;
     refresh(view, d.key);
   }
 }

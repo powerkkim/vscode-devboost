@@ -41,7 +41,8 @@ export class DbSession {
   /**
    * 접속을 닫는다. 실행 중인 일이 있으면 먼저 서버에서 멈추고(cancel) 끝나기를 기다린 뒤 닫는다.
    * 그냥 닫으면 서버는 쿼리가 끝날 때까지 그 세션을 계속 돌린다 (PostgreSQL 은 클라이언트가 떠난 것을 쿼리가 끝나야 안다,
-   * Oracle 은 실행 중인 접속은 닫히지 않는다) — 서버에 일하는 세션이 남지 않게
+   * Oracle 은 실행 중인 접속은 닫히지 않는다) — 서버에 일하는 세션이 남지 않게.
+   * 닫기 전에 ROLLBACK 을 직접 보낸다: 커밋하지 않은 변경과 잠금을 드라이버·서버의 닫기 동작에 맡기지 않고 여기서 푼다
    */
   async close(waitMs = 5000): Promise<void> {
     if (this.running > 0) {
@@ -57,6 +58,20 @@ export class DbSession {
         return;
       }
     }
+    await this.rollbackQuietly();
     await this.connection.close();
+  }
+
+  /** 닫기 전 롤백 (끊긴 접속이면 건너뛰고, 답이 늦으면 기다리지 않는다 — 닫으면 서버가 롤백한다) */
+  private async rollbackQuietly(waitMs = 2000): Promise<void> {
+    if (!this.connection.isHealthy()) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.resolve()
+        .then(() => this.connection.rollback())
+        .catch(() => undefined),
+      new Promise<void>((res) => (timer = setTimeout(res, waitMs))),
+    ]);
+    clearTimeout(timer);
   }
 }

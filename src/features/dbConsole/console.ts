@@ -7,7 +7,8 @@ import { driverFor } from './driver/registry';
 import { ConnectionStore } from './connectionStore';
 import { ConsoleStore, ConsoleSaved } from './consoleStore';
 import { HistoryStore } from './historyStore';
-import { Sessions, isConsoleKey, sessionKey } from './sessions';
+import { Sessions, connectionOfKey, isConsoleKey, sessionKey } from './sessions';
+import { idleAction, roomFor } from './txGuard';
 import { Statement, StatementInfo, classify, changesData } from './sql/statements';
 import { BindInput, bindValuesFor, toDriverSql } from './sql/binds';
 import { MAX_ROWS_LIMIT, ResultData, ResultView } from './ui/resultView';
@@ -53,8 +54,9 @@ type FromWebview =
 
 /** 쿼리 아래에 붙는 결과 하나 (화면이 그린다) */
 type Inline =
-  | { status: 'rows'; sql: string; resultId: number; columns: { name: string; type: string; numeric: boolean }[]; rows: (string | null)[][]; done: boolean; capped: boolean; ms: number; output?: string[] }
-  | { status: 'done'; text: string; ms: number; output?: string[] }
+  | { status: 'rows'; sql: string; resultId: number; columns: { name: string; type: string; numeric: boolean }[]; rows: (string | null)[][]; done: boolean; capped: boolean; ms: number; output?: string[]; pending?: boolean }
+  // pending: 아직 커밋하지 않은 변경 (커밋·롤백하면 화면이 "커밋됨"·"롤백됨"으로 바꾼다)
+  | { status: 'done'; text: string; ms: number; output?: string[]; pending?: boolean }
   | { status: 'error'; text: string; output?: string[] }
   | { status: 'plan'; lines: string[]; ms: number }
   | { status: 'cancel'; text: string }
@@ -92,6 +94,8 @@ interface ConsoleTab {
   key: string | undefined;
   /** 마지막으로 본 시각 (트리·사전에서 넣을 때 그 연결의 어느 콘솔에 넣을지) */
   seenAt: number;
+  /** SQL 로그에서 보낸 쿼리를 받는 콘솔 (보낼 때마다 새로 열지 않고 이것 하나를 다시 쓴다) */
+  forLog?: boolean;
   ready: boolean;
   /** 화면이 준비되기 전에 보내려던 메시지 */
   queue: unknown[];
@@ -121,6 +125,9 @@ export class DbConsole implements vscode.Disposable {
   /** 실행이 끝나기를 기다리는 일 (콘솔을 닫을 때 실행을 멈추고 끝나기를 기다린다) */
   private readonly waiters = new Map<string, (() => void)[]>();
   private disposing = false;
+  /** 커밋하지 않은 채 쉬고 있다고 이미 알린 접속 키 */
+  private readonly warned = new Set<string>();
+  private readonly guardTimer: ReturnType<typeof setInterval>;
   /** 결과 탭 id → 그 결과를 쿼리 아래에 보여 주는 콘솔 */
   private readonly owners = new Map<number, ConsoleTab>();
   private readonly subs: vscode.Disposable[] = [];
@@ -132,7 +139,11 @@ export class DbConsole implements vscode.Disposable {
     this.subs.push(
       // 접속이 닫히면(끊김 포함) 그 접속의 변경은 롤백된 것이고, 열어 둔 커서도 못 쓴다
       deps.sessions.onDidChange(() => {
-        for (const id of [...this.dirty.keys()]) if (!deps.sessions.isConnected(id)) this.dirty.delete(id);
+        for (const id of [...this.dirty.keys()]) {
+          if (deps.sessions.isConnected(id)) continue;
+          this.dirty.delete(id);
+          this.txEnded(id, 'closed');
+        }
         for (const tab of this.tabs) void this.syncServerOutput(tab);
         this.refresh();
       }),
@@ -168,10 +179,138 @@ export class DbConsole implements vscode.Disposable {
       }),
       // 오래 안 쓴 접속을 닫을 때, 커밋하지 않은 변경이 있거나 실행 중인 접속은 두고
       { dispose: () => deps.sessions.setKeepOpen(() => false) },
+      { dispose: () => clearInterval(this.guardTimer) },
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('devBoost.dbConsole.pageSize') || e.affectsConfiguration('devBoost.dbConsole.maxRows')) this.sendLimits();
       })
     );
+    // 커밋하지 않은 채 쉬는 접속을 살핀다 (잠금을 오래 붙들지 않게)
+    this.guardTimer = setInterval(() => void this.guardUncommitted().catch(() => undefined), 30_000);
+    this.guardTimer.unref?.();
+  }
+
+  private readonly changed = new vscode.EventEmitter<void>();
+  /** 커밋할 것·실행 중 상태가 바뀔 때 (상태바가 접속 수 · 커밋 안 한 변경을 보이려고) */
+  readonly onDidChangeState = this.changed.event;
+
+  /** 접속 키에 붙일 이름: "개발DB" / "개발DB 콘솔 2" */
+  labelOfKey(key: string): string {
+    const cfg = this.deps.store.get(connectionOfKey(key));
+    const no = isConsoleKey(key) ? Number(key.slice(key.indexOf('#') + 1)) : 1;
+    return cfg ? this.labelOf(cfg, no) : key;
+  }
+
+  /** 열린 접속들의 상태 (상태바 · 접속 목록) */
+  sessionStates(): { key: string; label: string; dirty: number; running: boolean; lastUsed: number; consoleOpen: boolean }[] {
+    return this.deps.sessions.list().map(({ key, session }) => ({
+      key,
+      label: this.labelOfKey(key),
+      dirty: this.dirty.get(key) ?? 0,
+      running: this.running.has(key),
+      lastUsed: session.lastUsed,
+      consoleOpen: [...this.tabs].some((t) => t.key === key),
+    }));
+  }
+
+  /** 접속 목록에서 커밋·롤백 */
+  async endTransactionOf(key: string, what: 'commit' | 'rollback'): Promise<boolean> {
+    const cfg = this.deps.store.get(connectionOfKey(key));
+    return cfg ? this.endTransaction(cfg, key, what) : false;
+  }
+
+  /** 그 접속을 쓰는 콘솔로 간다 (없으면 false) */
+  revealKey(key: string): boolean {
+    const tab = [...this.tabs].filter((t) => t.key === key).sort((a, b) => b.seenAt - a.seenAt)[0];
+    tab?.panel.reveal(undefined, false);
+    return !!tab;
+  }
+
+  /**
+   * 커밋하지 않은 변경이 있는 접속이 오래 쉬면: 먼저 알리고(커밋·롤백 버튼), 더 지나면 롤백한다.
+   * 잊고 둔 변경이 잠금을 붙든 채 남지 않게 (컴퓨터가 꺼지거나 네트워크가 끊기면 서버가 알아챌 때까지 잠금이 남는다)
+   */
+  private async guardUncommitted(now = Date.now()) {
+    for (const key of [...this.warned]) if (!this.isDirtyKey(key)) this.warned.delete(key);
+    const rollbackMs = uncommittedRollbackMs();
+    for (const [key, count] of [...this.dirty]) {
+      const session = this.deps.sessions.get(key);
+      const cfg = this.deps.store.get(connectionOfKey(key));
+      if (!session || !cfg || count <= 0 || this.running.has(key) || session.busy) continue;
+      const idle = now - session.lastUsed;
+      const action = idleAction(idle, rollbackMs, this.warned.has(key));
+      const label = this.labelOfKey(key);
+      const minutes = Math.round(idle / 60_000);
+      if (action === 'rollback') {
+        this.warned.delete(key);
+        const ok = await this.endTransaction(cfg, key, 'rollback');
+        if (!ok) continue;
+        const text = `${label}: 커밋하지 않은 변경 ${count}건을 ${minutes}분 동안 그대로 두어 롤백했습니다 (잠금을 풀었습니다).`;
+        this.deps.results.addLog({ kind: 'error', text, connectionName: cfg.name });
+        for (const tab of this.tabs) if (tab.key === key) this.post(tab, { type: 'hint', message: text });
+        void vscode.window.showWarningMessage(text);
+        // 콘솔만 쓰던 접속은 닫는다 (다음에 실행하면 다시 접속)
+        if (isConsoleKey(key)) {
+          this.deps.results.dropConnection(key);
+          await this.deps.sessions.disconnect(key);
+        }
+      } else if (action === 'warn') {
+        this.warned.add(key);
+        const commit = '커밋';
+        const rollback = '롤백';
+        const left = rollbackMs > 0 ? ` ${Math.max(1, Math.round((rollbackMs - idle) / 60_000))}분 뒤에는 자동으로 롤백합니다.` : '';
+        void vscode.window
+          .showWarningMessage(`${label}: 커밋하지 않은 변경 ${count}건이 ${minutes}분째 그대로입니다. 그동안 잠금을 잡고 있습니다.${left}`, commit, rollback)
+          .then((b) => {
+            if ((b === commit || b === rollback) && this.isDirtyKey(key)) void this.endTransaction(cfg, key, b === commit ? 'commit' : 'rollback');
+          });
+      }
+    }
+  }
+
+  /** 트랜잭션이 끝났다: 그 접속을 쓰는 콘솔의 "커밋 전" 표시를 커밋됨·롤백됨으로 바꾼다 */
+  private txEnded(key: string, what: 'commit' | 'rollback' | 'closed') {
+    this.warned.delete(key);
+    for (const tab of this.tabs) if (tab.key === key) this.post(tab, { type: 'txEnd', what });
+  }
+
+  /**
+   * 콘솔 접속을 하나 더 열 자리가 있는가 (연결당 상한). 상한에 닿았으면 가장 오래 쉰 콘솔 접속을 닫을지 묻는다 —
+   * 그 콘솔의 화면은 그대로 두고 접속만 닫는다 (다시 실행하면 접속). 닫을 수 있는 접속이 없으면 열지 않는다
+   */
+  private async makeRoom(cfg: DbConnectionConfig, tab: ConsoleTab): Promise<boolean> {
+    const max = maxSessions();
+    const state = () =>
+      this.deps.sessions.keysOf(cfg.id).map((k) => ({
+        key: k,
+        consoleOnly: isConsoleKey(k) && this.deps.sessions.isConnected(k),
+        dirty: this.isDirtyKey(k),
+        running: this.running.has(k) || !!this.deps.sessions.get(k)?.busy,
+        lastUsed: this.deps.sessions.get(k)?.lastUsed ?? Date.now(),
+      }));
+    const room = roomFor(state(), max);
+    if (room.ok) return true;
+    const n = this.deps.sessions.keysOf(cfg.id).length;
+    if (!room.victim) {
+      const text = `${cfg.name} 에 접속이 ${n}개 열려 있고(최대 ${max}개) 모두 실행 중이거나 커밋 전입니다. 커밋·롤백하거나 실행이 끝난 뒤 다시 실행하세요.`;
+      this.post(tab, { type: 'hint', message: text });
+      void vscode.window.showWarningMessage(text);
+      return false;
+    }
+    const go = '닫고 계속';
+    const answer = await vscode.window.showWarningMessage(
+      `${cfg.name} 에 접속이 ${n}개 열려 있습니다 (최대 ${max}개).`,
+      { modal: true, detail: `가장 오래 쉰 "${this.labelOfKey(room.victim)}" 의 접속을 닫고 계속할까요?\n그 콘솔의 화면과 SQL 은 그대로 두고, 거기서 다시 실행하면 접속합니다.` },
+      go
+    );
+    if (answer !== go) return false;
+    // 묻는 사이에 상황이 바뀌었을 수 있다: 다시 고른다
+    const again = roomFor(state(), max);
+    if (again.ok) return true;
+    if (!again.victim) return false;
+    this.deps.results.dropConnection(again.victim);
+    await this.deps.sessions.disconnect(again.victim);
+    for (const t of this.tabs) if (t.key === again.victim) this.post(t, { type: 'hint', message: '다른 콘솔이 접속을 쓰도록 이 콘솔의 접속을 닫았습니다. 실행하면 다시 접속합니다.' });
+    return true;
   }
 
   /** 한 번에 가져올 행 수·최대 행 수를 결과 패널과 모든 콘솔에 알린다 */
@@ -246,6 +385,7 @@ export class DbConsole implements vscode.Disposable {
 
   /** 모든 콘솔의 도구 줄(연결 상태·커밋 안 한 변경·실행 중)을 지금 상태에 맞춘다 */
   refresh() {
+    this.changed.fire();
     for (const tab of this.tabs) this.sendStatus(tab);
   }
 
@@ -453,10 +593,23 @@ export class DbConsole implements vscode.Disposable {
     this.postAfterBind(this.open(cfg), { type: 'snippet', query, values, title });
   }
 
+  /**
+   * newConsole: 쓰던 콘솔에 붙이지 않는다 (SQL 로그에서 고른 쿼리). 보낼 때마다 콘솔이 늘지 않게,
+   * 그 연결의 로그용 콘솔 하나를 열어 두고 거기에 이어 넣는다 (닫았으면 새로 연다)
+   */
   insertText(connectionId: string, text: string, opts: { asBlock?: boolean; run?: boolean; params?: Params; newConsole?: boolean } = {}) {
     const cfg = this.deps.store.get(connectionId);
     if (!cfg) return;
-    this.postAfterBind(opts.newConsole ? this.openNew(cfg) : this.open(cfg), { type: 'insert', text, asBlock: !!opts.asBlock, run: !!opts.run, params: opts.params });
+    let tab: ConsoleTab;
+    if (opts.newConsole) {
+      const have = [...this.tabs].find((t) => t.connectionId === cfg.id && t.forLog);
+      tab = have ?? this.openNew(cfg);
+      tab.forLog = true;
+      if (have) have.panel.reveal(undefined, false);
+    } else {
+      tab = this.open(cfg);
+    }
+    this.postAfterBind(tab, { type: 'insert', text, asBlock: !!opts.asBlock, run: !!opts.run, params: opts.params });
   }
 
   /**
@@ -586,6 +739,8 @@ export class DbConsole implements vscode.Disposable {
       this.post(tab, { type: 'hint', message: '다른 쿼리를 실행하는 중입니다. 끝난 뒤에 다시 실행하세요.' });
       return undefined;
     }
+    // 새로 접속해야 하는 콘솔 접속이면 연결당 상한을 먼저 본다
+    if (isConsoleKey(key) && !this.deps.sessions.isConnected(key) && !this.deps.sessions.isConnecting(key) && !(await this.makeRoom(cfg, tab))) return undefined;
     const session = await this.deps.ensureSession(cfg, key);
     // 접속하는 사이에 콘솔을 닫았으면 이 콘솔만 쓰는 접속은 바로 닫는다 (남지 않게)
     if (!this.tabs.has(tab)) {
@@ -785,6 +940,7 @@ export class DbConsole implements vscode.Disposable {
       void this.deps.history.add(cfg.id, { sql: st.sql, at: Date.now(), ms: r.ms, summary: `${n}행${r.page.done ? '' : ' 이상'}`, ok: true });
       if (info.forUpdate) addDirty(); // 행을 잠갔다 → 커밋·롤백으로 풀어야 한다
       this.inline(tab, st.key, {
+        pending: !!info.forUpdate,
         status: 'rows',
         sql: st.sql,
         resultId,
@@ -800,6 +956,7 @@ export class DbConsole implements vscode.Disposable {
     const ddlCommits = driverFor(cfg).ddlCommits;
     if ((info.kind === 'tx' && info.verb !== 'SAVEPOINT') || (info.kind === 'ddl' && ddlCommits)) {
       this.dirty.delete(key); // 직접 친 COMMIT·ROLLBACK, 또는 DDL (Oracle·MySQL 은 DDL 을 실행하면서 그 앞의 변경까지 커밋한다)
+      this.txEnded(key, info.kind === 'tx' && info.verb === 'ROLLBACK' ? 'rollback' : 'commit');
     } else if (!(r.kind === 'count' && r.rowsAffected === 0)) {
       addDirty(); // DML·PL/SQL·그 밖: 바뀐 것이 있을 수 있다 (0행 변경은 세지 않는다)
     }
@@ -809,10 +966,11 @@ export class DbConsole implements vscode.Disposable {
         : info.kind === 'ddl' && ddlCommits
           ? '실행됨 (DDL — 자동으로 커밋됩니다)'
           : '실행됨';
-    const pending = this.isDirtyKey(key) && info.kind !== 'tx' ? ' · 아직 커밋하지 않음' : '';
-    results.addLog({ kind: 'ok', text: `${what} · ${seconds(r.ms)}${pending}`, sql, connectionName: cfg.name });
+    const pending = this.isDirtyKey(key) && info.kind !== 'tx';
+    results.addLog({ kind: 'ok', text: `${what} · ${seconds(r.ms)}${pending ? ' · 커밋 전' : ''}`, sql, connectionName: cfg.name });
     void this.deps.history.add(cfg.id, { sql: st.sql, at: Date.now(), ms: r.ms, summary: what, ok: true });
-    this.inline(tab, st.key, { status: 'done', text: `${what}${pending}`, ms: r.ms, output });
+    // "커밋 전" 은 글에 박지 않고 표시로 보낸다 — 커밋·롤백하면 화면이 바꾼다
+    this.inline(tab, st.key, { status: 'done', text: what, ms: r.ms, output, pending });
   }
 
   /** 실행계획 (문장을 실제로 실행하지는 않는다) */
@@ -977,11 +1135,15 @@ export class DbConsole implements vscode.Disposable {
     }
     let ok = false;
     try {
+      const count = this.dirty.get(key) ?? 0;
       await session.use((c) => (what === 'commit' ? c.commit() : c.rollback()));
       this.dirty.delete(key);
+      this.txEnded(key, what);
       ok = true;
-      this.deps.results.addLog({ kind: 'ok', text: `${label}했습니다`, connectionName: cfg.name });
-      vscode.window.setStatusBarMessage(`${cfg.name}: ${label}했습니다`, 4000);
+      const done = count ? `${label}했습니다 — 변경 ${count}건` : `${label}했습니다 (${label}할 변경이 없었습니다)`;
+      this.deps.results.addLog({ kind: 'ok', text: done, connectionName: cfg.name });
+      for (const t of this.tabs) if (t.key === key) this.post(t, { type: 'hint', message: done, plain: true });
+      vscode.window.setStatusBarMessage(`${this.labelOfKey(key)}: ${done}`, 4000);
     } catch (e) {
       const text = session.driver.errors.explain(e);
       this.deps.sessions.reportError(key, e);
@@ -1105,6 +1267,18 @@ export class DbConsole implements vscode.Disposable {
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }
+}
+
+/** 연결 하나에 동시에 열어 두는 접속 수 상한 (기본 접속 + 콘솔별 접속). 기본 5 */
+function maxSessions(): number {
+  const n = vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('maxSessions', 5);
+  return Number.isFinite(n) ? Math.min(20, Math.max(2, Math.floor(n))) : 5;
+}
+
+/** 커밋하지 않은 채 이 시간 동안 쉬면 롤백한다 (ms). 0 이면 알리기만 한다. 기본 30분 */
+function uncommittedRollbackMs(): number {
+  const min = vscode.workspace.getConfiguration('devBoost.dbConsole').get<number>('uncommittedRollbackMinutes', 30);
+  return min > 0 ? Math.max(5, min) * 60_000 : 0;
 }
 
 /** 콘솔끼리 접속 하나를 같이 쓰는가 (설정 devBoost.dbConsole.sessionPerConsole 을 끈 경우) */

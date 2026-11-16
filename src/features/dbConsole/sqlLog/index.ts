@@ -6,7 +6,7 @@ import { registerServerTerminals } from './serverTerminal';
 
 /**
  * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 로그(MyBatis·log4jdbc·SQL 로 시작하는 로그)에서
- * 쿼리를 골라 값까지 채워 두고, 고르면 새 DB 콘솔에 옮긴다 (실행은 하지 않는다).
+ * 쿼리를 골라 값까지 채워 두고, 고르면 DB 콘솔(그 연결의 로그용 콘솔 하나)에 옮긴다 (실행은 하지 않는다).
  *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
  * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 출력
@@ -108,7 +108,7 @@ export const sqlLog: Feature = {
         md.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection) · [$(filter) 수집 필터](command:devBoost.sqlLog.pick)\n\n');
       }
       if (ring.excluded) md.appendMarkdown(`[$(filter) 수집 필터로 빠진 쿼리 ${ring.excluded}개](command:devBoost.sqlLog.pick) — 목록 창 위에서 필터를 풀면 돌아옵니다\n\n`);
-      if (list.length) md.appendMarkdown('**최근 쿼리** — 누르면 새 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
+      if (list.length) md.appendMarkdown('**최근 쿼리** — 누르면 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
       for (const q of list) {
         const arg = encodeURIComponent(JSON.stringify([q.id]));
         const info = queryInfo(q);
@@ -121,7 +121,7 @@ export const sqlLog: Feature = {
       status.show();
     };
 
-    /** 고른 쿼리를 새 DB 콘솔에 넣는다 (실행은 하지 않는다). DB 콘솔을 꺼 뒀으면 클립보드로 */
+    /** 고른 쿼리를 로그용 DB 콘솔에 넣는다 (실행은 하지 않는다). DB 콘솔을 꺼 뒀으면 클립보드로 */
     const send = async (q: LoggedQuery | undefined) => {
       if (!q) {
         void vscode.window.showInformationMessage('그 쿼리는 목록에서 밀려났습니다. 목록을 다시 열어 주세요.');

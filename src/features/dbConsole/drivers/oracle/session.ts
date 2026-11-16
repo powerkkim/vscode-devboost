@@ -67,6 +67,8 @@ export async function openOracle(cfg: DbConnectionConfig, password: string): Pro
     connectString: buildConnectString(cfg),
     connectTimeout: CONNECT_TIMEOUT_SEC,
     transportConnectTimeout: CONNECT_TIMEOUT_SEC,
+    // 쉬는 접속에 1분마다 확인 신호: 방화벽이 조용히 끊은 접속을 빨리 알아채고, 서버에 반쪽 세션이 오래 남지 않게
+    expireTime: 1,
   });
   try {
     const r = await raw.execute(`select sys_context('userenv','current_schema'), sys_context('userenv','db_name') from dual`);
