@@ -405,6 +405,7 @@ export const dbConsole: Feature = {
 
     /** 접속 하나를 닫는다 (커밋하지 않은 변경이 있으면 먼저 묻는다) */
     const closeSession = async (key: string): Promise<boolean> => {
+      await queryConsole.syncKey(key);
       const st = queryConsole.sessionStates().find((x) => x.key === key);
       if (!st) return false;
       if (st.dirty) {
@@ -459,6 +460,7 @@ export const dbConsole: Feature = {
           return;
         }
         if (!it.all) return;
+        await Promise.all(queryConsole.sessionStates().map((x) => queryConsole.syncKey(x.key)));
         const list = queryConsole.sessionStates();
         const dirty = list.reduce((n, x) => n + x.dirty, 0);
         const go = dirty ? '롤백하고 모두 닫기' : '모두 닫기';
@@ -511,6 +513,7 @@ export const dbConsole: Feature = {
         const cfg = await pick(item, '삭제할 DB 연결');
         if (!cfg) return;
         const yes = '삭제';
+        await queryConsole.syncConnection(cfg.id);
         const dirtyNote = queryConsole.isDirty(cfg.id) ? ` 커밋하지 않은 변경 ${queryConsole.dirtyCount(cfg.id)}건은 롤백됩니다.` : '';
         const answer = await vscode.window.showWarningMessage(`DB 연결 "${cfg.name}" 을 삭제할까요? 저장된 비밀번호도 지워집니다.${dirtyNote}`, { modal: true }, yes);
         if (answer !== yes) return;
@@ -534,6 +537,7 @@ export const dbConsole: Feature = {
       cmd('disconnect', async (item?: TreeNode) => {
         const cfg = await pick(item, '접속을 끊을 DB 연결');
         if (!cfg) return;
+        await queryConsole.syncConnection(cfg.id);
         if (queryConsole.isDirty(cfg.id)) {
           // 접속을 닫으면 커밋하지 않은 변경은 롤백된다
           const go = '롤백하고 끊기';

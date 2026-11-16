@@ -152,6 +152,12 @@ export interface DbConnection {
   explain(sql: string, binds: Binds): Promise<string[]>;
   commit(): Promise<void>;
   rollback(): Promise<void>;
+  /**
+   * 서버에 열린 트랜잭션(커밋·롤백으로 끝내야 할 것)이 있는가 — 문장 글로 짐작하지 않고 실제 상태를 본다.
+   * PL/SQL 안에서 커밋했거나, 조회처럼 보이는 문장이 트랜잭션을 연 경우(DB 링크 등)까지 맞는다.
+   * 알 수 없으면 undefined (그때는 실행한 문장을 세는 방식으로 본다). 없는 드라이버는 늘 세는 방식
+   */
+  hasOpenTransaction?(): Promise<boolean | undefined>;
   /** 실행 중인 문장을 멈춘다 (줄을 서지 않고 바로) */
   cancel(): Promise<void>;
   /** 서버에 다녀오지 않고 아는 범위에서 살아 있는지 */

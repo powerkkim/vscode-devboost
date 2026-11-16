@@ -23,6 +23,22 @@ export class DbSession {
     return this.running > 0;
   }
 
+  /**
+   * 서버에 열린 트랜잭션이 있는가 (알 수 없으면 undefined). 줄을 서서 묻지만 "쓴 시각"은 건드리지 않는다 —
+   * 쉬는 접속을 살피는 확인이 그 접속을 쓰는 것으로 보이지 않게
+   */
+  async openTransaction(): Promise<boolean | undefined> {
+    if (!this.connection.hasOpenTransaction || !this.connection.isHealthy()) return undefined;
+    const before = this.lastUsed;
+    try {
+      return await this.use((c) => c.hasOpenTransaction!());
+    } catch {
+      return undefined;
+    } finally {
+      this.lastUsed = before;
+    }
+  }
+
   /** 접속을 쓰는 일은 이것으로 감싼다 (앞의 일이 끝나면 시작한다) */
   use<T>(run: (connection: DbConnection) => Promise<T>): Promise<T> {
     this.running++;

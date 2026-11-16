@@ -112,6 +112,9 @@ export class Sessions {
   private idleCloseMs: number;
   /** 닫으면 안 되는 접속인가 (커밋하지 않은 변경·실행 중). 콘솔이 정한다 */
   private keepOpen: (key: string) => boolean = () => false;
+  /** 쉬는 접속을 닫기 직전에 한 번 더 묻는다 (서버에 열린 트랜잭션이 있는지 등). false 면 닫지 않는다 */
+  private confirmIdle: ((key: string) => Promise<boolean>) | undefined;
+  private readonly confirming = new Set<string>();
   private readonly idle = new Emitter<string>();
   /** 오래 안 써서 닫았을 때 (접속 키) */
   readonly onDidCloseIdle = this.idle.event;
@@ -140,6 +143,11 @@ export class Sessions {
   /** 닫으면 안 되는 접속을 알려 줄 함수 (커밋하지 않은 변경이 있는 콘솔) */
   setKeepOpen(fn: (key: string) => boolean) {
     this.keepOpen = fn;
+  }
+
+  /** 쉬는 접속을 닫기 직전의 확인 (없으면 묻지 않고 닫는다) */
+  setConfirmIdle(fn: ((key: string) => Promise<boolean>) | undefined) {
+    this.confirmIdle = fn;
   }
 
   /** 그 연결에 열린(또는 여는 중인) 접속 키들 */
@@ -274,19 +282,37 @@ export class Sessions {
   /** 오래 안 쓴 콘솔 접속을 닫는다 (기본 접속은 사용자가 끊을 때까지 둔다). 실행 중이거나 커밋하지 않은 변경이 있으면 두고 */
   closeIdle(now = Date.now()): string[] {
     if (!(this.idleCloseMs > 0)) return [];
-    const closed: string[] = [];
-    for (const [key, s] of [...this.open]) {
-      if (!isConsoleKey(key) || s.busy || now - s.lastUsed < this.idleCloseMs || this.keepOpen(key)) continue;
-      this.open.delete(key);
-      void s.close().catch(() => undefined);
-      closed.push(key);
+    const idle = (key: string, s: DbSession) => isConsoleKey(key) && !s.busy && now - s.lastUsed >= this.idleCloseMs && !this.keepOpen(key);
+    const close = (list: [string, DbSession][]) => {
+      const closed: string[] = [];
+      for (const [key, s] of list) {
+        if (this.open.get(key) !== s) continue;
+        this.open.delete(key);
+        void s.close().catch(() => undefined);
+        closed.push(key);
+      }
+      if (closed.length) {
+        this.schedule();
+        this.changed.fire();
+        for (const k of closed) this.idle.fire(k);
+      }
+      return closed;
+    };
+    const candidates = [...this.open].filter(([key, s]) => idle(key, s));
+    const confirm = this.confirmIdle;
+    if (!confirm) return close(candidates);
+    // 닫기 직전에 묻는다 (서버에 다녀온다). 묻는 사이에 쓰기 시작했으면 닫지 않는다
+    for (const [key, s] of candidates) {
+      if (this.confirming.has(key)) continue;
+      this.confirming.add(key);
+      void confirm(key)
+        .catch(() => true)
+        .then((ok) => {
+          this.confirming.delete(key);
+          if (ok && !this.disposed && this.open.get(key) === s && idle(key, s)) close([[key, s]]);
+        });
     }
-    if (closed.length) {
-      this.schedule();
-      this.changed.fire();
-      for (const k of closed) this.idle.fire(k);
-    }
-    return closed;
+    return [];
   }
 
   /**

@@ -136,6 +136,11 @@ export class DbConsole implements vscode.Disposable {
     deps.results.fetchMore = (connectionId, cursor, count) => this.fetchMore(connectionId, cursor, count);
     deps.results.setLimits(pageSize(), maxRows());
     deps.sessions.setKeepOpen((key) => this.isDirtyKey(key) || this.running.has(key));
+    // 쉬는 접속을 닫기 직전: 서버에 열린 트랜잭션이 있으면(센 것과 달라도) 닫지 않는다
+    deps.sessions.setConfirmIdle(async (key) => {
+      await this.syncTx(key);
+      return !this.isDirtyKey(key) && !this.running.has(key);
+    });
     this.subs.push(
       // 접속이 닫히면(끊김 포함) 그 접속의 변경은 롤백된 것이고, 열어 둔 커서도 못 쓴다
       deps.sessions.onDidChange(() => {
@@ -178,7 +183,7 @@ export class DbConsole implements vscode.Disposable {
         for (const [tab, list] of byTab) this.post(tab, { type: 'inlineDropped', ids: list });
       }),
       // 오래 안 쓴 접속을 닫을 때, 커밋하지 않은 변경이 있거나 실행 중인 접속은 두고
-      { dispose: () => deps.sessions.setKeepOpen(() => false) },
+      { dispose: () => (deps.sessions.setKeepOpen(() => false), deps.sessions.setConfirmIdle(undefined)) },
       { dispose: () => clearInterval(this.guardTimer) },
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('devBoost.dbConsole.pageSize') || e.affectsConfiguration('devBoost.dbConsole.maxRows')) this.sendLimits();
@@ -237,6 +242,10 @@ export class DbConsole implements vscode.Disposable {
       const cfg = this.deps.store.get(connectionOfKey(key));
       if (!session || !cfg || count <= 0 || this.running.has(key) || session.busy) continue;
       const idle = now - session.lastUsed;
+      if (idleAction(idle, rollbackMs, this.warned.has(key)) === 'none') continue;
+      // 알리거나 롤백하기 전에 서버에 실제로 열린 트랜잭션이 있는지 본다 (이미 끝났으면 아무것도 하지 않는다)
+      await this.syncTx(key);
+      if (!this.isDirtyKey(key)) continue;
       const action = idleAction(idle, rollbackMs, this.warned.has(key));
       const label = this.labelOfKey(key);
       const minutes = Math.round(idle / 60_000);
@@ -267,8 +276,40 @@ export class DbConsole implements vscode.Disposable {
     }
   }
 
+  /**
+   * 커밋할 것이 있는지를 서버의 실제 상태에 맞춘다 (실행한 문장을 센 것이 틀릴 수 있다):
+   *  - 센 것은 있는데 서버에는 열린 트랜잭션이 없다 → PL/SQL · 프로시저 안에서 끝났다: 표시를 푼다
+   *  - 센 것은 없는데 서버에는 열려 있다 → 조회처럼 보인 문장이 트랜잭션을 열었다(DB 링크 · 함수 안의 변경 등): 커밋 전으로 본다
+   * 매번 묻지 않는다 — 커밋 전 표시가 있을 때의 실행 뒤, 그리고 접속을 닫거나 롤백하기 직전에만
+   */
+  private async syncTx(key: string): Promise<void> {
+    const session = this.deps.sessions.get(key);
+    if (!session || this.running.has(key)) return;
+    const open = await session.openTransaction();
+    if (open === undefined || this.deps.sessions.get(key) !== session) return;
+    const counted = this.isDirtyKey(key);
+    if (!open && counted) {
+      this.dirty.delete(key);
+      this.txEnded(key, 'ended');
+      this.refresh();
+    } else if (open && !counted) {
+      this.dirty.set(key, 1);
+      this.refresh();
+    }
+  }
+
+  /** 그 연결의 모든 접속을 서버 상태에 맞춘다 (접속 끊기 · 연결 삭제 앞에서 물어볼 것이 있는지 보려고) */
+  async syncConnection(connectionId: string): Promise<void> {
+    await Promise.all(this.deps.sessions.keysOf(connectionId).map((k) => this.syncTx(k)));
+  }
+
+  /** 접속 하나를 서버 상태에 맞춘다 (접속 목록에서 닫기 앞) */
+  syncKey(key: string): Promise<void> {
+    return this.syncTx(key);
+  }
+
   /** 트랜잭션이 끝났다: 그 접속을 쓰는 콘솔의 "커밋 전" 표시를 커밋됨·롤백됨으로 바꾼다 */
-  private txEnded(key: string, what: 'commit' | 'rollback' | 'closed') {
+  private txEnded(key: string, what: 'commit' | 'rollback' | 'closed' | 'ended') {
     this.warned.delete(key);
     for (const tab of this.tabs) if (tab.key === key) this.post(tab, { type: 'txEnd', what });
   }
@@ -287,7 +328,13 @@ export class DbConsole implements vscode.Disposable {
         running: this.running.has(k) || !!this.deps.sessions.get(k)?.busy,
         lastUsed: this.deps.sessions.get(k)?.lastUsed ?? Date.now(),
       }));
-    const room = roomFor(state(), max);
+    let room = roomFor(state(), max);
+    // 닫을 후보는 서버에 열린 트랜잭션이 없는지 먼저 본다 (있으면 커밋 전으로 바뀌어 후보에서 빠진다)
+    for (let i = 0; i < max && !room.ok && room.victim; i++) {
+      await this.syncTx(room.victim);
+      if (!this.isDirtyKey(room.victim)) break;
+      room = roomFor(state(), max);
+    }
     if (room.ok) return true;
     const n = this.deps.sessions.keysOf(cfg.id).length;
     if (!room.victim) {
@@ -307,6 +354,8 @@ export class DbConsole implements vscode.Disposable {
     const again = roomFor(state(), max);
     if (again.ok) return true;
     if (!again.victim) return false;
+    await this.syncTx(again.victim);
+    if (this.isDirtyKey(again.victim)) return this.makeRoom(cfg, tab);
     this.deps.results.dropConnection(again.victim);
     await this.deps.sessions.disconnect(again.victim);
     for (const t of this.tabs) if (t.key === again.victim) this.post(t, { type: 'hint', message: '다른 콘솔이 접속을 쓰도록 이 콘솔의 접속을 닫았습니다. 실행하면 다시 접속합니다.' });
@@ -495,6 +544,9 @@ export class DbConsole implements vscode.Disposable {
       void this.deps.sessions.get(key)?.connection.cancel().catch(() => undefined);
       await this.untilIdle(key);
     }
+    // 센 것과 달라도 서버에 열린 트랜잭션이 있으면 묻는다 (묻지 않고 롤백하지 않게)
+    await this.syncTx(key);
+    if (this.disposing) return;
     if (cfg && this.isDirtyKey(key) && this.deps.sessions.isConnected(key)) {
       const commit = '커밋';
       const rollback = '롤백';
@@ -812,6 +864,9 @@ export class DbConsole implements vscode.Disposable {
     } finally {
       this.endRunning(key);
     }
+    // 커밋 전 표시가 있거나 조회가 아닌 문장을 실행했으면 서버 상태와 맞춘다
+    // (PL/SQL 안에서 커밋했으면 표시를 풀고, 센 것이 없어도 트랜잭션이 열렸으면 커밋 전으로 본다). 조회만 하는 동안은 묻지 않는다
+    if (this.isDirtyKey(key) || infos.some((i) => i.kind !== 'query')) await this.syncTx(key);
   }
 
   /**
@@ -954,7 +1009,11 @@ export class DbConsole implements vscode.Disposable {
       return;
     }
     const ddlCommits = driverFor(cfg).ddlCommits;
-    if ((info.kind === 'tx' && info.verb !== 'SAVEPOINT') || (info.kind === 'ddl' && ddlCommits)) {
+    // ROLLBACK TO SAVEPOINT 는 그 뒤만 되돌린다: 트랜잭션은 열려 있고 앞의 변경 · 잠금도 그대로다
+    const partial = info.kind === 'tx' && /^\s*rollback\s+(work\s+)?to\b/i.test(st.sql);
+    if (partial) {
+      // 커밋할 것은 그대로 둔다
+    } else if ((info.kind === 'tx' && info.verb !== 'SAVEPOINT') || (info.kind === 'ddl' && ddlCommits)) {
       this.dirty.delete(key); // 직접 친 COMMIT·ROLLBACK, 또는 DDL (Oracle·MySQL 은 DDL 을 실행하면서 그 앞의 변경까지 커밋한다)
       this.txEnded(key, info.kind === 'tx' && info.verb === 'ROLLBACK' ? 'rollback' : 'commit');
     } else if (!(r.kind === 'count' && r.rowsAffected === 0)) {

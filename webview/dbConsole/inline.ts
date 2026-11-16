@@ -26,7 +26,7 @@ export interface InlineData {
   /** 아직 커밋하지 않은 변경 (또는 FOR UPDATE 로 잡은 잠금) */
   pending?: boolean;
   /** 그 변경이 어떻게 끝났나 — 커밋 · 롤백 · 접속이 닫혀 롤백 */
-  ended?: 'commit' | 'rollback' | 'closed';
+  ended?: 'commit' | 'rollback' | 'closed' | 'ended';
   collapsed?: boolean;
   sort?: Sort;
 }
@@ -165,8 +165,11 @@ function txBadge(head: HTMLElement, d: InlineData) {
     b.title = '아직 확정하지 않았습니다. 도구 줄의 커밋 또는 롤백으로 끝냅니다';
     head.appendChild(b);
   } else if (d.ended) {
-    const text = d.ended === 'commit' ? '✓ 커밋됨' : d.ended === 'rollback' ? '↩ 롤백됨' : '↩ 접속이 닫혀 롤백됨';
-    const b = el('span', `ir-tx ${d.ended === 'commit' ? 'committed' : 'rolled'}`, d.status === 'rows' ? (d.ended === 'commit' ? '✓ 커밋됨 (잠금 풀림)' : '↩ 롤백됨 (잠금 풀림)') : text);
+    // ended: 버튼 · 문장이 아닌 곳(프로시저 안 등)에서 끝났다 — 서버에 열린 트랜잭션이 없음을 확인했다
+    const done = d.ended === 'commit' || d.ended === 'ended';
+    const text = d.ended === 'commit' ? '✓ 커밋됨' : d.ended === 'ended' ? '✓ 트랜잭션 끝남' : d.ended === 'rollback' ? '↩ 롤백됨' : '↩ 접속이 닫혀 롤백됨';
+    const b = el('span', `ir-tx ${done ? 'committed' : 'rolled'}`, d.status === 'rows' ? `${text} (잠금 풀림)` : text);
+    if (d.ended === 'ended') b.title = '서버에 열린 트랜잭션이 없습니다 (실행한 문장 안에서 커밋 · 롤백됐습니다)';
     head.appendChild(b);
   }
 }
@@ -432,7 +435,7 @@ export function markDropped(view: EditorView, ids: number[]) {
 }
 
 /** 커밋·롤백했다: "커밋 전" 이던 결과를 모두 커밋됨·롤백됨으로 바꾼다 */
-export function txEnded(view: EditorView, what: 'commit' | 'rollback' | 'closed') {
+export function txEnded(view: EditorView, what: 'commit' | 'rollback' | 'closed' | 'ended') {
   for (const d of data.values()) {
     if (!d.pending) continue;
     d.pending = false;
