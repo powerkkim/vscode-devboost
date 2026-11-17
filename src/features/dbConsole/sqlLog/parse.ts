@@ -32,9 +32,38 @@ export interface LoggedQuery {
   failed?: boolean;
   /** 값이 채워지지 않은 ? 가 남아 있다 (값을 따로 찍지 않는 로그) */
   unbound?: boolean;
+  /** 로그를 찍은 스레드 ("http-nio-8080-exec-5", 모르면 '') */
+  thread?: string;
+  /** 로그 줄에 찍힌 시각 (그날 0시부터 ms, 줄에 시각이 없으면 없음) — 요청 안에서 몇 ms 뒤에 돌았는지 */
+  at?: number;
+  /** 이 쿼리를 돌린 요청 (요청 시작 줄을 본 경우) */
+  req?: RequestInfo;
+}
+
+/**
+ * 웹 요청 하나 — 요청 시작 줄([REQ][id] GET /url, DispatcherServlet : GET "/url")부터 끝 줄([RES][id] … status=200 | 236ms, Completed 200)까지.
+ * 끝 줄이 오면 같은 객체에 status · ms · ended 를 채운다 (쿼리들이 같은 객체를 가리킨다)
+ */
+export interface RequestInfo {
+  /** 읽은 차례 번호 */
+  id: number;
+  /** 줄에 찍힌 요청 id ([REQ][e2ccdecf] 의 e2ccdecf) */
+  key?: string;
+  method: string;
+  url: string;
+  thread: string;
+  at?: number;
+  time: number;
+  status?: number;
+  ms?: number;
+  ended?: boolean;
 }
 
 export interface LogReaderOptions {
+  /** 이 낱말이 든 로그 줄을 요청 시작으로 본다 (기본 ["[REQ]"]). DispatcherServlet 의 DEBUG 로그는 늘 알아본다 */
+  requestStart?: string[];
+  /** 이 낱말이 든 로그 줄을 요청 끝으로 본다 (기본 ["[RES]"]) */
+  requestEnd?: string[];
   /** 로거 이름을 몰라도, 로그 내용이 SQL 로 시작하면 다음 로그 줄 전까지를 쿼리로 읽는다 (기본 켬) */
   auto?: boolean;
   /** 이 낱말이 들어 있는 로그 줄부터 다음 로그 줄 전까지를 쿼리로 읽는다 (자동으로 안 잡히는 로거용) */
@@ -221,10 +250,34 @@ function prefixKey(prefix: string): string {
   return prefix.replace(/^[\s\d\-/:.,TZ+[\]]+/, '').trim();
 }
 
-/** 줄 머리의 스레드 이름 "[http-nio-8080-exec-5]" (없으면 '') — 같은 요청의 로그끼리 묶는 데 쓴다 */
-function threadOf(prefix: string): string {
-  const m = /\[([^\]]*[A-Za-z][^\]]*)\]/.exec(prefix);
-  return m ? m[1].trim() : '';
+/**
+ * 줄 머리의 스레드 이름 "[http-nio-8080-exec-5]" (없으면 '') — 같은 요청의 로그끼리 묶는 데 쓴다.
+ * 로그 내용(" : " · " - " 뒤)의 [..] 는 보지 않고, 머리의 [..] 가운데 마지막 것을 쓴다
+ * (Spring Boot 3.4 의 "--- [앱 이름] [스레드]" 처럼 둘일 때 뒤의 것이 스레드). 로그 수준 [DEBUG] 는 뺀다
+ */
+export function threadOf(prefix: string): string {
+  const cut = prefix.search(/\s[:-]\s/);
+  const head = cut >= 0 ? prefix.slice(0, cut) : prefix;
+  const all = [...head.matchAll(/\[([^\]]*[A-Za-z][^\]]*)\]/g)].map((m) => m[1].trim()).filter((t) => !/^(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)$/i.test(t));
+  return all.length ? all[all.length - 1] : '';
+}
+
+/** 줄 머리의 시각 → 그날 0시부터 ms (12:34:56.789 · 12:34:56,789 · 12:34:56). 없으면 undefined */
+export function logTimeOf(line: string): number | undefined {
+  const m = /(\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,3}))?/.exec(line.slice(0, 48));
+  if (!m) return undefined;
+  return ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000 + Number((m[4] ?? '0').padEnd(3, '0'));
+}
+
+const HTTP_METHOD = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+"?([^\s"|,]+)/;
+const DISPATCH_START = /DispatcherServlet\s*:\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+"([^"]+)"/;
+const DISPATCH_END = /DispatcherServlet\s*:\s*Completed\s+(\d{3})\b/;
+
+/** "[REQ][e2ccdecf] GET …" 에서 낱말 바로 뒤의 [id] (없으면 undefined) */
+function bracketAfter(line: string, word: string): string | undefined {
+  const at = line.indexOf(word);
+  const m = /^\s*\[([^\]\s]{1,64})\]/.exec(line.slice(at + word.length));
+  return m ? m[1] : undefined;
 }
 
 /** "... c.e.m.UserMapper.selectUser :" → "UserMapper.selectUser". 로거 이름이 줄여 찍혀 클래스가 한두 글자면 메서드만 */
@@ -316,7 +369,7 @@ export class LogReader {
   /** 아직 다음 줄을 기다리는 "==>" 줄 (터미널 폭에서 잘린 나머지가 이어질 수 있어서) */
   private held: string | undefined;
   /** 읽는 중인 여러 줄 SQL 덩어리 (log4jdbc, 또는 SQL 로 시작하는 로그) */
-  private block: { kind: BlockKind; thread: string; lines: string[]; size: number; needSql?: boolean } | undefined;
+  private block: { kind: BlockKind; thread: string; lines: string[]; size: number; needSql?: boolean; at?: number } | undefined;
   /** 열쇠 → Preparing 의 SQL */
   private open = new Map<string, { sql: string; mapper: string }>();
   /** 열쇠 → 방금 내보낸 쿼리 (Total 이 오면 건수를 적는다) */
@@ -326,6 +379,12 @@ export class LogReader {
 
   private readonly auto: boolean;
   private readonly keywords: string[];
+  private readonly startWords: string[];
+  private readonly endWords: string[];
+  /** 끝나지 않은 요청: 요청 id → 요청, 스레드 → 요청 */
+  private reqById = new Map<string, RequestInfo>();
+  private reqByThread = new Map<string, RequestInfo>();
+  private reqSeq = 0;
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -333,6 +392,49 @@ export class LogReader {
   ) {
     this.auto = options.auto !== false;
     this.keywords = (options.keywords ?? []).map((k) => k.trim()).filter(Boolean);
+    const words = (list: string[] | undefined, def: string[]) => (list ?? def).map((k) => String(k).trim()).filter(Boolean);
+    this.startWords = words(options.requestStart, ['[REQ]']);
+    this.endWords = words(options.requestEnd, ['[RES]']);
+  }
+
+  /** 요청 시작 · 끝 줄이면 요청을 열고 닫고 true. 시작 줄 뒤 같은 스레드의 쿼리는 그 요청에 묶인다 */
+  private request(line: string, thread: string): boolean {
+    const word = this.startWords.find((w) => line.includes(w));
+    const dispatcher = line.includes('DispatcherServlet');
+    const ds = word || !dispatcher ? null : DISPATCH_START.exec(line);
+    if (word || ds) {
+      const key = word ? bracketAfter(line, word) : undefined;
+      const mu = ds ? [ds[0], ds[1], ds[2]] : HTTP_METHOD.exec(line.slice(line.indexOf(word!) + word!.length));
+      const r: RequestInfo = { id: ++this.reqSeq, key, method: mu?.[1] ?? '', url: mu?.[2] ?? '', thread, at: logTimeOf(line), time: this.now() };
+      const prev = this.reqByThread.get(thread);
+      if (prev) this.closeRequest(prev); // 끝 줄 없이 다음 요청이 시작됨
+      this.reqByThread.set(thread, r);
+      if (key) this.reqById.set(key, r);
+      if (this.reqById.size > MAX_OPEN) this.reqById.delete(this.reqById.keys().next().value as string);
+      if (this.reqByThread.size > MAX_OPEN) this.reqByThread.delete(this.reqByThread.keys().next().value as string);
+      return true;
+    }
+    const end = this.endWords.find((w) => line.includes(w));
+    const de = end || !dispatcher ? null : DISPATCH_END.exec(line);
+    if (!end && !de) return false;
+    const key = end ? bracketAfter(line, end) : undefined;
+    const r = (key && this.reqById.get(key)) || this.reqByThread.get(thread);
+    if (r && !r.ended) {
+      const status = de ? Number(de[1]) : Number(/status\s*[=:]\s*(\d{3})/i.exec(line)?.[1] ?? /\s(\d{3})\s/.exec(line.slice(line.indexOf(end!)))?.[1]);
+      if (status) r.status = status;
+      const ms = /(\d+)\s*ms\b/.exec(end ? line.slice(line.indexOf(end)) : '')?.[1];
+      const at = logTimeOf(line);
+      if (ms) r.ms = Number(ms);
+      else if (at !== undefined && r.at !== undefined && at >= r.at) r.ms = at - r.at;
+      this.closeRequest(r);
+    }
+    return true;
+  }
+
+  private closeRequest(r: RequestInfo) {
+    r.ended = true;
+    if (r.key && this.reqById.get(r.key) === r) this.reqById.delete(r.key);
+    if (this.reqByThread.get(r.thread) === r) this.reqByThread.delete(r.thread);
   }
 
   push(chunk: string): LoggedQuery[] {
@@ -396,7 +498,7 @@ export class LogReader {
     }
     const j = line.indexOf('.sql') < 0 ? null : JDBC_HEAD.exec(line);
     if (j && isLogHead(line)) {
-      this.block = { kind: j[2] as 'sqlonly' | 'sqltiming', thread: threadOf(j[1]), lines: [], size: 0 };
+      this.block = { kind: j[2] as 'sqlonly' | 'sqltiming', thread: threadOf(j[1]), lines: [], size: 0, at: logTimeOf(line) };
       const rest = j[3];
       const tail = JDBC_TAIL.exec(rest);
       if (tail) {
@@ -410,22 +512,24 @@ export class LogReader {
     }
     if (!isLogHead(line)) return;
     const thread = threadOf(line);
+    if (this.request(line, thread)) return;
+    const logAt = logTimeOf(line);
     // 설정에 적은 낱말이 있는 로그: 그 낱말 뒤부터 다음 로그 줄 전까지
     for (const k of this.keywords) {
       const at = line.indexOf(k);
       if (at < 0) continue;
       const rest = line.slice(at + k.length).replace(/^[\s:\-|>\]]+/, '');
-      this.block = { kind: 'custom', thread, lines: [], size: 0 };
+      this.block = { kind: 'custom', thread, lines: [], size: 0, at: logAt };
       if (rest.trim() && !CALL_SITE.test(rest)) this.inline(rest, out);
       return;
     }
     if (!this.auto) return;
     const m = SQL_IN_HEAD.exec(line);
     if (m) {
-      this.block = { kind: 'generic', thread, lines: [], size: 0 };
+      this.block = { kind: 'generic', thread, lines: [], size: 0, at: logAt };
       this.inline(m[1], out);
     } else if (EMPTY_HEAD.test(line)) {
-      this.block = { kind: 'generic', thread, lines: [], size: 0, needSql: true };
+      this.block = { kind: 'generic', thread, lines: [], size: 0, needSql: true, at: logAt };
     }
   }
 
@@ -459,6 +563,7 @@ export class LogReader {
       return;
     }
     const q: LoggedQuery = { sql, mapper: '', time: this.now() };
+    if (b.at !== undefined) q.at = b.at;
     if (unbound) q.unbound = true;
     if (ms !== undefined) q.ms = ms;
     if (failed) q.failed = true;
@@ -467,6 +572,9 @@ export class LogReader {
   }
 
   private remember(thread: string, q: LoggedQuery, src: Source) {
+    if (thread) q.thread = thread;
+    const req = this.reqByThread.get(thread);
+    if (req) q.req = req;
     this.byThread.delete(thread);
     this.byThread.set(thread, { q, seen: new Set([src]) });
     if (this.byThread.size > MAX_OPEN) this.byThread.delete(this.byThread.keys().next().value as string);
@@ -493,6 +601,8 @@ export class LogReader {
     const params = parseParams(m[3]);
     const bound = bindSql(prep.sql, params);
     const q: LoggedQuery = { sql: bound.sql, mapper: prep.mapper, time: this.now() };
+    const at = logTimeOf(line);
+    if (at !== undefined) q.at = at;
     if (bound.placeholders !== params.length) q.warn = `? ${bound.placeholders}개, 값 ${params.length}개 — 로그 줄이 잘렸을 수 있습니다`;
     this.last.delete(key);
     this.last.set(key, q);
@@ -569,11 +679,54 @@ export function sameQueryKey(q: LoggedQuery): string {
 
 /** 필터에 걸려 빠진 쿼리를 이만큼 기억해 둔다 (필터를 풀면 목록으로 돌아온다) */
 export const EXCLUDED_KEEP = 50;
+/** 요청 하나에 담는 쿼리 수 (넘으면 뒤에 온 것을 버리고 개수만 센다 — 앞의 주 쿼리는 남기고, 반복이 많은 요청이 메모리를 채우지 않게) */
+export const PER_REQUEST = 50;
+/** 요청 줄이 없는 쿼리는 같은 스레드에서 이만큼 안에 이어 돈 것끼리 한 묶음으로 본다 */
+export const THREAD_GAP_MS = 2000;
 
-type Entry = LoggedQuery & { id: number };
+export type Entry = LoggedQuery & { id: number; group: string };
+
+/** 묶음 하나 (요청 하나, 또는 요청 줄이 없을 때 같은 스레드에서 이어 돈 쿼리들) */
+export interface QueryGroup {
+  key: string;
+  req?: RequestInfo;
+  thread: string;
+  /** 돈 차례대로 (오래된 것부터) */
+  queries: Entry[];
+  /** 담지 못하고 버린 쿼리 수 */
+  overflow: number;
+}
+
+/** 같은 쿼리로 볼 열쇠 (값만 다른 반복을 하나로): 쿼리 id → mapper 메서드 → 값을 뺀 SQL */
+export function repeatKey(q: LoggedQuery): string {
+  return (
+    sameQueryKey(q) ||
+    q.sql
+      .replace(/'(?:[^']|'')*'/g, '?')
+      .replace(/\b\d+(?:\.\d+)?\b/g, '?')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+/** 묶음 안에서 at 번 이상 반복된 쿼리 (N+1 의심): 열쇠 → 횟수. 많은 것부터 */
+export function repeats(queries: readonly LoggedQuery[], at: number): { key: string; title: string; count: number }[] {
+  const count = new Map<string, { title: string; count: number }>();
+  for (const q of queries) {
+    const k = repeatKey(q);
+    const c = count.get(k);
+    if (c) c.count++;
+    else count.set(k, { title: queryTitle(q), count: 1 });
+  }
+  return [...count]
+    .filter(([, c]) => c.count >= Math.max(2, at))
+    .map(([key, c]) => ({ key, ...c }))
+    .sort((x, y) => y.count - x.count);
+}
 
 /**
- * 최근 쿼리 목록 (새 것부터, 최대 max 개). 같은 쿼리가 연달아 찍히면(같은 SQL · mapper) 한 건으로 합친다.
+ * 최근 쿼리 목록 — 요청(묶음) 단위로 최근 max 개를 둔다. 쿼리는 새 것부터 한 줄로 두고, 묶음 열쇠(group)로 나눈다.
+ * 같은 쿼리가 연달아 찍히면(같은 묶음 · SQL · mapper) 한 건으로 합친다.
  * 필터에 걸린 쿼리는 목록에 넣지 않고 따로 최근 EXCLUDED_KEEP 개까지 기억한다 — 필터를 바꾸면 다시 나눠, 풀린 것은 목록으로 돌아온다.
  * latestOnly 면 같은 쿼리 id 의 예전 것은 뺀다
  */
@@ -583,6 +736,11 @@ export class QueryRing {
   /** 기억할 자리가 없어 버린 걸린 쿼리 수 */
   private dropped = 0;
   private seq = 0;
+  /** 묶음 열쇠 → 담지 못하고 버린 쿼리 수 */
+  private overflow = new Map<string, number>();
+  /** 요청 줄이 없는 쿼리: 스레드 → 마지막 쿼리의 시각 · 묶음 번호 */
+  private lastByThread = new Map<string, { at: number; seg: number }>();
+  private segSeq = 0;
 
   constructor(
     private max: number,
@@ -597,7 +755,7 @@ export class QueryRing {
 
   setMax(max: number) {
     this.max = Math.max(1, max);
-    this.list.length = Math.min(this.list.length, this.max);
+    this.trim();
   }
 
   /**
@@ -622,7 +780,8 @@ export class QueryRing {
         return true;
       });
     }
-    this.list = list.slice(0, this.max);
+    this.list = list;
+    this.trim();
     const now = new Set(this.list.map((q) => q.id));
     return { removed: [...before].filter((id) => !now.has(id)).length, restored: [...now].filter((id) => !before.has(id)).length };
   }
@@ -631,14 +790,28 @@ export class QueryRing {
     return this.filter.accepts(q);
   }
 
+  /** 묶음 열쇠: 요청이 있으면 그 요청, 없으면 같은 스레드에서 THREAD_GAP_MS 안에 이어 돈 것끼리 */
+  private groupOf(q: LoggedQuery): string {
+    if (q.req) return `r${q.req.id}`;
+    const thread = q.thread ?? '';
+    const at = q.at ?? q.time;
+    const last = this.lastByThread.get(thread);
+    const seg = last && at >= last.at && at - last.at <= THREAD_GAP_MS ? last.seg : ++this.segSeq;
+    this.lastByThread.delete(thread);
+    this.lastByThread.set(thread, { at, seg });
+    if (this.lastByThread.size > 64) this.lastByThread.delete(this.lastByThread.keys().next().value as string);
+    return `t${seg}`;
+  }
+
   /** 목록에 넣었으면 true, 필터에 걸렸으면 false */
   add(q: LoggedQuery): boolean {
+    const group = this.groupOf(q);
     const top = this.list[0];
-    if (top && top.sql === q.sql && top.mapper === q.mapper) {
-      this.list[0] = Object.assign(q, { id: top.id });
+    if (top && top.group === group && top.sql === q.sql && top.mapper === q.mapper) {
+      this.list[0] = Object.assign(q, { id: top.id, group });
       return true;
     }
-    const entry = Object.assign(q, { id: ++this.seq });
+    const entry = Object.assign(q, { id: ++this.seq, group });
     if (!this.filter.accepts(q)) {
       this.held.unshift(entry);
       if (this.held.length > EXCLUDED_KEEP) {
@@ -652,12 +825,53 @@ export class QueryRing {
       if (key) this.list = this.list.filter((x) => sameQueryKey(x) !== key);
     }
     this.list.unshift(entry);
-    if (this.list.length > this.max) this.list.length = this.max;
+    this.trim();
     return true;
+  }
+
+  /** 묶음마다 시작한 차례 (그 묶음의 가장 오래된 쿼리 번호) */
+  private starts(): Map<string, number> {
+    const start = new Map<string, number>();
+    for (const q of this.list) start.set(q.group, Math.min(start.get(q.group) ?? Infinity, q.id));
+    return start;
+  }
+
+  /** 늦게 시작한 max 개 묶음만 남기고, 묶음마다 먼저 돈 PER_REQUEST 개까지만 (뒤에 넘친 것은 개수만) */
+  private trim() {
+    const start = this.starts();
+    const keep = new Set([...start].sort((x, y) => y[1] - x[1]).slice(0, this.max).map(([g]) => g));
+    const kept = new Map<string, number>();
+    const drop = new Set<number>();
+    // 목록은 새 것부터라 거꾸로(먼저 돈 것부터) 센다
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const q = this.list[i];
+      if (!keep.has(q.group)) continue;
+      const n = kept.get(q.group) ?? 0;
+      if (n >= PER_REQUEST) {
+        drop.add(q.id);
+        this.overflow.set(q.group, (this.overflow.get(q.group) ?? 0) + 1);
+      } else kept.set(q.group, n + 1);
+    }
+    this.list = this.list.filter((q) => keep.has(q.group) && !drop.has(q.id));
+    for (const g of this.overflow.keys()) if (!kept.has(g)) this.overflow.delete(g);
   }
 
   items(): readonly Entry[] {
     return this.list;
+  }
+
+  /** 묶음들 — 늦게 시작한 것부터, 안의 쿼리는 돈 차례대로 */
+  groups(): QueryGroup[] {
+    const start = this.starts();
+    const map = new Map<string, QueryGroup>();
+    for (const q of this.list) {
+      let g = map.get(q.group);
+      if (!g) map.set(q.group, (g = { key: q.group, req: q.req, thread: q.thread ?? '', queries: [], overflow: this.overflow.get(q.group) ?? 0 }));
+      g.queries.push(q);
+    }
+    const out = [...map.values()].sort((x, y) => (start.get(y.key) ?? 0) - (start.get(x.key) ?? 0));
+    for (const g of out) g.queries.reverse();
+    return out;
   }
 
   get(id: number): Entry | undefined {
@@ -668,6 +882,7 @@ export class QueryRing {
     this.list = [];
     this.held = [];
     this.dropped = 0;
+    this.overflow.clear();
   }
 }
 
@@ -821,4 +1036,51 @@ export function consoleText(q: LoggedQuery, timeText: string): string {
   const mapper = queryMapper(q);
   const head = `-- [로그 ${timeText}] ${queryTitle(q)}${mapper ? ` (${mapper})` : ''}${info ? ` · ${info}` : ''}${q.warn ? ` · ${q.warn}` : ''}`;
   return `${head}\n${displaySql(q)};`;
+}
+
+/** 묶음 이름: "GET /api/posts" (요청 줄이 없으면 "스레드 http-nio-8080-exec-1") */
+export function groupTitle(g: QueryGroup): string {
+  if (g.req) return `${g.req.method} ${g.req.url}`.trim() || '요청';
+  return `스레드 ${g.thread || '(이름 없음)'}`;
+}
+
+/** 묶음 요약: "200 · 236ms · 쿼리 14" (끝나지 않은 요청은 "진행 중") */
+export function groupInfo(g: QueryGroup): string {
+  const parts: string[] = [];
+  if (g.req) {
+    if (g.req.status) parts.push(String(g.req.status));
+    if (g.req.ms !== undefined) parts.push(`${g.req.ms}ms`);
+    if (!g.req.ended) parts.push('진행 중');
+  }
+  parts.push(`쿼리 ${g.queries.length + g.overflow}`);
+  return parts.join(' · ');
+}
+
+/** 요청 안에서 몇 ms 뒤에 돌았는지 ("+12ms", 시각을 모르면 '') */
+export function offsetText(g: QueryGroup, q: LoggedQuery): string {
+  const from = g.req?.at ?? g.queries[0]?.at;
+  if (from === undefined || q.at === undefined || q.at < from) return '';
+  return `+${q.at - from}ms`;
+}
+
+/**
+ * 묶음째 콘솔에 넣을 글: 요청 머리 주석 + 쿼리를 돈 차례대로. 값만 다른 반복(at 번 이상)은 처음 것만 넣고 횟수를 적는다
+ */
+export function groupConsoleText(g: QueryGroup, timeText: (q: LoggedQuery) => string, at: number): string {
+  const many = new Map(repeats(g.queries, at).map((r) => [r.key, r.count]));
+  const done = new Set<string>();
+  const out = [`-- [요청] ${groupTitle(g)} · ${groupInfo(g)}`];
+  for (const q of g.queries) {
+    const k = repeatKey(q);
+    const n = many.get(k);
+    if (n) {
+      if (done.has(k)) continue;
+      done.add(k);
+      out.push(`-- N+1 의심: 값만 바꿔 ${n}번 돈 쿼리 (첫 번째만)\n${consoleText(q, timeText(q))}`);
+    } else {
+      out.push(consoleText(q, timeText(q)));
+    }
+  }
+  if (g.overflow) out.push(`-- (뒤에 돈 쿼리 ${g.overflow}개는 담지 못했습니다)`);
+  return out.join('\n\n');
 }

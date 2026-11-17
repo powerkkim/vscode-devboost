@@ -13,7 +13,9 @@ export const RENAMED_SETTINGS: Readonly<Record<string, string>> = {
   'sqlLog.enabled': 'dbConsole.sqlLog.enabled',
   'sqlLog.autoDetect': 'dbConsole.sqlLog.autoDetect',
   'sqlLog.loggers': 'dbConsole.sqlLog.loggers',
-  'sqlLog.maxQueries': 'dbConsole.sqlLog.maxQueries',
+  'sqlLog.maxQueries': 'dbConsole.sqlLog.maxRequests',
+  // 0.34.0: 최근 쿼리 n개 → 최근 요청 n개
+  'dbConsole.sqlLog.maxQueries': 'dbConsole.sqlLog.maxRequests',
   'importJump.enabled': 'codeTools.importJump.enabled',
   'importJump.aliases': 'codeTools.importJump.aliases',
   'importJump.hover': 'codeTools.importJump.hover',

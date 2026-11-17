@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import { Feature } from '../../../core/feature';
-import { LogReader, LoggedQuery, QueryFilter, QueryRing, consoleText, queryInfo, queryTitle } from './parse';
+import { LogReader, LoggedQuery, QueryFilter, QueryGroup, QueryRing, consoleText, groupConsoleText, groupInfo, groupTitle, queryTitle, repeats } from './parse';
 import { closeSqlLogPicker, showSqlLogPicker } from './picker';
 import { registerServerTerminals } from './serverTerminal';
 
 /**
  * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 로그(MyBatis·log4jdbc·SQL 로 시작하는 로그)에서
  * 쿼리를 골라 값까지 채워 두고, 고르면 DB 콘솔(그 연결의 로그용 콘솔 하나)에 옮긴다 (실행은 하지 않는다).
- *  - 상태바 `SQL n`: 마우스를 올리면 최근 쿼리 목록, 누르면 고르는 창 (목록 + 전체 SQL 미리보기)
+ *  - 요청 단위로 묶는다: 요청 시작 · 끝 줄([REQ] · [RES], DispatcherServlet)이 있으면 그 사이 같은 스레드의 쿼리, 없으면 스레드 · 2초.
+ *    최근 요청 maxRequests 개, 요청마다 쿼리 50개까지. 한 요청에서 값만 다른 같은 쿼리가 nPlusOne 번 넘게 돌면 N+1 로 표시
+ *  - 상태바 `SQL 요청 n`: 마우스를 올리면 최근 요청 목록, 누르면 고르는 창 (요청별 · 쿼리별 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
  * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 출력
  * (Java 서버는 디버그 출력으로 받아 확장이 만든 터미널에 보인다 — serverTerminal.ts),
@@ -29,6 +31,14 @@ function cfg() {
 
 const FILTER_SETTINGS = ['include', 'exclude', 'latestOnly'].map((k) => `devBoost.dbConsole.sqlLog.${k}`);
 
+/** 기억할 최근 요청 수 (1~30) */
+const maxRequests = () => Math.min(30, Math.max(1, Math.floor(cfg().get<number>('maxRequests', 10) || 10)));
+/** N+1 로 볼 반복 횟수 */
+const nPlusOne = () => Math.max(2, Math.floor(cfg().get<number>('nPlusOne', 5) || 5));
+
+/** 상태바 · 마크다운에 넣을 글 (링크 · 꾸밈 글자를 글자 그대로) */
+const md = (t: string) => t.replace(/[[\]\\*_`]/g, '\\$&');
+
 function readFilter(): QueryFilter {
   return new QueryFilter(cfg().get<string[]>('include', []), cfg().get<string[]>('exclude', []));
 }
@@ -37,6 +47,13 @@ const two = (n: number) => String(n).padStart(2, '0');
 function timeText(ms: number): string {
   const d = new Date(ms);
   return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
+/** 로그 줄에 찍힌 시각이 있으면 그것(그날 0시부터 ms), 없으면 읽은 시각으로 "12:34:56" */
+function whenText(x: { at?: number; time: number }): string {
+  if (x.at === undefined) return timeText(x.time);
+  const sec = Math.floor(x.at / 1000);
+  return `${two(Math.floor(sec / 3600) % 24)}:${two(Math.floor(sec / 60) % 60)}:${two(sec % 60)}`;
 }
 
 /** 목록 한 줄에 보일 SQL (한 줄로, 길면 자름) */
@@ -50,7 +67,7 @@ export const sqlLog: Feature = {
   name: 'SQL 로그',
   switches: ['dbConsole.enabled', 'dbConsole.sqlLog.enabled'],
   start(context) {
-    const ring = new QueryRing(cfg().get<number>('maxQueries', 10), readFilter(), cfg().get<boolean>('latestOnly', false));
+    const ring = new QueryRing(maxRequests(), readFilter(), cfg().get<boolean>('latestOnly', false));
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
     status.command = 'devBoost.sqlLog.pick';
     status.name = 'DevBoost SQL 로그';
@@ -98,26 +115,27 @@ export const sqlLog: Feature = {
     };
 
     const refresh = () => {
-      const list = ring.items();
-      status.text = `$(database) SQL ${list.length}`;
-      const md = new vscode.MarkdownString(undefined, true);
-      md.isTrusted = { enabledCommands: ['devBoost.sqlLog.send', 'devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick'] };
-      if (!list.length) {
-        md.appendMarkdown('**SQL 로그** — 모은 쿼리가 없습니다\n\n');
-        for (const line of diagnose()) md.appendMarkdown(`- ${line.replace(/[[\]\\*_`]/g, '\\$&')}\n`);
-        md.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection) · [$(filter) 수집 필터](command:devBoost.sqlLog.pick)\n\n');
+      const groups = ring.groups();
+      const queries = ring.items().length;
+      status.text = groups.length ? `$(database) SQL 요청 ${groups.length} · 쿼리 ${queries}` : '$(database) SQL 0';
+      const tip = new vscode.MarkdownString(undefined, true);
+      tip.isTrusted = { enabledCommands: ['devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick'] };
+      if (!groups.length) {
+        tip.appendMarkdown('**SQL 로그** — 모은 쿼리가 없습니다\n\n');
+        for (const line of diagnose()) tip.appendMarkdown(`- ${md(line)}\n`);
+        tip.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection) · [$(filter) 수집 필터](command:devBoost.sqlLog.pick)\n\n');
       }
-      if (ring.excluded) md.appendMarkdown(`[$(filter) 수집 필터로 빠진 쿼리 ${ring.excluded}개](command:devBoost.sqlLog.pick) — 목록 창 위에서 필터를 풀면 돌아옵니다\n\n`);
-      if (list.length) md.appendMarkdown('**최근 쿼리** — 누르면 DB 콘솔에 옮깁니다 (실행은 직접)\n\n');
-      for (const q of list) {
-        const arg = encodeURIComponent(JSON.stringify([q.id]));
-        const info = queryInfo(q);
-        const head = `${timeText(q.time)} ${queryTitle(q)}${info ? ` · ${info}` : ''}`;
-        md.appendMarkdown(`[$(arrow-right) ${head.replace(/[[\]\\]/g, '\\$&')}](command:devBoost.sqlLog.send?${arg})  \n`);
-        md.appendMarkdown(`\`${oneLine(q.sql, 90).replace(/`/g, "'")}\`\n\n`);
+      if (ring.excluded) tip.appendMarkdown(`[$(filter) 수집 필터로 빠진 쿼리 ${ring.excluded}개](command:devBoost.sqlLog.pick) — 목록 창에서 필터를 풀면 돌아옵니다\n\n`);
+      if (groups.length) tip.appendMarkdown('**최근 요청** — 누르면 목록 창에서 그 요청을 엽니다\n\n');
+      for (const g of groups) {
+        const arg = encodeURIComponent(JSON.stringify([g.key]));
+        const n1 = repeats(g.queries, nPlusOne())[0];
+        const when = whenText(g.req ?? g.queries[0]);
+        tip.appendMarkdown(`[$(arrow-right) ${md(`${when} ${groupTitle(g)} · ${groupInfo(g)}`)}](command:devBoost.sqlLog.pick?${arg})${n1 ? ` $(warning) **N+1 ×${n1.count}**` : ''}  \n`);
+        tip.appendMarkdown(`\`${oneLine(g.queries.map((q) => queryTitle(q)).filter((t, i, all) => all.indexOf(t) === i).join(', '), 90).replace(/`/g, "'")}\`\n\n`);
       }
-      if (list.length) md.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기`);
-      status.tooltip = md;
+      if (groups.length) tip.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기`);
+      status.tooltip = tip;
       status.show();
     };
 
@@ -127,7 +145,19 @@ export const sqlLog: Feature = {
         void vscode.window.showInformationMessage('그 쿼리는 목록에서 밀려났습니다. 목록을 다시 열어 주세요.');
         return;
       }
-      const text = consoleText(q, timeText(q.time));
+      await toConsole(consoleText(q, whenText(q)));
+    };
+
+    /** 요청 하나의 쿼리를 차례대로 콘솔에 넣는다 (반복은 처음 것만) */
+    const sendGroup = async (g: QueryGroup | undefined) => {
+      if (!g) {
+        void vscode.window.showInformationMessage('그 요청은 목록에서 밀려났습니다. 목록을 다시 열어 주세요.');
+        return;
+      }
+      await toConsole(groupConsoleText(g, whenText, nPlusOne()));
+    };
+
+    const toConsole = async (text: string) => {
       const all = await vscode.commands.getCommands(true);
       if (all.includes('devBoost.dbConsole.runSql')) {
         await vscode.commands.executeCommand('devBoost.dbConsole.runSql', text, { run: false, newConsole: true });
@@ -141,11 +171,16 @@ export const sqlLog: Feature = {
     const currentFilter = () => ({ include: cfg().get<string[]>('include', []), exclude: cfg().get<string[]>('exclude', []), latestOnly: cfg().get<boolean>('latestOnly', false) });
 
     /** 고르는 창을 연다 — 연 순간의 목록 그대로 (그 뒤 들어온 쿼리는 다시 열면 보인다). 쿼리가 없어도 열어 까닭과 필터를 보인다 */
-    const pick = () => {
+    const pick = (focus?: string) => {
       showSqlLogPicker(context, {
         items: () => ring.items(),
+        groups: () => ring.groups(),
+        focus: typeof focus === 'string' ? focus : undefined,
+        nPlusOne: nPlusOne(),
         send,
+        sendGroup,
         timeText,
+        whenText,
         excluded: () => ring.excluded,
         filter: currentFilter,
         setFilter,
@@ -172,7 +207,13 @@ export const sqlLog: Feature = {
       return result;
     };
 
-    const newReader = () => new LogReader(Date.now, { auto: cfg().get<boolean>('autoDetect', true), keywords: cfg().get<string[]>('loggers', []) });
+    const newReader = () =>
+      new LogReader(Date.now, {
+        auto: cfg().get<boolean>('autoDetect', true),
+        keywords: cfg().get<string[]>('loggers', []),
+        requestStart: cfg().get<string[]>('requestStart', ['[REQ]']),
+        requestEnd: cfg().get<string[]>('requestEnd', ['[RES]']),
+      });
 
     /**
      * 출력 한 줄기(터미널 명령 하나 · 디버그 세션 하나)를 읽는 곳. push 로 글을 넣고 끝나면 end.
@@ -307,10 +348,11 @@ export const sqlLog: Feature = {
         refresh();
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('devBoost.dbConsole.sqlLog.maxQueries')) {
-          ring.setMax(cfg().get<number>('maxQueries', 10));
+        if (e.affectsConfiguration('devBoost.dbConsole.sqlLog.maxRequests')) {
+          ring.setMax(maxRequests());
           refresh();
         }
+        if (e.affectsConfiguration('devBoost.dbConsole.sqlLog.nPlusOne')) refresh();
         // 필터를 바꾸면 이미 모인 목록에도 적용한다
         if (FILTER_SETTINGS.some((k) => e.affectsConfiguration(k))) {
           ring.setFilter(readFilter(), cfg().get<boolean>('latestOnly', false));

@@ -11,7 +11,7 @@
 | **Search Everywhere** | 클래스·파일·심볼·텍스트 통합 검색 | `Shift` 두 번 / `Ctrl+Alt+Shift+F` | `devBoost.searchEverywhere.enabled` |
 | **DB 콘솔** | **DB 연결 · 콘솔** — Oracle(12.1 이상)·PostgreSQL·MySQL/MariaDB 에 직접 접속해 쿼리 실행, 결과는 실행한 문장 아래와 하단 패널 `DB 결과` | 사이드바 DevBoost → `DB 연결` / 콘솔에서 `Ctrl+Enter` | `devBoost.dbConsole.enabled` (묶음) |
 | | **Mapper 쿼리 실행** — MyBatis mapper XML 쿼리를 콘솔에서 실행, 콘솔 왼쪽 칸에서 파라미터 값을 바꾸면 if·foreach 까지 다시 풀림 | `Ctrl+Alt+Enter`·우클릭 / 쿼리 위 `▶ 콘솔에서 실행`·`SQL 복사` | `devBoost.dbConsole.mybatis.enabled` |
-| | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 콘솔로 | 상태바 `SQL n` / `Ctrl+Alt+L` | `devBoost.dbConsole.sqlLog.enabled` |
+| | **SQL 로그** — 터미널에서 실행한 서버의 SQL 로그(MyBatis·log4jdbc)에서 쿼리를 골라 콘솔로 | 상태바 `SQL 요청 n` / `Ctrl+Alt+L` | `devBoost.dbConsole.sqlLog.enabled` |
 | | **스키마 · 테이블 정의서** — 스키마 가져오기, 테이블 정의서(Excel) | 명령 `DevBoost · DB 콘솔: 스키마 가져오기 · 테이블 정의서` | `devBoost.dbConsole.schema.enabled` |
 | **API 콘솔** | API 요청을 모음으로 저장해 두고 보내 보기 (환경 변수 · 기록 · cURL · Postman 모음 가져오기). Controller 메서드에서 바로 열기, 브라우저 캡처로 실제 호출과 로그인 상태 이어받기 | `Ctrl+Alt+A` / Controller 위 `API 콘솔` | `devBoost.apiConsole.enabled` |
 | **Source Atlas** | 열린 Vue 파일의 컴포넌트·API·서버 흐름 화면 | Vue 파일 우클릭 → `Atlas 화면 열기` | `devBoost.sourceAtlas.enabled` |
@@ -139,11 +139,19 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 → SELECT * FROM TB_USER WHERE DEPT_CD = 'D001' AND REG_DT >= TIMESTAMP '2026-11-01 00:00:00.0'
 ```
 
-- `Ctrl+Alt+L` 또는 상태바 `SQL n` 을 누르면 **고르는 창**이 열립니다 (명령 `DevBoost · SQL 로그: 최근 쿼리를 DB 콘솔로`)
+- `Ctrl+Alt+L` 또는 상태바 `SQL 요청 n` 을 누르면 **고르는 창**이 열립니다 (명령 `DevBoost · SQL 로그: 최근 쿼리를 DB 콘솔로`)
   - 왼쪽 목록: 종류, 이름, 테이블, 건수·실행 시간, 넘어간 값이 보이는 조건 하나 / 오른쪽: 고른 쿼리의 전체 SQL
   - 찾기 칸에 테이블·칼럼·값을 적으면 SQL 전체에서 찾습니다. `↑` `↓` 로 옮기고 `Enter` 로 **DB 콘솔**에 옮깁니다 (로그용 콘솔 하나에 이어 넣어, 보낼 때마다 콘솔 · 접속이 늘지 않습니다). `Ctrl+C` 는 복사
-  - 창을 연 순간의 목록(기본 10개, 새 것부터)을 그대로 보여 줍니다. 그 뒤 들어온 쿼리는 닫고 다시 열면 보입니다
-- 상태바 `SQL n` 에 마우스를 올리면 최근 쿼리를 한 줄씩 보고 바로 옮길 수도 있습니다
+  - 창을 연 순간의 목록(최근 요청 10개, 새 것부터)을 그대로 보여 줍니다. 그 뒤 들어온 쿼리는 닫고 다시 열면 보입니다
+- 상태바 `SQL 요청 n` 에 마우스를 올리면 최근 요청(`GET /url · 200 · 236ms · 쿼리 14`)을 보고, 누르면 그 요청을 연 창이 열립니다
+
+요청별로 보기 (기본)
+- 최근 **요청 10개**를 기억하고, 요청마다 그 요청이 돌린 쿼리를 50개까지 담습니다 (`devBoost.dbConsole.sqlLog.maxRequests`)
+- 왼쪽에 요청(`GET /api/posts` · 상태 · 걸린 시간 · 쿼리 수), 오른쪽에 그 요청의 쿼리를 돈 차례대로(`+12ms`) 보여 줍니다
+- `묶음째 새 콘솔로`(Enter): 그 요청의 쿼리를 차례대로 한 콘솔에 넣습니다. `Alt+Enter` 는 고른 쿼리 하나만
+- `↑` `↓` 요청, `Alt+↑` `Alt+↓` 요청 안의 쿼리, `Ctrl+1` · `Ctrl+2` 요청별 · 쿼리별 바꾸기
+- 요청은 로그의 `[REQ][id] GET /url` ~ `[RES][id] … status=200 | 236ms` 줄과 Spring `DispatcherServlet` DEBUG 로그(`GET "/url"` ~ `Completed 200`)로 알아봅니다. 다른 모양이면 `devBoost.dbConsole.sqlLog.requestStart` · `requestEnd` 에 그 줄의 낱말을 적습니다. 요청 줄이 없으면 같은 스레드에서 2초 안에 이어 돈 쿼리를 한 묶음으로 봅니다
+- **N+1**: 한 요청에서 값만 다른 같은 쿼리가 5번 넘게 돌면(반복문 안에서 Mapper 를 부르는 경우) 요청에 `N+1 ×12` 를 붙이고, 그 쿼리를 한 줄로 접어 보여 줍니다(눌러 펼침). 기준은 `devBoost.dbConsole.sqlLog.nPlusOne`
 - 옮기기만 하고 실행하지 않습니다. 콘솔에서 확인한 뒤 `Ctrl+Enter` 로 직접 실행
 - 숫자는 그대로, 글자는 따옴표, 날짜는 `DATE '…'`·`TIMESTAMP '…'`, `null` 은 `NULL`
 - 여러 요청이 섞여 찍혀도 같은 요청의 쿼리와 값끼리 맞춥니다
@@ -155,7 +163,7 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 플러그인을 켜기(업데이트) 전에 띄워 둔 서버: 터미널에서 SQL 로그를 드래그해 고르고 우클릭 → `SQL 로그 — 고른 로그에서 읽기` (편집기에서 고른 글 · 클립보드의 로그도 됨)
 - Run · Debug(F5, Spring Boot Dashboard, `Run` · `Debug` 링크)로 띄운 Java 서버는 DevBoost 가 만든 터미널(`Debug: 앱 이름`)에 로그를 그대로 보이면서 읽습니다. `Ctrl+C` 나 터미널 닫기로 서버를 멈춥니다 (Java 디버거가 만드는 원래 터미널은 VS Code 가 출력을 넘겨주지 않아 읽을 수 없기 때문). 끄려면 `devBoost.dbConsole.sqlLog.debugTerminal`
 - 상태바 `SQL n` 은 늘 보입니다. 쿼리가 없을 때 마우스를 올리면 읽고 있는 곳(터미널 · 디버그 세션과 읽은 줄 수)과 못 읽는 까닭(셸 통합이 없는 터미널 등)이 나옵니다
-- 개수: `devBoost.dbConsole.sqlLog.maxQueries`
+- 개수: `devBoost.dbConsole.sqlLog.maxRequests` (최근 요청 수)
 
 필요 없는 쿼리 빼기 · 필요한 것만 모으기 (수집 필터)
 - 목록 창(`Ctrl+Alt+L`) 오른쪽 아래 `수집 제외` · `포함만` 칸에서 관리합니다
