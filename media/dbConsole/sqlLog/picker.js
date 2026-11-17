@@ -19,6 +19,7 @@
   let cur = -1; // 고른 쿼리의 id
   let rules = { include: [], exclude: [], latestOnly: false };
   let diagnosis = [];
+  let debugConsole = true; // Java 실행이 이미 디버그 콘솔인지 (아니면 전환 단추를 보인다)
 
   /** 필터를 바꿔 달라고 보낸다 (확장이 저장하고 목록을 다시 보낸다) */
   function sendRules(next, note) {
@@ -154,6 +155,14 @@
     const box = div('empty');
     box.appendChild(div('', '모은 쿼리가 없습니다.'));
     for (const line of diagnosis) box.appendChild(div('why', line));
+    if (!debugConsole) {
+      const d = document.createElement('button');
+      d.className = 'primary';
+      d.textContent = '디버그 콘솔로 전환';
+      d.title = 'F5 · Run · Debug 로 띄우는 Java 서버의 로그를 디버그 콘솔로 보내 SQL 을 모읍니다 (사용자 설정 java.debug.settings.console). 바꾼 뒤 서버를 다시 실행하세요';
+      d.addEventListener('click', () => vscode.postMessage({ type: 'useDebugConsole' }));
+      box.appendChild(d);
+    }
     const b = document.createElement('button');
     b.textContent = '고른 로그에서 읽기';
     b.title = '터미널에서 SQL 로그를 드래그해 고른 뒤 누르세요 (편집기에서 고른 글 · 클립보드도 됨)';
@@ -417,6 +426,7 @@
       const keep = !!m.note; // 필터를 바꿔 다시 받은 목록이면 고른 것 · 찾기 글을 그대로
       rules = m.filter;
       diagnosis = m.diagnose || [];
+      debugConsole = m.debugConsole !== false;
       const $note = $('note');
       $note.textContent = m.note || '';
       $note.className = /못했/.test(m.note || '') ? 'err' : 'ok';

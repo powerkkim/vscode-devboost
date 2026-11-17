@@ -161,7 +161,18 @@ VS Code 터미널에서 서버를 실행하면(`gradlew bootRun`, `mvn spring-bo
 - 터미널의 셸 통합이 켜져 있어야 합니다 (VS Code 1.93 이상, PowerShell·Git Bash·bash·zsh. 명령 프롬프트(cmd)는 읽지 못함)
 - 이 기능이 켜진 뒤에 시작한 명령부터 읽습니다. 쿼리는 메모리에만 두고 VS Code 를 닫으면 사라집니다
 - 플러그인을 켜기(업데이트) 전에 띄워 둔 서버: 터미널에서 SQL 로그를 드래그해 고르고 우클릭 → `SQL 로그 — 고른 로그에서 읽기` (편집기에서 고른 글 · 클립보드의 로그도 됨)
-- Run · Debug(F5, Spring Boot Dashboard, `Run` · `Debug` 링크)로 띄운 Java 서버는 DevBoost 가 만든 터미널(`Debug: 앱 이름`)에 로그를 그대로 보이면서 읽습니다. `Ctrl+C` 나 터미널 닫기로 서버를 멈춥니다 (Java 디버거가 만드는 원래 터미널은 VS Code 가 출력을 넘겨주지 않아 읽을 수 없기 때문). 끄려면 `devBoost.dbConsole.sqlLog.debugTerminal`
+- Run · Debug(F5, ▷ `Run Java`, `Run` · `Debug` 링크, Spring Boot Dashboard)로 띄운 Java 서버는 **출력이 디버그 콘솔이어야** 읽을 수 있습니다. Java 디버거는 기본으로 자기 터미널(`Debug: 앱 이름`)에 띄우는데, 이 터미널은 VS Code 가 확장에 내용을 넘겨주지 않기 때문입니다
+  - 명령 `SQL 로그 — 디버그 콘솔로 전환`(상태바 안내 · 목록 창의 단추)이 무엇을 적을지 보여 주고, 확인하면 설정에 적습니다. 바꾼 뒤 서버를 다시 실행하세요
+
+    ```json
+    "java.debug.settings.console": "internalConsole",
+    "java.debug.settings.vmArgs": "-Dspring.output.ansi.enabled=ALWAYS"
+    ```
+
+    둘째 줄은 디버그 콘솔에서도 로그 색이 나오게 하는 옵션입니다 (적어 둔 vmArgs 가 있으면 뒤에 이어 붙임)
+  - Java 서버가 터미널로 실행되면 한 번 물어봅니다 (`다시 묻지 않기` 가능). launch.json 에 `"console": "integratedTerminal"` 이 적혀 있으면 그 줄이 이기므로 지우거나 `internalConsole` 로 바꾸세요
+  - 디버그 콘솔은 서버에 키보드 입력을 보낼 수 없습니다 (Spring Boot 서버는 보통 상관없음). 실행 설정을 실행 때 고치는 일은 하지 않습니다
+- 터미널에 `gradlew bootRun` 을 **직접 입력**한 서버는 터미널 그대로 읽습니다 (셸 통합). 사이드바 Gradle 화면에서 눌러 실행한 것은 읽지 못하니 드래그 → `고른 로그에서 읽기`
 - 상태바 `SQL n` 은 늘 보입니다. 쿼리가 없을 때 마우스를 올리면 읽고 있는 곳(터미널 · 디버그 세션과 읽은 줄 수)과 못 읽는 까닭(셸 통합이 없는 터미널 등)이 나옵니다
 - 개수: `devBoost.dbConsole.sqlLog.maxRequests` (최근 요청 수)
 

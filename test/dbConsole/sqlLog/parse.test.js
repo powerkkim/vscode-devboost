@@ -445,22 +445,24 @@ test('최근 쿼리 목록: 필터를 풀면 걸려 있던 쿼리가 차례대�
   assert.deepStrictEqual(many.items()[0].sql, 'SELECT 59 FROM X');
 });
 
-// ── Run · Debug 로 띄운 Java 서버: 실행 설정 바꾸기
-const { redirectJavaLaunch, toTerminalText, MARK } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'launch.js'));
+// ── Run · Debug 로 띄운 Java 서버: 출력 곳 · 설정에 적을 값
+const { javaOutputPlace, withColorArg, COLOR_ARG } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'launch.js'));
 
-test('Java 실행 설정: 출력 곳을 정하지 않았거나 통합 터미널이면 디버그 콘솔로 받아 확장 터미널에', () => {
-  const base = { type: 'java', request: 'launch', name: 'DemoApplication', mainClass: 'com.x.Demo' };
-  const r = redirectJavaLaunch(base);
-  assert.deepStrictEqual(r, { ...base, console: 'internalConsole', internalConsoleOptions: 'neverOpen', vmArgs: '-Dspring.output.ansi.enabled=ALWAYS', [MARK]: true });
-  assert.strictEqual(base.console, undefined, '원래 설정은 그대로');
-  assert.strictEqual(redirectJavaLaunch({ ...base, console: 'integratedTerminal', vmArgs: '-Xmx1g' }).vmArgs, '-Xmx1g -Dspring.output.ansi.enabled=ALWAYS');
-  assert.deepStrictEqual(redirectJavaLaunch({ ...base, vmArgs: ['-Xmx1g'] }).vmArgs, ['-Xmx1g', '-Dspring.output.ansi.enabled=ALWAYS']);
-  assert.strictEqual(redirectJavaLaunch({ ...base, vmArgs: '-Dspring.output.ansi.enabled=NEVER' }).vmArgs, '-Dspring.output.ansi.enabled=NEVER');
-  // 따로 정해 둔 출력 곳 · attach · 다른 언어는 그대로
-  for (const keep of [{ ...base, console: 'internalConsole' }, { ...base, console: 'externalTerminal' }, { ...base, request: 'attach' }, { type: 'node', request: 'launch' }]) {
-    assert.strictEqual(redirectJavaLaunch(keep), keep);
-  }
-  assert.strictEqual(toTerminalText('a\nb\r\nc'), 'a\r\nb\r\nc');
+test('Java 실행의 출력 곳: 실행 설정의 console → 사용자 설정 → 기본(터미널)', () => {
+  assert.deepStrictEqual(javaOutputPlace(undefined, undefined), { place: 'terminal', explicit: false });
+  assert.deepStrictEqual(javaOutputPlace(undefined, 'internalConsole'), { place: 'debugConsole', explicit: false });
+  assert.deepStrictEqual(javaOutputPlace('integratedTerminal', 'internalConsole'), { place: 'terminal', explicit: true }, 'launch.json 이 이긴다');
+  assert.deepStrictEqual(javaOutputPlace('internalConsole', 'integratedTerminal'), { place: 'debugConsole', explicit: true });
+  assert.deepStrictEqual(javaOutputPlace('externalTerminal', undefined), { place: 'external', explicit: true });
+  assert.deepStrictEqual(javaOutputPlace('', 'internalConsole'), { place: 'debugConsole', explicit: false });
+});
+
+test('설정에 적을 vmArgs: 적어 둔 값 뒤에 색 옵션을 잇고, 이미 정했으면 그대로', () => {
+  assert.strictEqual(withColorArg(''), COLOR_ARG);
+  assert.strictEqual(withColorArg(undefined), COLOR_ARG);
+  assert.strictEqual(withColorArg(' -Xmx1g '), `-Xmx1g ${COLOR_ARG}`);
+  assert.strictEqual(withColorArg('-Dspring.output.ansi.enabled=NEVER'), undefined);
+  assert.strictEqual(withColorArg(`-Xmx1g ${COLOR_ARG}`), undefined);
 });
 
 // ── 요청 단위 (요청 top 10)
