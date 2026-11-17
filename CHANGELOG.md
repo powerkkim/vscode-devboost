@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.35.0 - 2026-11-17
+- **SQL 로그: Run · Debug 서버는 디버그 콘솔에서 읽기** — 0.32.0 의 "디버그 출력을 받아 DevBoost 터미널에 다시 보여 주기"를 없앰. 실행 설정을 실행 때 몰래 바꾸지 않고, 로그를 두 곳에 쌓지 않음
+  - Java 서버의 출력이 디버그 콘솔이면 디버그 출력을 옆에서 읽기만 함 (로그를 막거나 늦추지 않음)
+  - `디버그 콘솔로 전환` 명령 · 단추 (상태바 안내, 목록 창): 적을 내용을 보여 주고 확인하면 설정에 `java.debug.settings.console: internalConsole` 과 로그 색 옵션(`java.debug.settings.vmArgs` 에 `-Dspring.output.ansi.enabled=ALWAYS`, 적어 둔 값 뒤에 이어 붙임)을 적음
+  - Java 서버가 터미널로 실행되면 한 번 물어봄 (`다시 묻지 않기`). launch.json 의 `console` 이 터미널이라 설정이 안 먹으면 알려 줌
+  - 설정 `devBoost.dbConsole.sqlLog.debugTerminal` 없앰
+
 ## 0.34.0 - 2026-11-17
 - **SQL 로그: 요청별로 묶어 보기 (최근 요청 10)** — 로그의 `[REQ][id]` ~ `[RES][id]`(또는 Spring `DispatcherServlet` DEBUG 로그) 사이 같은 스레드의 쿼리를 한 요청으로 묶음
   - 목록 창 `요청별`(기본): 왼쪽 요청(`GET /url` · 상태 · 시간 · 쿼리 수), 오른쪽 그 요청의 쿼리를 돈 차례대로(`+12ms`) · 고른 쿼리의 SQL. `쿼리별` 보기도 그대로 (`Ctrl+1` · `Ctrl+2`)

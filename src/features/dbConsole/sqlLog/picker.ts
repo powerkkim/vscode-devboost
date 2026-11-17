@@ -47,6 +47,10 @@ interface Deps {
   diagnose: () => string[];
   /** 고른 로그에서 읽기 */
   readSelection: () => Promise<void>;
+  /** Java 실행이 이미 디버그 콘솔로 되어 있는지 */
+  debugConsole: () => boolean;
+  /** 디버그 콘솔로 전환 */
+  useDebugConsole: () => Promise<void>;
 }
 
 let current: vscode.WebviewPanel | undefined;
@@ -81,6 +85,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       excluded: deps.excluded(),
       filter: deps.filter(),
       diagnose: deps.diagnose(),
+      debugConsole: deps.debugConsole(),
       view: context.globalState.get<string>('devBoost.sqlLog.view', 'request'),
       focus,
       groups: groupSnap.map((g) => ({
@@ -141,6 +146,9 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
         sending = true;
         panel.dispose();
         await deps.sendGroup(g);
+      } else if (m.type === 'useDebugConsole') {
+        await deps.useDebugConsole();
+        void post(deps.debugConsole() ? '디버그 콘솔로 전환함 — 서버를 다시 실행하세요' : ' ');
       } else if (m.type === 'readSelection') {
         await deps.readSelection();
       } else if (m.type === 'send' && q && !sending) {

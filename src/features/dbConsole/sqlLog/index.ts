@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Feature } from '../../../core/feature';
 import { LogReader, LoggedQuery, QueryFilter, QueryGroup, QueryRing, consoleText, groupConsoleText, groupInfo, groupTitle, queryTitle, repeats } from './parse';
 import { closeSqlLogPicker, showSqlLogPicker } from './picker';
-import { registerServerTerminals } from './serverTerminal';
+import { javaOutputPlace, withColorArg } from './launch';
 
 /**
  * SQL 로그: 터미널에서 돌린 서버(gradlew bootRun, mvn spring-boot:run …)의 로그(MyBatis·log4jdbc·SQL 로 시작하는 로그)에서
@@ -11,8 +11,8 @@ import { registerServerTerminals } from './serverTerminal';
  *    최근 요청 maxRequests 개, 요청마다 쿼리 50개까지. 한 요청에서 값만 다른 같은 쿼리가 nPlusOne 번 넘게 돌면 N+1 로 표시
  *  - 상태바 `SQL 요청 n`: 마우스를 올리면 최근 요청 목록, 누르면 고르는 창 (요청별 · 쿼리별 + 전체 SQL 미리보기)
  *  - 명령 `SQL 로그: 최근 쿼리를 DB 콘솔로`
- * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 출력
- * (Java 서버는 디버그 출력으로 받아 확장이 만든 터미널에 보인다 — serverTerminal.ts),
+ * 읽는 곳: 터미널 명령(VS Code 의 셸 통합 — 기능이 켜진 뒤에 시작한 명령부터), Run · Debug 의 디버그 콘솔 출력
+ * (Java 디버거는 기본으로 자기 터미널에 띄워 읽을 수 없다 → `디버그 콘솔로 전환` 이 사용자 설정 java.debug.settings.console 을 바꾼다),
  * 그리고 사용자가 고른 로그(`SQL 로그: 고른 로그에서 읽기` — 이미 떠 있는 서버의 로그). 쿼리는 메모리에만 둔다.
  * 상태바는 늘 보이고, 쿼리가 없으면 왜 없는지(읽는 곳 · 셸 통합이 없는 터미널 · 읽은 줄 수)를 알려 준다.
  * 수집 필터(include · exclude 낱말, 같은 쿼리 id 는 최신 하나만)는 모을 때 걸러, 필요 없는 공통 쿼리가 자리를 차지하지 않게 한다.
@@ -73,7 +73,77 @@ export const sqlLog: Feature = {
     status.name = 'DevBoost SQL 로그';
     let disposed = false;
 
-    const serverTerminals = registerServerTerminals(() => cfg().get<boolean>('debugTerminal', true));
+    /** Java 실행의 기본 출력 곳 (사용자 · 작업 영역 설정) */
+    const javaConsole = () => vscode.workspace.getConfiguration('java.debug.settings').get<string>('console', 'integratedTerminal');
+    const debugConsoleSet = () => javaConsole() === 'internalConsole';
+
+    /**
+     * 디버그 콘솔로 전환: 설정에 java.debug.settings.console = internalConsole 과, 로그 색이 유지되게
+     * java.debug.settings.vmArgs 에 색 옵션을 적는다 (적어 둔 vmArgs 는 그대로 두고 뒤에 잇는다).
+     * 실행 설정을 실행 때 몰래 고치지 않고 보이는 설정에 적는다 — 무엇을 적을지 먼저 보여 주고 확인받는다.
+     * 작업 영역에 그 설정을 적어 두었으면 그곳을(그래야 먹는다), 아니면 사용자 설정을 바꾼다
+     */
+    const useDebugConsole = async () => {
+      const c = vscode.workspace.getConfiguration('java.debug.settings');
+      const target = (key: string) => (c.inspect(key)?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
+      const whereOf = (key: string) => (target(key) === vscode.ConfigurationTarget.Workspace ? '작업 영역 설정' : '사용자 설정');
+      const vmArgs = withColorArg(c.get<string>('vmArgs', ''));
+      const lines = [
+        ...(debugConsoleSet() ? [] : [`"java.debug.settings.console": "internalConsole"  (${whereOf('console')})`]),
+        ...(vmArgs === undefined ? [] : [`"java.debug.settings.vmArgs": "${vmArgs}"  (${whereOf('vmArgs')} — 디버그 콘솔에서도 로그 색 유지)`]),
+      ];
+      if (!lines.length) {
+        void vscode.window.showInformationMessage('이미 디버그 콘솔로 실행하게 설정되어 있습니다. 서버를 다시 실행하면 SQL 이 모입니다 (launch.json 에 console 이 적혀 있으면 그 줄이 이깁니다).');
+        return;
+      }
+      const ok = await vscode.window.showInformationMessage(
+        'Run · Debug 로 띄우는 Java 서버의 로그를 디버그 콘솔로 보내 SQL 을 모읍니다.',
+        { modal: true, detail: `설정에 다음을 적습니다:\n\n${lines.join('\n')}\n\n로그는 터미널 대신 디버그 콘솔에 나오고, 서버에 키보드 입력은 보낼 수 없게 됩니다. 설정에서 지우면 원래대로 돌아갑니다.` },
+        '설정에 적기'
+      );
+      if (ok !== '설정에 적기') return;
+      try {
+        if (!debugConsoleSet()) await c.update('console', 'internalConsole', target('console'));
+        if (vmArgs !== undefined) await c.update('vmArgs', vmArgs, target('vmArgs'));
+      } catch (e) {
+        void vscode.window.showWarningMessage(`설정을 바꾸지 못했습니다: ${e instanceof Error ? e.message : String(e)}. settings.json 에 직접 넣어 주세요: ${lines.join(', ')}`);
+        return;
+      }
+      refresh();
+      const a = await vscode.window.showInformationMessage('설정에 적었습니다. 서버를 다시 실행하면 로그가 디버그 콘솔에 나오고 SQL 이 모입니다.', '설정 보기');
+      if (a) void vscode.commands.executeCommand('workbench.action.openSettings', 'java.debug.settings');
+    };
+
+    /** 이번 VS Code 에서 이미 물었는지 (실행할 때마다 묻지 않게) */
+    let asked = false;
+    const ASK_KEY = 'devBoost.sqlLog.askDebugConsole';
+
+    /** Java 서버가 터미널로 실행되면 SQL 을 모을 수 없다 → 한 번 알린다 */
+    const onJavaStart = async (session: vscode.DebugSession) => {
+      const c = session.configuration;
+      if (session.type !== 'java' || c.request !== 'launch') return;
+      const { place, explicit } = javaOutputPlace(c.console, javaConsole());
+      if (place === 'debugConsole') return;
+      refresh();
+      if (explicit && debugConsoleSet()) {
+        // 사용자 설정은 디버그 콘솔인데 실행 설정(launch.json)이 터미널을 적어 둠
+        const a = await vscode.window.showInformationMessage(
+          `"${session.name}" 은 실행 설정(launch.json)에 console: "${c.console}" 이 적혀 있어 SQL 로그를 모을 수 없습니다. launch.json 에서 그 줄을 지우거나 "internalConsole" 로 바꾸세요.`,
+          'launch.json 열기'
+        );
+        if (a) void vscode.commands.executeCommand('workbench.action.debug.configure');
+        return;
+      }
+      if (asked || context.globalState.get<boolean>(ASK_KEY) === false) return;
+      asked = true;
+      const a = await vscode.window.showInformationMessage(
+        `"${session.name}" 이 터미널로 실행되어 SQL 로그를 모을 수 없습니다. Java 실행을 디버그 콘솔로 바꿀까요? (로그는 디버그 콘솔에 나오고, 서버에 키보드 입력은 보낼 수 없게 됩니다)`,
+        '디버그 콘솔로 전환',
+        '다시 묻지 않기'
+      );
+      if (a === '디버그 콘솔로 전환') await useDebugConsole();
+      else if (a === '다시 묻지 않기') await context.globalState.update(ASK_KEY, false);
+    };
 
     /** 지금 읽고 있는 곳 (터미널 명령 · 디버그 세션) → 읽은 줄 수 */
     const sources = new Map<object, { label: string; lines: number }>();
@@ -99,14 +169,14 @@ export const sqlLog: Feature = {
       } else {
         out.push('읽고 있는 터미널 명령 · 디버그 세션이 없습니다. 이 기능이 켜지기 전에 띄운 서버는 읽지 못합니다 — 서버를 VS Code 터미널에서 다시 띄우거나, 터미널에서 로그를 드래그하고 우클릭 → "SQL 로그 — 고른 로그에서 읽기".');
       }
-      const noShell = vscode.window.terminals.filter((t) => 'shellIntegration' in t && !t.shellIntegration && !serverTerminals.owns(t)).map((t) => t.name);
+      const noShell = vscode.window.terminals.filter((t) => 'shellIntegration' in t && !t.shellIntegration).map((t) => t.name);
       const debugTerms = noShell.filter((n) => /^(Run|Debug): /.test(n));
       const plainTerms = noShell.filter((n) => !/^(Run|Debug): /.test(n));
       if (debugTerms.length) {
         out.push(
-          cfg().get<boolean>('debugTerminal', true)
-            ? `Java 디버거가 만든 터미널(${debugTerms.join(', ')})은 읽지 못합니다. 서버를 멈추고 Run · Debug 로 다시 띄우면 DevBoost 가 읽을 수 있는 터미널에 보여 줍니다.`
-            : `Java 디버거가 만든 터미널(${debugTerms.join(', ')})은 읽지 못합니다. 설정 devBoost.dbConsole.sqlLog.debugTerminal 을 켜고 서버를 다시 띄우세요.`
+          debugConsoleSet()
+            ? `Java 디버거가 만든 터미널(${debugTerms.join(', ')})은 읽지 못합니다. 출력이 디버그 콘솔로 바뀌어 있으니 서버를 멈추고 다시 실행하세요 (launch.json 에 console 이 적혀 있으면 그 줄을 지우세요).`
+            : `Java 디버거가 만든 터미널(${debugTerms.join(', ')})은 읽지 못합니다. "디버그 콘솔로 전환" 후 서버를 다시 실행하세요.`
         );
       }
       if (plainTerms.length) out.push(`셸 통합이 없는 터미널(읽지 못함): ${plainTerms.join(', ')} — 명령 프롬프트(cmd)이거나 셸 통합이 꺼진 터미널입니다. PowerShell · Git Bash 터미널에서 띄워 주세요.`);
@@ -119,11 +189,13 @@ export const sqlLog: Feature = {
       const queries = ring.items().length;
       status.text = groups.length ? `$(database) SQL 요청 ${groups.length} · 쿼리 ${queries}` : '$(database) SQL 0';
       const tip = new vscode.MarkdownString(undefined, true);
-      tip.isTrusted = { enabledCommands: ['devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick'] };
+      tip.isTrusted = { enabledCommands: ['devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick', 'devBoost.sqlLog.useDebugConsole'] };
       if (!groups.length) {
         tip.appendMarkdown('**SQL 로그** — 모은 쿼리가 없습니다\n\n');
         for (const line of diagnose()) tip.appendMarkdown(`- ${md(line)}\n`);
-        tip.appendMarkdown('\n[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection) · [$(filter) 수집 필터](command:devBoost.sqlLog.pick)\n\n');
+        tip.appendMarkdown(
+          `\n${debugConsoleSet() ? '' : '[$(debug-console) 디버그 콘솔로 전환](command:devBoost.sqlLog.useDebugConsole) · '}[$(selection) 고른 로그에서 읽기](command:devBoost.sqlLog.readSelection) · [$(filter) 수집 필터](command:devBoost.sqlLog.pick)\n\n`
+        );
       }
       if (ring.excluded) tip.appendMarkdown(`[$(filter) 수집 필터로 빠진 쿼리 ${ring.excluded}개](command:devBoost.sqlLog.pick) — 목록 창에서 필터를 풀면 돌아옵니다\n\n`);
       if (groups.length) tip.appendMarkdown('**최근 요청** — 누르면 목록 창에서 그 요청을 엽니다\n\n');
@@ -185,6 +257,8 @@ export const sqlLog: Feature = {
         filter: currentFilter,
         setFilter,
         diagnose: () => (ring.items().length ? [] : diagnose()),
+        debugConsole: debugConsoleSet,
+        useDebugConsole,
         readSelection: () => readSelection(),
       });
     };
@@ -280,7 +354,6 @@ export const sqlLog: Feature = {
             if (m.type !== 'event' || m.event !== 'output' || !m.body?.output) return;
             const cat = m.body.category ?? 'console';
             if (cat !== 'stdout' && cat !== 'stderr' && cat !== 'console') return;
-            serverTerminals.output(session, m.body.output);
             (src ??= openSource(session, `디버그 "${session.name}"`)).push(m.body.output);
           },
           onWillStopSession: () => src?.end(),
@@ -339,7 +412,8 @@ export const sqlLog: Feature = {
       vscode.commands.registerCommand('devBoost.sqlLog.pick', pick),
       vscode.commands.registerCommand('devBoost.sqlLog.readSelection', readSelection),
       vscode.debug.registerDebugAdapterTrackerFactory('*', debugTracker),
-      ...serverTerminals.disposables,
+      vscode.commands.registerCommand('devBoost.sqlLog.useDebugConsole', useDebugConsole),
+      vscode.debug.onDidStartDebugSession((s) => void onJavaStart(s)),
       vscode.window.onDidOpenTerminal(refresh),
       vscode.window.onDidCloseTerminal(refresh),
       vscode.commands.registerCommand('devBoost.sqlLog.send', (id: number) => send(ring.get(Number(id)))),
