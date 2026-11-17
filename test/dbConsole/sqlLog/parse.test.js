@@ -120,20 +120,22 @@ test('줄 나누기: 절·AND 앞에서만, 괄호·따옴표·BETWEEN 은 그�
   assert.strictEqual(layoutSql('UPDATE TB_A SET NM = 1 WHERE ID = 2'), 'UPDATE TB_A\nSET NM = 1\nWHERE ID = 2');
 });
 
-test('최근 목록: 새 것이 앞, 개수 제한, 같은 쿼리가 이어 오면 하나로', () => {
+test('최근 목록: 새 것이 앞, 요청(묶음) 개수 제한, 같은 묶음에서 같은 쿼리가 이어 오면 하나로', () => {
   const ring = new QueryRing(3);
-  const q = (sql, time) => ({ sql, mapper: 'M.a', time });
-  ring.add(q('S1', 1));
-  ring.add(q('S1', 2));
+  // 요청 줄이 없는 쿼리: 스레드가 다르거나 2초 넘게 떨어지면 다른 묶음
+  const q = (sql, thread, at) => ({ sql, mapper: 'M.a', time: at, thread, at });
+  ring.add(q('S1', 'exec-1', 1000));
+  ring.add(q('S1', 'exec-1', 1001));
   assert.strictEqual(ring.items().length, 1);
-  assert.strictEqual(ring.items()[0].time, 2);
+  assert.strictEqual(ring.items()[0].time, 1001);
   const id1 = ring.items()[0].id;
-  ring.add(q('S2', 3));
-  ring.add(q('S3', 4));
-  ring.add(q('S4', 5));
-  assert.deepStrictEqual(ring.items().map((x) => x.sql), ['S4', 'S3', 'S2']);
-  assert.strictEqual(ring.get(id1), undefined); // 밀려난 것
-  assert.strictEqual(ring.get(ring.items()[1].id).sql, 'S3');
+  ring.add(q('S2', 'exec-2', 1002));
+  ring.add(q('S3', 'exec-1', 9000));
+  ring.add(q('S4', 'exec-1', 9001));
+  ring.add(q('S5', 'exec-3', 9002));
+  assert.deepStrictEqual(ring.groups().map((g) => g.queries.map((x) => x.sql)), [['S5'], ['S3', 'S4'], ['S2']]);
+  assert.strictEqual(ring.get(id1), undefined); // 밀려난 묶음
+  assert.strictEqual(ring.get(ring.items()[1].id).sql, 'S4');
 });
 
 test('콘솔에 넣을 글: 머리 주석은 mapper 머리 주석(-- 네임스페이스.id)과 겹치지 않는 모양', () => {
@@ -439,7 +441,7 @@ test('최근 쿼리 목록: 필터를 풀면 걸려 있던 쿼리가 차례대�
   const many = new QueryRing(5, new QueryFilter([], ['X']));
   for (let i = 0; i < 60; i++) many.add(Q(`SELECT ${i} FROM X`));
   assert.strictEqual(many.excluded, 60);
-  assert.strictEqual(many.setFilter(new QueryFilter(), false).restored, 5, '목록 자리(5)만큼만 돌아옴');
+  assert.strictEqual(many.setFilter(new QueryFilter(), false).restored, 50, '기억한 50개가 돌아옴 (한 묶음에 50개까지)');
   assert.deepStrictEqual(many.items()[0].sql, 'SELECT 59 FROM X');
 });
 
@@ -459,4 +461,105 @@ test('Java 실행 설정: 출력 곳을 정하지 않았거나 통합 터미널�
     assert.strictEqual(redirectJavaLaunch(keep), keep);
   }
   assert.strictEqual(toTerminalText('a\nb\r\nc'), 'a\r\nb\r\nc');
+});
+
+// ── 요청 단위 (요청 top 10)
+const { threadOf, logTimeOf, repeats, repeatKey, PER_REQUEST, groupConsoleText } = require(path.join(__dirname, '..', '..', '..', 'out', 'features', 'dbConsole', 'sqlLog', 'parse.js'));
+
+test('스레드 · 로그 시각: Spring Boot 2 · 3.4 · logback, 로그 내용의 [..] 는 보지 않음', () => {
+  assert.strictEqual(threadOf('2026-11-15 01:10:00.123 DEBUG 1 --- [nio-8080-exec-1] c.e.b.m.PostMapper.findPostById   : ==>  Preparing'), 'nio-8080-exec-1');
+  assert.strictEqual(threadOf('2026-11-15T01:50:00.000+09:00 DEBUG 1 --- [demo] [nio-8081-exec-1] c.e.d.mapper.PostMapper : ==> x'), 'nio-8081-exec-1');
+  assert.strictEqual(threadOf('01:10:00.123 [http-nio-8080-exec-1] DEBUG c.e.b.m.X - [REQ][e2] GET /a'), 'http-nio-8080-exec-1');
+  assert.strictEqual(threadOf('2026-11-15 01:10:00 [DEBUG] [main] c.e.App : started'), 'main');
+  assert.strictEqual(threadOf('2026-11-15 01:10:00.200  INFO 1 --- [exec-2] c.e.LogFilter : [REQ][e2ccdecf] GET /x'), 'exec-2');
+  assert.strictEqual(logTimeOf('2026-11-15T01:50:00.123+09:00 DEBUG'), ((1 * 60 + 50) * 60) * 1000 + 123);
+  assert.strictEqual(logTimeOf('01:10:02,5 [x]'), ((1 * 60 + 10) * 60 + 2) * 1000 + 500);
+  assert.strictEqual(logTimeOf('no time here'), undefined);
+});
+
+/** 로그 줄 만들기 (Spring Boot 3.4 모양) */
+const L = (time, thread, logger, msg) => `2026-11-17T${time}+09:00 DEBUG 1 --- [demo] [${thread}] ${logger} : ${msg}`;
+const M = (time, thread, id, msg) => L(time, thread, `c.e.d.mapper.${id}`, msg);
+
+test('요청 묶기: [REQ][id] ~ [RES][id] 사이 같은 스레드의 쿼리, 상태 · 시간 · 몇 ms 뒤에 돌았는지', () => {
+  const r = new LogReader(() => 1);
+  const lines = [
+    L('22:00:00.000', 'exec-1', 'c.e.common.config.LogFilter', '[REQ][47be5123] GET /api/blog/posts?page=0&size=12 | ip=0:0:0:0:0:0:0:1'),
+    M('22:00:00.010', 'exec-1', 'PostMapper.findPostAll', '==>  Preparing: SELECT p.id FROM tb_posts p FETCH NEXT ? ROWS ONLY'),
+    M('22:00:00.011', 'exec-1', 'PostMapper.findPostAll', '==> Parameters: 12(Integer)'),
+    M('22:00:00.020', 'exec-1', 'PostMapper.findPostAll', '<==      Total: 12'),
+    // 다른 요청이 다른 스레드에서 겹쳐 돈다
+    L('22:00:00.030', 'exec-2', 'c.e.common.config.LogFilter', '[REQ][2c3c1149] GET /api/blog/posts/261'),
+    M('22:00:00.040', 'exec-2', 'PostMapper.findPostById', '==>  Preparing: SELECT * FROM tb_posts WHERE id = ?'),
+    M('22:00:00.041', 'exec-2', 'PostMapper.findPostById', '==> Parameters: 261(Long)'),
+    M('22:00:00.201', 'exec-1', 'PostMapper.countPostAll', "==>  Preparing: SELECT COUNT(*) FROM tb_posts WHERE visibility = 'BLOG'"),
+    M('22:00:00.202', 'exec-1', 'PostMapper.countPostAll', '==> Parameters: '),
+    L('22:00:00.236', 'exec-1', 'c.e.common.config.LogFilter', '[RES][47be5123] GET /api/blog/posts | status=200 | 236ms'),
+    L('22:00:00.300', 'exec-2', 'c.e.common.config.LogFilter', '[RES][2c3c1149] GET /api/blog/posts/261 | status=404 | 270ms'),
+    M('22:00:05.000', 'scheduling-1', 'CodeMapper.selectCodes', '==>  Preparing: SELECT CD FROM TB_CODE'),
+    M('22:00:05.001', 'scheduling-1', 'CodeMapper.selectCodes', '==> Parameters: '),
+  ];
+  const found = [...r.push(lines.join('\n') + '\n'), ...r.flush()];
+  const ring = new QueryRing(10);
+  found.forEach((q) => ring.add(q));
+  const g = ring.groups();
+  assert.deepStrictEqual(
+    g.map((x) => [x.req ? `${x.req.method} ${x.req.url} ${x.req.status} ${x.req.ms} ${x.req.key}` : `스레드 ${x.thread}`, x.queries.map((q) => queryTitle(q))]),
+    [
+      ['스레드 scheduling-1', ['CodeMapper.selectCodes']],
+      ['GET /api/blog/posts/261 404 270 2c3c1149', ['PostMapper.findPostById']],
+      ['GET /api/blog/posts?page=0&size=12 200 236 47be5123', ['PostMapper.findPostAll', 'PostMapper.countPostAll']],
+    ]
+  );
+  const posts = g[2];
+  assert.deepStrictEqual(posts.queries.map((q) => q.at - posts.req.at), [11, 202]);
+  assert.strictEqual(posts.queries[0].rows, 12);
+});
+
+test('요청 묶기: DispatcherServlet DEBUG 로그, 끝 줄 없이 다음 요청이 오면 앞 요청을 닫음, 요청 줄이 없으면 스레드 · 2초', () => {
+  const r = new LogReader(() => 1);
+  const D = (t, msg) => L(t, 'exec-5', 'o.s.web.servlet.DispatcherServlet', msg);
+  const lines = [
+    D('10:00:00.000', 'GET "/api/orders?page=1", parameters={masked}'),
+    M('10:00:00.050', 'exec-5', 'OrderMapper.list', '==>  Preparing: SELECT * FROM TB_ORDER'),
+    M('10:00:00.051', 'exec-5', 'OrderMapper.list', '==> Parameters: '),
+    D('10:00:00.120', 'Completed 200 OK'),
+    D('10:00:01.000', 'Completed initialization in 0 ms'),
+    D('10:00:02.000', 'POST "/api/orders", parameters={}'),
+    M('10:00:02.010', 'exec-5', 'OrderMapper.insert', '==>  Preparing: INSERT INTO TB_ORDER VALUES (?)'),
+    M('10:00:02.011', 'exec-5', 'OrderMapper.insert', '==> Parameters: 1(Integer)'),
+  ];
+  const found = [...r.push(lines.join('\n') + '\n'), ...r.flush()];
+  assert.deepStrictEqual(found.map((q) => [q.req.method, q.req.url, q.req.status, q.req.ms, !!q.req.ended]), [
+    ['GET', '/api/orders?page=1', 200, 120, true],
+    ['POST', '/api/orders', undefined, undefined, false],
+  ]);
+});
+
+test('N+1: 값만 다른 같은 쿼리가 한 요청에서 여러 번, 요청 하나에 50개까지 담고 나머지는 개수만', () => {
+  const r = new LogReader(() => 1);
+  const lines = [L('11:00:00.000', 'e1', 'c.e.LogFilter', '[REQ][a1] GET /api/blog/posts')];
+  for (let i = 0; i < 60; i++) {
+    lines.push(M('11:00:00.100', 'e1', 'TagMapper.findTags', '==>  Preparing: SELECT name FROM tb_tag WHERE post_id = ?'));
+    lines.push(M('11:00:00.101', 'e1', 'TagMapper.findTags', `==> Parameters: ${300 - i}(Long)`));
+  }
+  lines.push(L('11:00:00.400', 'e1', 'c.e.LogFilter', '[RES][a1] GET /api/blog/posts | status=200 | 400ms'));
+  // 반복 앞에 주 쿼리가 하나 있다 — 넘쳐도 주 쿼리는 남아야 한다
+  lines.splice(1, 0, M('11:00:00.050', 'e1', 'PostMapper.list', '==>  Preparing: SELECT * FROM tb_posts'), M('11:00:00.051', 'e1', 'PostMapper.list', '==> Parameters: '));
+  const ring = new QueryRing(10);
+  [...r.push(lines.join('\n') + '\n'), ...r.flush()].forEach((q) => ring.add(q));
+  const [g] = ring.groups();
+  assert.deepStrictEqual([g.queries.length, g.overflow], [PER_REQUEST, 11]);
+  assert.strictEqual(queryTitle(g.queries[0]), 'PostMapper.list', '먼저 돈 주 쿼리는 남는다');
+  assert.ok(groupConsoleText(g, () => '11:00:00', 5).includes('뒤에 돈 쿼리 11개는 담지 못했습니다'));
+  assert.deepStrictEqual(repeats(g.queries, 5).map((x) => [x.title, x.count]), [['TagMapper.findTags', 49]]);
+  assert.deepStrictEqual(repeats(g.queries.slice(0, 4), 5), []);
+  // 쿼리 id · mapper 가 없으면 값을 뺀 SQL 로 같은지 본다
+  assert.strictEqual(repeatKey({ sql: "SELECT * FROM T WHERE A = 'x' AND B = 12", mapper: '' }), repeatKey({ sql: "SELECT * FROM T WHERE A = 'y''z' AND B = 3.5", mapper: '' }));
+});
+
+test('설정 낱말(loggers)로 읽는 SQL 도 로그 시각이 붙는다', () => {
+  const r = new LogReader(() => 1, { keywords: ['MY.SQL'] });
+  const found = [...r.push('2026-11-17 12:00:01.250 DEBUG [exec-9] MY.SQL - SELECT 1 FROM DUAL\n2026-11-17 12:00:02.000 INFO [exec-9] other - done\n'), ...r.flush()];
+  assert.deepStrictEqual(found.map((q) => [q.sql, q.at, q.thread]), [['SELECT 1 FROM DUAL', 12 * 3600000 + 1250, 'exec-9']]);
 });

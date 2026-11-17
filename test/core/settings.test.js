@@ -44,8 +44,11 @@ test('한 항목을 쓰지 못해도 나머지는 옮긴다 (못 옮긴 것은 �
 });
 
 test('바뀐 이름 표: 새 이름은 모두 묶음(DB 콘솔 · 코드 도구) 아래', () => {
+  // 뜻이 바뀌어 끝 이름까지 바꾼 것 (0.34.0: 최근 쿼리 수 → 최근 요청 수)
+  const meaning = new Set(['sqlLog.maxQueries', 'dbConsole.sqlLog.maxQueries']);
   for (const [o, n] of Object.entries(RENAMED_SETTINGS)) {
     assert.match(n, /^(dbConsole|codeTools)\.[a-zA-Z]+\./, `${o} → ${n}`);
-    assert.ok(n.endsWith(o.slice(o.indexOf('.'))), `${o} → ${n}: 뒷부분 이름은 그대로`);
+    if (meaning.has(o)) assert.strictEqual(n, 'dbConsole.sqlLog.maxRequests');
+    else assert.ok(n.endsWith(o.slice(o.indexOf('.'))), `${o} → ${n}: 뒷부분 이름은 그대로`);
   }
 });

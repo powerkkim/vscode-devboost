@@ -3,7 +3,7 @@
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서, JavaScript · 정규식 작업대 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -1227,13 +1227,43 @@
             "order": 2,
             "markdownDescription": "자동으로 안 잡히는 SQL 로그가 있을 때, 그 로그 줄에 항상 들어 있는 낱말(로거 이름 등)을 적음. 그 낱말 뒤부터 다음 로그 줄 전까지를 쿼리 한 건으로 읽음. 예: `[\"SQL_LOG\", \"c.e.common.QueryLogger\"]`. 바꾼 뒤에 시작한 명령부터 적용"
           },
-          "devBoost.dbConsole.sqlLog.maxQueries": {
+          "devBoost.dbConsole.sqlLog.maxRequests": {
             "order": 3,
             "type": "number",
             "default": 10,
             "minimum": 1,
-            "maximum": 50,
-            "description": "기억해 둘 최근 쿼리 수 (메모리에만 두고, VS Code 를 닫으면 사라짐)"
+            "maximum": 30,
+            "markdownDescription": "기억해 둘 최근 요청 수. 요청 하나에는 그 요청이 돌린 쿼리를 50개까지 담음 (넘으면 개수만). 요청 줄이 없는 로그는 같은 스레드에서 2초 안에 이어 돈 쿼리를 한 묶음으로 침. 메모리에만 두고 VS Code 를 닫으면 사라짐"
+          },
+          "devBoost.dbConsole.sqlLog.requestStart": {
+            "order": 3.1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "[REQ]"
+            ],
+            "markdownDescription": "이 낱말이 든 로그 줄을 요청 시작으로 봄. 줄의 `GET /url` 을 요청 이름으로, 낱말 바로 뒤의 `[id]` 를 요청 id 로 씀 (예: `[REQ][e2ccdecf] GET /api/posts`). Spring `DispatcherServlet` 의 DEBUG 로그(`GET \"/url\"` · `Completed 200`)는 따로 적지 않아도 알아봄"
+          },
+          "devBoost.dbConsole.sqlLog.requestEnd": {
+            "order": 3.2,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "[RES]"
+            ],
+            "markdownDescription": "이 낱말이 든 로그 줄을 요청 끝으로 봄. 줄의 `status=200` 과 `236ms` 를 읽음 (없으면 시작 줄과의 시각 차이)"
+          },
+          "devBoost.dbConsole.sqlLog.nPlusOne": {
+            "order": 3.3,
+            "type": "number",
+            "default": 5,
+            "minimum": 2,
+            "maximum": 100,
+            "markdownDescription": "한 요청 안에서 같은 쿼리(같은 쿼리 id · mapper 메서드, 값만 다름)가 이만큼 돌면 `N+1 ×n` 으로 표시 — 반복문 안에서 Mapper 를 부르는 곳을 찾을 때"
           },
           "devBoost.dbConsole.sqlLog.exclude": {
             "type": "array",
@@ -1576,7 +1606,7 @@
           "devBoost.sqlLog.maxQueries": {
             "type": "number",
             "default": 10,
-            "deprecationMessage": "devBoost.dbConsole.sqlLog.maxQueries 로 바뀌었습니다. 적어 둔 값은 자동으로 옮겨집니다."
+            "deprecationMessage": "devBoost.dbConsole.sqlLog.maxRequests 로 바뀌었습니다. 적어 둔 값은 자동으로 옮겨집니다."
           },
           "devBoost.importJump.enabled": {
             "type": "boolean",
@@ -1640,6 +1670,11 @@
             "type": "string",
             "default": "",
             "deprecationMessage": "devBoost.codeTools.caseConverter.mybatis.tablePrefix 로 바뀌었습니다. 적어 둔 값은 자동으로 옮겨집니다."
+          },
+          "devBoost.dbConsole.sqlLog.maxQueries": {
+            "type": "number",
+            "default": 10,
+            "deprecationMessage": "devBoost.dbConsole.sqlLog.maxRequests 로 바뀌었습니다 (최근 쿼리 수 → 최근 요청 수). 적어 둔 값은 자동으로 옮겨집니다."
           }
         }
       }
