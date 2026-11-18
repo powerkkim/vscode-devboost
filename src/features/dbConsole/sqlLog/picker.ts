@@ -10,6 +10,8 @@ import { newNonce } from '../../../core/webview';
  * 창을 연 순간의 목록을 그대로 보여 준다 — 그 뒤에 들어온 쿼리는 다시 열어야 보인다 (고르는 동안 목록이 밀리지 않게).
  * 다른 곳을 누르면 닫힌다.
  * 오른쪽 아래 수집 필터 칸에서 제외 · 포함 낱말을 보고(칩) 더하고(⊕ 고른 쿼리의 id · 테이블, 또는 직접 입력) ✕ 로 뺀다.
+ * 화면 나누기: 왼쪽 목록 | 오른쪽, 요청 안 쿼리 | SQL 의 경계선을 끌어 크기를 바꾸고, 수집 필터 칸은 접어 둔다(기본). `SQL 크게` 는 오른쪽을 SQL 로 채운다.
+ * 크기 · 접힘은 기억한다(globalState). `새로 고침` 은 지금 목록을 다시 받고, `비우기` 는 모은 것을 지운다 (창은 그대로).
  * 필터를 바꾸면 목록을 다시 받는다 (풀린 쿼리는 돌아오고, 걸린 쿼리는 빠진다). 쿼리가 없으면 왜 없는지를 보인다.
  */
 
@@ -47,6 +49,8 @@ interface Deps {
   diagnose: () => string[];
   /** 고른 로그에서 읽기 */
   readSelection: () => Promise<void>;
+  /** 모은 쿼리를 모두 지운다 */
+  clear: () => void;
   /** Java 실행이 이미 디버그 콘솔로 되어 있는지 */
   debugConsole: () => boolean;
   /** 디버그 콘솔로 전환 */
@@ -58,6 +62,9 @@ let current: vscode.WebviewPanel | undefined;
 export function closeSqlLogPicker() {
   current?.dispose();
 }
+
+/** 화면 나누기 크기 · 수집 필터 접힘을 기억하는 곳 */
+const LAYOUT_KEY = 'devBoost.sqlLog.layout';
 
 export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
   current?.dispose(); // 다시 열면 최신 목록으로
@@ -87,6 +94,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       diagnose: deps.diagnose(),
       debugConsole: deps.debugConsole(),
       view: context.globalState.get<string>('devBoost.sqlLog.view', 'request'),
+      layout: context.globalState.get<unknown>(LAYOUT_KEY, {}),
       focus,
       groups: groupSnap.map((g) => ({
         key: g.key,
@@ -116,7 +124,7 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
     });
 
   panel.webview.onDidReceiveMessage(
-    async (m: { type: string; id?: number; key?: string; view?: string; filter?: SqlLogFilter; note?: string }) => {
+    async (m: { type: string; id?: number; key?: string; view?: string; filter?: SqlLogFilter; note?: string; layout?: unknown }) => {
       const q = snapshot.find((x) => x.id === m.id);
       if (m.type === 'ready') {
         void post();
@@ -138,6 +146,14 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
         groupSnap = deps.groups().map((g) => ({ ...g, req: g.req && { ...g.req } }));
         focus = undefined;
         void post(note);
+      } else if (m.type === 'reload' || m.type === 'clear') {
+        if (m.type === 'clear') deps.clear();
+        snapshot = deps.items().map((x) => ({ ...x }));
+        groupSnap = deps.groups().map((g) => ({ ...g, req: g.req && { ...g.req } }));
+        focus = undefined;
+        void post(m.type === 'clear' ? '목록을 비웠습니다 — 화면을 조회한 뒤 "새로 고침"' : `새로 고침 — 요청 ${groupSnap.length}`);
+      } else if (m.type === 'layout' && m.layout && typeof m.layout === 'object') {
+        void context.globalState.update(LAYOUT_KEY, m.layout);
       } else if (m.type === 'view' && m.view) {
         void context.globalState.update('devBoost.sqlLog.view', m.view);
       } else if (m.type === 'sendGroup' && !sending) {
@@ -188,22 +204,29 @@ export function showSqlLogPicker(context: vscode.ExtensionContext, deps: Deps) {
       <span class="seg" role="tablist"><button id="vReq" role="tab" title="요청 단위로 (Ctrl+1)">요청별</button><button id="vQuery" role="tab" title="쿼리 단위로 (Ctrl+2)">쿼리별</button></span>
       <input id="filter" type="text" placeholder="URL · 테이블 · 이름 · 값으로 찾기 (띄어 쓰면 모두 포함)" spellcheck="false" autocomplete="off">
       <span class="count" id="count"></span>
+      <button id="reload" title="지금까지 모인 목록으로 다시 그리기 (창을 닫았다 열지 않아도 됨)">새로 고침</button>
+      <button id="clear" title="모은 쿼리를 모두 지우기 — 비운 뒤 화면에 들어가 그 화면의 쿼리만 모을 때 (Ctrl+Alt+Shift+L)">비우기</button>
     </div>
-    <div class="main">
+    <div class="main" id="main">
       <div id="list"></div>
-      <div class="right">
+      <div class="split col" id="splitCol" title="끌어서 너비 바꾸기 (두 번 누르면 처음 크기)"></div>
+      <div class="right" id="right">
         <div id="head"></div>
         <div id="inner"></div>
+        <div class="split row" id="splitRow" title="끌어서 높이 바꾸기 (두 번 누르면 처음 크기)"></div>
         <pre id="sql"></pre>
         <div class="acts">
           <button class="primary" id="sendGroup" title="이 요청의 쿼리를 돈 차례대로 한 콘솔에 (반복은 처음 것만, Enter)">묶음째 새 콘솔로</button>
           <button id="send" title="고른 쿼리 하나만 새 콘솔에">새 콘솔로 옮기기</button>
           <button id="copy">복사</button>
+          <span class="sp"></span>
+          <button id="max" title="쿼리 목록 · 수집 필터를 가리고 SQL 을 크게 (다시 누르면 돌아옴)">SQL 크게</button>
         </div>
-        <div class="rules" title="모을 때 거르는 필터 — 쿼리 id · mapper 이름 · SQL 글에서 낱말 단위로 찾음 (대소문자 무시, * 는 이름 글자 여럿)">
+        <div class="rulesHead"><button id="rulesToggle" title="모을 때 거르는 필터 (제외 · 포함) 펴기 · 접기">▸ 수집 필터</button><span id="rulesSum"></span><span class="sp"></span><span id="filtered"></span></div>
+        <div class="rules" id="rules" title="모을 때 거르는 필터 — 쿼리 id · mapper 이름 · SQL 글에서 낱말 단위로 찾음 (대소문자 무시, * 는 이름 글자 여럿)">
           <div class="rule"><span class="lbl">수집 제외</span><span class="words"><span class="chips" id="exChips"></span><span class="sugg" id="exSugg"></span></span><input id="exAdd" type="text" placeholder="+ 낱말 (Enter)" spellcheck="false" autocomplete="off"></div>
           <div class="rule"><span class="lbl">포함만</span><span class="words"><span class="chips" id="inChips"></span><span class="sugg" id="inSugg"></span></span><input id="inAdd" type="text" placeholder="+ 낱말 (비우면 모두)" spellcheck="false" autocomplete="off"></div>
-          <div class="rule"><label class="latest"><input type="checkbox" id="latestOnly"> 같은 쿼리는 최근 하나만</label><span class="sp"></span><span id="filtered"></span></div>
+          <div class="rule"><label class="latest"><input type="checkbox" id="latestOnly"> 같은 쿼리는 최근 하나만</label></div>
         </div>
       </div>
     </div>
