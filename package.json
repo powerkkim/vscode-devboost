@@ -3,7 +3,7 @@
   "displayName": "DevBoost",
   "description": "개발 편의 기능 모음 — 통합 검색(Search Everywhere), MyBatis SQL 실행, DB 스키마·테이블 정의서, JavaScript · 정규식 작업대 등. 기능별로 켜고 끌 수 있음",
   "icon": "resources/icons/devboost.png",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "publisher": "powerkkim",
   "license": "MIT",
   "repository": {
@@ -956,6 +956,12 @@
         "key": "ctrl+alt+r",
         "mac": "cmd+alt+r",
         "when": "config.devBoost.playground.enabled && config.devBoost.playground.regexBench.enabled"
+      },
+      {
+        "command": "devBoost.sqlLog.clear",
+        "key": "ctrl+alt+shift+l",
+        "mac": "cmd+alt+shift+l",
+        "when": "config.devBoost.dbConsole.enabled && config.devBoost.dbConsole.sqlLog.enabled"
       }
     ],
     "configuration": [

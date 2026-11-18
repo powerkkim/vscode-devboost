@@ -189,7 +189,7 @@ export const sqlLog: Feature = {
       const queries = ring.items().length;
       status.text = groups.length ? `$(database) SQL 요청 ${groups.length} · 쿼리 ${queries}` : '$(database) SQL 0';
       const tip = new vscode.MarkdownString(undefined, true);
-      tip.isTrusted = { enabledCommands: ['devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick', 'devBoost.sqlLog.useDebugConsole'] };
+      tip.isTrusted = { enabledCommands: ['devBoost.sqlLog.readSelection', 'devBoost.sqlLog.pick', 'devBoost.sqlLog.useDebugConsole', 'devBoost.sqlLog.clear'] };
       if (!groups.length) {
         tip.appendMarkdown('**SQL 로그** — 모은 쿼리가 없습니다\n\n');
         for (const line of diagnose()) tip.appendMarkdown(`- ${md(line)}\n`);
@@ -206,7 +206,7 @@ export const sqlLog: Feature = {
         tip.appendMarkdown(`[$(arrow-right) ${md(`${when} ${groupTitle(g)} · ${groupInfo(g)}`)}](command:devBoost.sqlLog.pick?${arg})${n1 ? ` $(warning) **N+1 ×${n1.count}**` : ''}  \n`);
         tip.appendMarkdown(`\`${oneLine(g.queries.map((q) => queryTitle(q)).filter((t, i, all) => all.indexOf(t) === i).join(', '), 90).replace(/`/g, "'")}\`\n\n`);
       }
-      if (groups.length) tip.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기`);
+      if (groups.length) tip.appendMarkdown(`---\n\n\`${PICK_KEY}\` 또는 여기를 눌러 전체 SQL 을 보며 고르기 · [$(clear-all) 비우기](command:devBoost.sqlLog.clear)`);
       status.tooltip = tip;
       status.show();
     };
@@ -239,6 +239,12 @@ export const sqlLog: Feature = {
       }
     };
 
+    /** 모은 쿼리를 모두 지운다 (수집은 계속 — 비운 뒤 들어간 화면의 쿼리만 보려고) */
+    const clear = () => {
+      ring.clear();
+      refresh();
+    };
+
     /** 지금 수집 필터 */
     const currentFilter = () => ({ include: cfg().get<string[]>('include', []), exclude: cfg().get<string[]>('exclude', []), latestOnly: cfg().get<boolean>('latestOnly', false) });
 
@@ -260,6 +266,7 @@ export const sqlLog: Feature = {
         debugConsole: debugConsoleSet,
         useDebugConsole,
         readSelection: () => readSelection(),
+        clear,
       });
     };
 
@@ -417,10 +424,7 @@ export const sqlLog: Feature = {
       vscode.window.onDidOpenTerminal(refresh),
       vscode.window.onDidCloseTerminal(refresh),
       vscode.commands.registerCommand('devBoost.sqlLog.send', (id: number) => send(ring.get(Number(id)))),
-      vscode.commands.registerCommand('devBoost.sqlLog.clear', () => {
-        ring.clear();
-        refresh();
-      }),
+      vscode.commands.registerCommand('devBoost.sqlLog.clear', clear),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('devBoost.dbConsole.sqlLog.maxRequests')) {
           ring.setMax(maxRequests());

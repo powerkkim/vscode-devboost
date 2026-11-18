@@ -1,6 +1,6 @@
 html, body { height: 100%; }
 body { margin: 0; padding: 0; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); background: var(--vscode-editor-background); }
-.wrap { display: flex; flex-direction: column; height: 100vh; max-width: 1100px; margin: 0 auto; box-sizing: border-box; padding: 10px 12px 6px; }
+.wrap { display: flex; flex-direction: column; height: 100vh; max-width: 1500px; margin: 0 auto; box-sizing: border-box; padding: 10px 12px 6px; }
 .top { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; }
 #filter { flex: 1; box-sizing: border-box; padding: 6px 8px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; font: inherit; outline: none; }
 #filter:focus { border-color: var(--vscode-focusBorder); }
@@ -88,3 +88,18 @@ button.small.query::before { content: none; }
 .verb.GET { background: var(--vscode-charts-blue, #3794ff); color: #fff; }
 .verb.POST { background: var(--vscode-charts-green, #3fb950); color: #fff; }
 .verb.PUT, .verb.PATCH { background: var(--vscode-charts-orange, #d18616); color: #fff; }
+.main { grid-template-columns: var(--left, 40%) 5px minmax(0, 1fr); }
+#list { border-right: 0; min-width: 0; }
+.split { background: var(--vscode-panel-border, var(--vscode-widget-border, #8884)); flex: none; touch-action: none; }
+.split.col { cursor: col-resize; background-clip: content-box; padding: 0 2px; }
+.split.row { height: 5px; cursor: row-resize; background-clip: content-box; padding: 2px 0; }
+.split:hover, .split.on { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); background-clip: border-box; }
+#inner { border-bottom: 0; flex: none; }
+#sql { min-height: 80px; }
+.acts .sp { flex: 1; }
+.rulesHead { display: flex; align-items: center; gap: 8px; padding: 0 12px 6px; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+.rulesHead .sp { flex: 1; }
+#rulesToggle { padding: 1px 6px; background: transparent; color: var(--vscode-foreground); }
+#rulesToggle:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.right.max #inner, .right.max #splitRow, .right.max .rulesHead, .right.max #rules { display: none !important; }
+.top button { flex: none; }

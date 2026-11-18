@@ -19,6 +19,7 @@
   let cur = -1; // 고른 쿼리의 id
   let rules = { include: [], exclude: [], latestOnly: false };
   let diagnosis = [];
+  let layout = { rules: false }; // 나누기 크기(left %, inner px) · 수집 필터 폄
   let debugConsole = true; // Java 실행이 이미 디버그 콘솔인지 (아니면 전환 단추를 보인다)
 
   /** 필터를 바꿔 달라고 보낸다 (확장이 저장하고 목록을 다시 보낸다) */
@@ -66,7 +67,68 @@
       if (!rules[kind].length && !sugg.childElementCount) box.appendChild(div('none', kind === 'exclude' ? '없음' : '없음 (모두 모음)'));
     }
     $('latestOnly').checked = !!rules.latestOnly;
+    $('rulesSum').textContent = [`제외 ${rules.exclude.length}`, `포함 ${rules.include.length}`, rules.latestOnly ? '최근 하나만' : ''].filter(Boolean).join(' · ');
   }
+
+  // ── 화면 나누기: 경계선 끌기 · 수집 필터 접기 · SQL 크게
+  const saveLayout = () => vscode.postMessage({ type: 'layout', layout });
+  function applyLayout() {
+    const main = $('main'), inner = $('inner');
+    if (typeof layout.left === 'number') main.style.setProperty('--left', Math.max(20, Math.min(70, layout.left)) + '%');
+    else main.style.removeProperty('--left');
+    if (typeof layout.inner === 'number') {
+      inner.style.height = Math.max(48, layout.inner) + 'px';
+      inner.style.maxHeight = '70%';
+    } else {
+      inner.style.height = '';
+      inner.style.maxHeight = '';
+    }
+    $('rules').style.display = layout.rules ? '' : 'none';
+    $('rulesToggle').textContent = (layout.rules ? '▾' : '▸') + ' 수집 필터';
+  }
+  function drag(id, onMove, reset) {
+    const el = $(id);
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('on');
+      const move = (ev) => (onMove(ev), applyLayout());
+      const up = () => {
+        el.classList.remove('on');
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        saveLayout();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+    el.addEventListener('dblclick', () => (reset(), applyLayout(), saveLayout()));
+  }
+  drag('splitCol', (e) => {
+    const r = $('main').getBoundingClientRect();
+    layout.left = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10;
+  }, () => delete layout.left);
+  drag('splitRow', (e) => {
+    const top = $('inner').getBoundingClientRect().top;
+    const room = $('right').getBoundingClientRect().bottom - top;
+    layout.inner = Math.round(Math.max(48, Math.min(room - 160, e.clientY - top)));
+  }, () => delete layout.inner);
+  $('rulesToggle').addEventListener('click', () => {
+    layout.rules = !layout.rules;
+    applyLayout();
+    saveLayout();
+    $filter.focus();
+  });
+  $('max').addEventListener('click', () => {
+    const on = $('right').classList.toggle('max');
+    $('max').textContent = on ? '원래 크기' : 'SQL 크게';
+    $filter.focus();
+  });
+  // 단추에 초점이 남으면 뒤이은 Enter 가 단추도 누르고 콘솔로도 보낸다 → 찾기 칸으로 돌려 둔다
+  $('reload').addEventListener('click', () => (vscode.postMessage({ type: 'reload' }), $filter.focus()));
+  $('clear').addEventListener('click', () => (vscode.postMessage({ type: 'clear' }), $filter.focus()));
 
   const KEYWORDS = new Set(
     ('SELECT FROM WHERE AND OR NOT IN IS NULL LIKE BETWEEN EXISTS JOIN LEFT RIGHT FULL INNER OUTER CROSS ON GROUP BY ORDER HAVING UNION ALL ' +
@@ -227,6 +289,7 @@
     $head.textContent = '';
     const g = view === 'request' ? groups.find((x) => x.key === curGroup && shown.includes(x)) : undefined;
     $inner.style.display = g ? '' : 'none';
+    $('splitRow').style.display = g ? '' : 'none';
     if (g) {
       const h = div('gh');
       h.appendChild(document.createTextNode(g.title));
@@ -432,8 +495,10 @@
       $note.className = /못했/.test(m.note || '') ? 'err' : 'ok';
       filtered(m.excluded);
       load(m, keep);
+      $('opened').textContent = m.openedAt + ' 의 목록';
       if (!keep) {
-        $('opened').textContent = m.openedAt + ' 에 연 목록';
+        if (m.layout && typeof m.layout === 'object') layout = Object.assign({ rules: false }, m.layout);
+        applyLayout();
         $filter.value = '';
         $filter.focus();
       }
